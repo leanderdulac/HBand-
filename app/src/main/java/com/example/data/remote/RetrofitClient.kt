@@ -10,7 +10,11 @@ import java.util.concurrent.TimeUnit
 object RetrofitClient {
 
     const val DEFAULT_BASE_URL = "https://healthtech-secure-api-5794833455.us-central1.run.app/"
-    const val DEFAULT_API_KEY = "0fbb492fff2311f5d025d0d2c1a2082fb3ea6cb66bbe132194608665c20426f8"
+    // Nunca hardcode uma chave real aqui — esta constante existe apenas como último fallback
+    // quando nem BuildConfig.HEALTHTECH_INGEST_API_KEY (via .env) nem a config salva pelo
+    // usuário em Ajustes estão disponíveis. Configure a chave real via .env (gitignored) ou
+    // na tela de Ajustes do app.
+    const val DEFAULT_API_KEY = ""
 
     @Volatile
     private var customBaseUrl: String? = null

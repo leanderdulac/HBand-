@@ -391,12 +391,11 @@ private fun MetricStatsBar(
         when (activeMetric) {
             ChartMetricType.SEVEN_DAY_SUMMARY -> {
                 val hrVals = metrics.map { it.heartRate }
-                val stepVals = metrics.map { it.steps }
                 listOf(
                     if (hrVals.isNotEmpty()) String.format("%.0f", hrVals.average()) else "72",
-                    if (stepVals.isNotEmpty()) "${stepVals.minOrNull() ?: 0}" else "5000",
-                    if (stepVals.isNotEmpty()) "${stepVals.maxOrNull() ?: 0}" else "10000",
-                    "7d Avg HR / Steps"
+                    "${hrVals.minOrNull() ?: 0}",
+                    "${hrVals.maxOrNull() ?: 0}",
+                    "BPM"
                 )
             }
             ChartMetricType.HEART_RATE -> {

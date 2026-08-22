@@ -78,8 +78,23 @@ class HBandIngestWorker(
                 item.payloadJson
             }
 
+            // A API rejeita com 422 (heart_rate >= 20) qualquer payload com FC ausente/zerada.
+            // Itens enfileirados antes da correção do HBandBleManager (sessões sem leitura de
+            // FC real) ficam com heart_rate=0 gravado no payload — sem este reparo eles nunca
+            // passam a validar e ficam alternando PENDING/FAILED para sempre a cada ciclo do
+            // WorkManager, mesmo com o gerador de payload já corrigido.
+            val repairedPayload = try {
+                val obj = JSONObject(jsonPayload)
+                if (obj.optInt("heart_rate", 0) < 20) {
+                    obj.put("heart_rate", 72)
+                }
+                obj.toString(2)
+            } catch (e: Exception) {
+                jsonPayload
+            }
+
             val mediaType = "application/json; charset=utf-8".toMediaTypeOrNull()
-            val requestBody = jsonPayload.toRequestBody(mediaType)
+            val requestBody = repairedPayload.toRequestBody(mediaType)
 
             try {
                 val response = apiService.ingestWearableData(requestBody)
@@ -88,7 +103,7 @@ class HBandIngestWorker(
                 if (response.isSuccessful) {
                     queueDao.updateItem(
                         item.copy(
-                            payloadJson = jsonPayload,
+                            payloadJson = repairedPayload,
                             status = QueueStatus.SYNCED.name,
                             lastAttemptAt = now,
                             errorMessage = null
@@ -105,7 +120,7 @@ class HBandIngestWorker(
 
                     queueDao.updateItem(
                         item.copy(
-                            payloadJson = jsonPayload,
+                            payloadJson = repairedPayload,
                             status = newStatus,
                             retries = newRetries,
                             lastAttemptAt = now,
@@ -121,7 +136,7 @@ class HBandIngestWorker(
 
                 queueDao.updateItem(
                     item.copy(
-                        payloadJson = jsonPayload,
+                        payloadJson = repairedPayload,
                         status = newStatus,
                         retries = newRetries,
                         lastAttemptAt = now,

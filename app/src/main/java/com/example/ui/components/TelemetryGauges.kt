@@ -80,6 +80,7 @@ fun TelemetryGauges(
             heartRate = telemetry.heartRate,
             deviceModel = telemetry.deviceModel,
             hrvScore = telemetry.hrvScore,
+            isRealSensorData = telemetry.isRealSensorData,
             modifier = Modifier.testTag("gauge_heart_rate")
         )
 
@@ -224,6 +225,7 @@ private fun HeartRateHeroCard(
     heartRate: Int,
     deviceModel: String = "",
     hrvScore: Int = 0,
+    isRealSensorData: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val isMeasuring = heartRate > 0
@@ -243,14 +245,18 @@ private fun HeartRateHeroCard(
             ) {
                 Column {
                     Text(
-                        text = "Frequência Cardíaca (Sensor PPG Real)",
+                        text = if (isMeasuring && isRealSensorData) "Frequência Cardíaca (Sensor PPG Real)" else "Frequência Cardíaca",
                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                         color = Color(0xFF001D36)
                     )
                     Text(
-                        text = if (isMeasuring) "Leitura de hardware ao vivo · $deviceModel" else "Aguardando leitura do sensor no pulso...",
+                        text = when {
+                            isMeasuring && isRealSensorData -> "Leitura de hardware ao vivo · $deviceModel"
+                            isMeasuring -> "Valor de demonstração (spot-check) · sem pacote GATT real recebido"
+                            else -> "Aguardando leitura do sensor no pulso..."
+                        },
                         style = MaterialTheme.typography.bodySmall,
-                        color = Color(0xFF004A77)
+                        color = if (isMeasuring && !isRealSensorData) Color(0xFFB3261E) else Color(0xFF004A77)
                     )
                 }
 

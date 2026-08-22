@@ -76,6 +76,15 @@ googleServices { missingGoogleServicesStrategy = MissingGoogleServicesStrategy.W
 // Some unused dependencies are commented out below instead of being removed.
 // This makes it easy to add them back in the future if needed.
 dependencies {
+  // SDK oficial Veepoo/HBand (VPOperateManager) para o VE30 — ver app/libs/THIRD_PARTY_NOTICE.md
+  // gson-2.2.4.jar excluído: o projeto já traz Gson 2.10.1 (via Firebase/Retrofit), que
+  // cobre a API que o vpprotocol usa e evita "duplicate class" no dexing.
+  implementation(fileTree("libs") { include("*.aar"); exclude("gson-2.2.4.jar") })
+  // com.veepoo.protocol.nordic.McuMgrOtaManager (usado internamente pelo VPOperateManager em
+  // TODA conexão bem-sucedida, não só para OTA) precisa dessas classes em runtime, senão
+  // NoClassDefFoundError derruba o app assim que o GATT conecta.
+  implementation("no.nordicsemi.android:mcumgr-core:2.7.4")
+  implementation("no.nordicsemi.android:mcumgr-ble:2.7.4")
   implementation(platform(libs.androidx.compose.bom))
   implementation(platform(libs.firebase.bom))
   // implementation(libs.accompanist.permissions)

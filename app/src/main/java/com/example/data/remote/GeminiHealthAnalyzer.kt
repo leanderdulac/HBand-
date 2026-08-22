@@ -17,7 +17,7 @@ import java.util.concurrent.TimeUnit
 object GeminiHealthAnalyzer {
 
     private const val TAG = "GeminiHealthAnalyzer"
-    private const val GEMINI_MODEL = "gemini-2.5-flash"
+    private const val GEMINI_MODEL = "gemini-3.6-flash"
     private const val BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models/$GEMINI_MODEL:generateContent"
 
     @Volatile

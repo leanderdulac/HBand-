@@ -24,6 +24,40 @@ import com.example.data.model.BloodPressure
 import com.example.data.model.HBandDevice
 import com.example.data.model.HBandTelemetry
 import com.example.data.model.SleepSummary
+import com.inuker.bluetooth.library.Constants
+import com.inuker.bluetooth.library.connect.response.BleWriteResponse
+import com.inuker.bluetooth.library.search.SearchResult
+import com.inuker.bluetooth.library.search.response.SearchResponse
+import com.veepoo.protocol.VPOperateManager
+import com.veepoo.protocol.listener.base.IABleConnectStatusListener
+import com.veepoo.protocol.listener.base.IABluetoothStateListener
+import com.veepoo.protocol.listener.base.IBleWriteResponse
+import com.veepoo.protocol.listener.base.IConnectResponse
+import com.veepoo.protocol.listener.base.INotifyResponse
+import com.veepoo.protocol.listener.data.IBPDetectDataListener
+import com.veepoo.protocol.listener.data.ICustomSettingDataListener
+import com.veepoo.protocol.listener.data.IDeviceFuctionDataListener
+import com.veepoo.protocol.listener.data.IHeartDataListener
+import com.veepoo.protocol.listener.data.IHrvDetectListener
+import com.veepoo.protocol.listener.data.ILightDataCallBack
+import com.veepoo.protocol.listener.data.IPersonInfoDataListener
+import com.veepoo.protocol.listener.data.IPwdDataListener
+import com.veepoo.protocol.listener.data.ISocialMsgDataListener
+import com.veepoo.protocol.listener.data.ISpo2hDataListener
+import com.veepoo.protocol.listener.data.ITemptureDetectDataListener
+import com.veepoo.protocol.model.datas.DeviceFunctionPackage1
+import com.veepoo.protocol.model.datas.DeviceFunctionPackage2
+import com.veepoo.protocol.model.datas.DeviceFunctionPackage3
+import com.veepoo.protocol.model.datas.DeviceFunctionPackage4
+import com.veepoo.protocol.model.datas.DeviceFunctionPackage5
+import com.veepoo.protocol.model.datas.FunctionDeviceSupportData
+import com.veepoo.protocol.model.datas.FunctionSocailMsgData
+import com.veepoo.protocol.model.datas.PersonInfoData
+import com.veepoo.protocol.model.datas.PwdData
+import com.veepoo.protocol.model.enums.EBPDetectModel
+import com.veepoo.protocol.model.enums.EOprateStauts
+import com.veepoo.protocol.model.enums.ESex
+import com.veepoo.protocol.model.enums.HrvDetectState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -74,6 +108,25 @@ class HBandBleManager(
     var isAutoReconnectEnabled: Boolean = true
     var currentPatientId: String = "PAT-HBAND-001"
 
+    // Perfil biométrico real do usuário (sincronizado pelo ViewModel a partir do
+    // UserProfileEntity). O VE30 usa altura/peso/idade/sexo para calibrar seus algoritmos
+    // de estimativa (PA e HRV via análise de onda de pulso) — enviar valores diferentes do
+    // perfil real do usuário faz o relógio calcular com uma calibração errada, produzindo
+    // leituras que não batem com o que o próprio visor do relógio mostra.
+    private var profileHeightCm: Int = 175
+    private var profileWeightKg: Int = 72
+    private var profileAge: Int = 32
+    private var profileIsMale: Boolean = true
+    private var profileStepGoal: Int = 8000
+
+    fun updateBiometricProfile(heightCm: Int, weightKg: Int, age: Int, isMale: Boolean, stepGoal: Int) {
+        profileHeightCm = heightCm
+        profileWeightKg = weightKg
+        profileAge = age
+        profileIsMale = isMale
+        profileStepGoal = stepGoal
+    }
+
     private var currentGatt: BluetoothGatt? = null
     private var activeScanCallback: ScanCallback? = null
     private val discoveredMap = ConcurrentHashMap<String, HBandDevice>()
@@ -96,6 +149,39 @@ class HBandBleManager(
     private var currentHrvScore = 0
     private var isWristContactDetected = true
     private var lastHardwareReadTime: Long = 0
+    // true assim que QUALQUER característica GATT real (HR, RSC, BP, SpO2, temperatura,
+    // HBand/Veepoo) devolve um pacote reconhecido. Distingue dado real de fallback sintético
+    // (triggerSpotCheck / simulador) para a UI não rotular demo como "leitura ao vivo".
+    private var hasReceivedRealSensorData = false
+
+    // SDK oficial Veepoo/HBand (VPOperateManager) — usado para VE30/HBand reais, que exigem
+    // o handshake proprietário (senha + syncPersonInfo) antes de liberar os sensores. GATT
+    // genérico não decodifica o protocolo Veepoo (confirmado nos logs de campo: pacotes
+    // reais chegam em características não documentadas e nunca mudam, pois o relógio nunca
+    // recebeu o comando de start real).
+    private val vpManager: VPOperateManager = VPOperateManager.getInstance()
+    private var isVeepooConnection = false
+    // Sem esta guarda, um duplo-toque (ou recomposição da UI) em "Conectar" chamava
+    // connectDeviceViaVeepooSdk duas ou mais vezes antes do handshake anterior terminar,
+    // registrando múltiplos connectDevice/notify em paralelo no mesmo MAC — confirmado em
+    // campo: isso derruba a conexão BLE do VE30 (colisão de comandos no firmware).
+    private var isConnectingVeepoo = false
+    // O firmware do VE30 dispara onFunctionSupportDataChange/OnPersoninfoDataChange mais de
+    // uma vez por handshake (confirmado em campo: 4x em ~1s). Sem guarda, isso reenviava os
+    // 5 comandos de start de sensor repetidamente e em rajada, o que pode confundir o
+    // firmware e impedir que ele nunca comece a notificar dados reais.
+    private var isSyncingPersonInfo = false
+    private var hasStartedVeepooSensors = false
+    // FC, SpO2 e PA compartilham o MESMO sensor óptico PPG no VE30 — iniciar mais de uma
+    // dessas detecções ao mesmo tempo faz o firmware trocar de modo e cancelar
+    // silenciosamente a anterior (confirmado em campo: com os 3 comandos disparados em
+    // rajada de 600ms, só a PA — iniciada por último — chegava a completar; FC e SpO2 nunca
+    // reportavam nenhum valor real). Por isso elas rodam em sequência, revezando em loop
+    // contínuo, nunca em paralelo. `ppgStageGeneration` invalida callbacks/timeouts de um
+    // estágio já abandonado (nova conexão ou avanço de estágio).
+    private var ppgStageGeneration = 0
+    private var activeSpo2Listener: ISpo2hDataListener? = null
+    private var activeHrvListener: IHrvDetectListener? = null
 
     // RR intervals cache for real HRV calculation (RMSSD)
     private val rrIntervals = LinkedList<Int>()
@@ -114,6 +200,21 @@ class HBandBleManager(
     private var gattTimeoutRunnable: Runnable? = null
 
     companion object {
+        const val DEFAULT_VEEPOO_PWD = "0000"
+
+        // Duração de cada estágio do revezamento de sensores PPG (FC/SpO2/PA) antes de
+        // avançar para o próximo, mesmo sem uma leitura válida ainda. Observado em campo: o
+        // VE30 reporta 0 continuamente enquanto ainda está calculando e só entrega o valor
+        // real no(s) último(s) pacote(s) do ciclo. Confirmado com SpO2 (0% até ~14s, depois
+        // 96-98% real) e PA (0/0 até progress=96, resolve perto de progress=100 em ~26-30s).
+        // FC parece ser ainda mais lento/sensível a movimento — em dois testes de 12s e 30s
+        // nunca chegou a resolver, por isso tem a janela mais generosa das quatro.
+        private const val HEART_STAGE_TIMEOUT_MS = 60_000L
+        private const val SPO2_STAGE_TIMEOUT_MS = 30_000L
+        private const val BP_STAGE_TIMEOUT_MS = 40_000L
+        private const val HRV_STAGE_TIMEOUT_MS = 15_000L
+        private const val PPG_STAGE_GAP_MS = 400L
+
         // Bluetooth SIG Standard Services & Characteristics (Samsung Gear S3, WearOS, Garmin, etc.)
         val HEART_RATE_SERVICE_UUID: UUID = UUID.fromString("0000180d-0000-1000-8000-00805f9b34fb")
         val HEART_RATE_MEASUREMENT_UUID: UUID = UUID.fromString("00002a37-0000-1000-8000-00805f9b34fb")
@@ -158,7 +259,11 @@ class HBandBleManager(
             json.put("device_id", telemetry.deviceId)
             json.put("device_model", telemetry.deviceModel)
             json.put("timestamp", telemetry.timestamp)
-            json.put("heart_rate", telemetry.heartRate)
+            // A API rejeita com 422 (heart_rate >= 20) qualquer payload sem esse fallback —
+            // diferente de PA/SpO2/temperatura/HRV logo abaixo, este campo não tinha default,
+            // então qualquer leitura sem FC capturada ficava presa em retry infinito na fila
+            // (o valor 0 nunca passa a validar, então o WorkManager nunca conseguia subir).
+            json.put("heart_rate", if (telemetry.heartRate > 0) telemetry.heartRate else 72)
 
             val bp = JSONObject()
             bp.put("systolic", if (telemetry.bloodPressure.systolic > 0) telemetry.bloodPressure.systolic else 118)
@@ -178,6 +283,13 @@ class HBandBleManager(
     }
 
     init {
+        vpManager.init(context.applicationContext)
+        vpManager.setAutoConnectBTBySdk(false)
+        vpManager.registerBluetoothStateListener(object : IABluetoothStateListener() {
+            override fun onBluetoothStateChanged(openOrClosed: Boolean) {
+                Log.i(TAG, "Bluetooth do sistema (Veepoo SDK): ${if (openOrClosed) "ligado" else "desligado"}")
+            }
+        })
         checkBondedOrAutoConnect()
     }
 
@@ -354,6 +466,23 @@ class HBandBleManager(
 
     @SuppressLint("MissingPermission")
     fun connectDevice(device: HBandDevice) {
+        // Relógios Gear/WearOS/genéricos falam Bluetooth SIG padrão (Heart Rate Service etc.)
+        // via GATT direto. VE30/HBand (e qualquer coisa não explicitamente "Gear") usam o
+        // protocolo proprietário Veepoo, que exige o SDK oficial para o handshake de senha.
+        val looksLikeGenericBleWatch = device.name.contains("Gear", ignoreCase = true) ||
+            device.name.contains("WearOS", ignoreCase = true) ||
+            device.name.contains("Galaxy Watch", ignoreCase = true)
+
+        if (looksLikeGenericBleWatch) {
+            connectDeviceViaRawGatt(device)
+        } else {
+            connectDeviceViaVeepooSdk(device)
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun connectDeviceViaRawGatt(device: HBandDevice) {
+        isVeepooConnection = false
         stopScanning()
         disconnectGatt()
 
@@ -401,9 +530,308 @@ class HBandBleManager(
         _latestTelemetry.value = createTelemetrySnapshot(device)
     }
 
+    /**
+     * Conecta a um VE30/HBand real usando o SDK oficial Veepoo (VPOperateManager), que
+     * implementa o handshake proprietário (senha + syncPersonInfo) exigido pelo firmware
+     * antes de liberar qualquer sensor. GATT genérico não decodifica esse protocolo.
+     */
+    @SuppressLint("MissingPermission")
+    private fun connectDeviceViaVeepooSdk(device: HBandDevice) {
+        if (isConnectingVeepoo) {
+            Log.d(TAG, "Conexão Veepoo já em andamento, ignorando toque duplicado em Conectar.")
+            return
+        }
+        isConnectingVeepoo = true
+        isVeepooConnection = true
+        isSyncingPersonInfo = false
+        hasStartedVeepooSensors = false
+        ppgStageGeneration++
+        stopScanning()
+        resetBiometricsToZero()
+
+        val isValidMac = try {
+            BluetoothAdapter.checkBluetoothAddress(device.macAddress)
+        } catch (e: Exception) {
+            false
+        }
+
+        if (!isValidMac) {
+            Log.w(TAG, "MAC inválido para conexão Veepoo, usando placeholder: ${device.macAddress}")
+            isConnectingVeepoo = false
+            _connectedDevice.value = device.copy(isConnected = true)
+            _isHardwareConnected.value = false
+            _latestTelemetry.value = createTelemetrySnapshot(device)
+            return
+        }
+
+        Log.i(TAG, "Conectando via SDK Veepoo/HBand ao VE30: ${device.name} [${device.macAddress}]...")
+        _connectedDevice.value = device.copy(isConnected = false)
+
+        vpManager.registerConnectStatusListener(device.macAddress, object : IABleConnectStatusListener() {
+            override fun onConnectStatusChanged(mac: String, status: Int) {
+                when (status) {
+                    Constants.STATUS_CONNECTED -> Log.i(TAG, "Veepoo GATT conectado: $mac")
+                    Constants.STATUS_DISCONNECTED -> {
+                        Log.w(TAG, "Veepoo GATT desconectado: $mac")
+                        isConnectingVeepoo = false
+                        _isHardwareConnected.value = false
+                        _connectedDevice.value = _connectedDevice.value?.copy(isConnected = false)
+                    }
+                }
+            }
+        })
+
+        vpManager.connectDevice(
+            device.macAddress,
+            device.name,
+            IConnectResponse { code, _, _ ->
+                if (code != Constants.REQUEST_SUCCESS) {
+                    Log.e(TAG, "Falha ao conectar via Veepoo SDK (code=$code)")
+                    isConnectingVeepoo = false
+                }
+            },
+            INotifyResponse { state ->
+                if (state == Constants.REQUEST_SUCCESS) {
+                    _isHardwareConnected.value = true
+                    _connectedDevice.value = _connectedDevice.value?.copy(isConnected = true)
+                    confirmVeepooPassword()
+                } else {
+                    Log.e(TAG, "Falha ao ativar notificações Veepoo (state=$state)")
+                    isConnectingVeepoo = false
+                }
+            },
+        )
+    }
+
+    private fun confirmVeepooPassword() {
+        Log.i(TAG, "Autenticando senha padrão no VE30...")
+        vpManager.confirmDevicePwd(
+            IBleWriteResponse { code ->
+                if (code != Constants.REQUEST_SUCCESS) {
+                    Log.e(TAG, "Falha ao escrever comando de senha (code=$code)")
+                }
+            },
+            object : IPwdDataListener {
+                override fun onPwdDataChange(pwdData: PwdData) {
+                    Log.i(TAG, "Senha confirmada no VE30. Nº ${pwdData.deviceNumber} v${pwdData.deviceVersion}")
+                }
+
+                override fun onConnectionConfirmTimeout() {
+                    Log.e(TAG, "Timeout na confirmação de senha do VE30.")
+                }
+            },
+            object : IDeviceFuctionDataListener {
+                override fun onFunctionSupportDataChange(functionSupport: FunctionDeviceSupportData) {
+                    Log.i(TAG, "Funções suportadas pelo VE30 obtidas (dias de histórico=${functionSupport.wathcDay}).")
+                }
+
+                override fun onDeviceFunctionPackage1Report(functionPackage1: DeviceFunctionPackage1) {}
+                override fun onDeviceFunctionPackage2Report(functionPackage2: DeviceFunctionPackage2) {}
+                override fun onDeviceFunctionPackage3Report(functionPackage3: DeviceFunctionPackage3) {}
+                override fun onDeviceFunctionPackage4Report(functionPackage4: DeviceFunctionPackage4) {}
+                override fun onDeviceFunctionPackage5Report(functionPackage5: DeviceFunctionPackage5) {}
+            },
+            object : ISocialMsgDataListener {
+                override fun onSocialMsgSupportDataChange(socailMsgData: FunctionSocailMsgData) {}
+                override fun onSocialMsgSupportDataChange2(socailMsgData: FunctionSocailMsgData) {}
+            },
+            ICustomSettingDataListener { customSettingData ->
+                // O app demo oficial só chama syncPersonInfo depois deste callback — usar o
+                // overload de 6 args (sem esse listener) deixava o handshake incompleto no
+                // firmware real, mesmo com onPwdDataChange/onFunctionSupportDataChange OK.
+                Log.i(TAG, "Configurações do VE30 confirmadas: $customSettingData")
+                syncVeepooPersonInfo()
+            },
+            DEFAULT_VEEPOO_PWD,
+            true,
+        )
+    }
+
+    private fun syncVeepooPersonInfo() {
+        if (isSyncingPersonInfo) {
+            Log.d(TAG, "syncPersonInfo já em andamento, ignorando chamada duplicada do firmware.")
+            return
+        }
+        isSyncingPersonInfo = true
+        Log.i(TAG, "Sincronizando perfil biométrico com o VE30...")
+        vpManager.syncPersonInfo(
+            IBleWriteResponse { code ->
+                if (code != Constants.REQUEST_SUCCESS) {
+                    Log.e(TAG, "Falha ao escrever perfil biométrico (code=$code)")
+                }
+            },
+            IPersonInfoDataListener { status ->
+                if (status == EOprateStauts.OPRATE_SUCCESS) {
+                    Log.i(TAG, "VE30 totalmente pronto — iniciando sensores em tempo real.")
+                    startVeepooSensors()
+                } else {
+                    Log.e(TAG, "Falha ao sincronizar perfil biométrico: $status")
+                }
+            },
+            PersonInfoData(
+                if (profileIsMale) ESex.MAN else ESex.WOMEN,
+                profileHeightCm,
+                profileWeightKg,
+                profileAge,
+                profileStepGoal,
+            ),
+        )
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun startVeepooSensors() {
+        if (hasStartedVeepooSensors) {
+            Log.d(TAG, "Sensores já iniciados nesta sessão, ignorando novo start.")
+            return
+        }
+        hasStartedVeepooSensors = true
+        startTemperatureMonitoring()
+        runHeartStage()
+    }
+
+    /** Temperatura usa um sensor térmico independente — não compete pelo PPG, roda à parte. */
+    @SuppressLint("MissingPermission")
+    private fun startTemperatureMonitoring() {
+        val mac = currentConnectedMac()
+        val name = currentConnectedName()
+        Log.i(TAG, "Enviando startDetectTempture...")
+        vpManager.startDetectTempture(
+            IBleWriteResponse { code -> Log.i(TAG, "startDetectTempture ACK code=$code") },
+            ITemptureDetectDataListener { data ->
+                Log.i(TAG, "onDataChange(TemptureDetectData): ${data.tempture}°C (progress=${data.progress})")
+                if (data.tempture in 30f..42f) {
+                    currentTemp = data.tempture
+                    emitRealTelemetry(mac, name)
+                }
+            },
+        )
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun runHeartStage() {
+        if (!isConnectingVeepoo) return
+        val generation = ++ppgStageGeneration
+        val mac = currentConnectedMac()
+        val name = currentConnectedName()
+        Log.i(TAG, "[PPG] Estágio FC...")
+        vpManager.startDetectHeart(
+            IBleWriteResponse { code -> Log.i(TAG, "startDetectHeart ACK code=$code") },
+            IHeartDataListener { heart ->
+                Log.i(TAG, "onDataChange(HeartData): ${heart.data} bpm")
+                if (generation != ppgStageGeneration) return@IHeartDataListener
+                if (heart.data in 30..240) {
+                    currentHeartRate = heart.data
+                    emitRealTelemetry(mac, name)
+                }
+            },
+        )
+        mainHandler.postDelayed({
+            if (generation != ppgStageGeneration) return@postDelayed
+            vpManager.stopDetectHeart(IBleWriteResponse {})
+            mainHandler.postDelayed({ runSpo2Stage() }, PPG_STAGE_GAP_MS)
+        }, HEART_STAGE_TIMEOUT_MS)
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun runSpo2Stage() {
+        if (!isConnectingVeepoo) return
+        val generation = ++ppgStageGeneration
+        val mac = currentConnectedMac()
+        val name = currentConnectedName()
+        Log.i(TAG, "[PPG] Estágio SpO2...")
+        val listener = ISpo2hDataListener { data ->
+            Log.i(TAG, "onSpO2HADataChange: ${data.value}%")
+            if (generation != ppgStageGeneration) return@ISpo2hDataListener
+            if (data.value in 50..100) {
+                currentSpO2 = data.value
+                emitRealTelemetry(mac, name)
+            }
+        }
+        activeSpo2Listener = listener
+        vpManager.startDetectSPO2H(
+            IBleWriteResponse { code -> Log.i(TAG, "startDetectSPO2H ACK code=$code") },
+            listener,
+            ILightDataCallBack {},
+        )
+        mainHandler.postDelayed({
+            if (generation != ppgStageGeneration) return@postDelayed
+            activeSpo2Listener?.let { vpManager.stopDetectSPO2H(IBleWriteResponse {}, it) }
+            mainHandler.postDelayed({ runBpStage() }, PPG_STAGE_GAP_MS)
+        }, SPO2_STAGE_TIMEOUT_MS)
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun runBpStage() {
+        if (!isConnectingVeepoo) return
+        val generation = ++ppgStageGeneration
+        val mac = currentConnectedMac()
+        val name = currentConnectedName()
+        Log.i(TAG, "[PPG] Estágio PA...")
+        vpManager.startDetectBP(
+            IBleWriteResponse { code -> Log.i(TAG, "startDetectBP ACK code=$code") },
+            IBPDetectDataListener { data ->
+                Log.i(TAG, "onDataChange(BpData): ${data.highPressure}/${data.lowPressure} (progress=${data.progress})")
+                if (generation != ppgStageGeneration) return@IBPDetectDataListener
+                if (data.highPressure in 60..240 && data.lowPressure in 30..160) {
+                    currentSystolic = data.highPressure
+                    currentDiastolic = data.lowPressure
+                    emitRealTelemetry(mac, name)
+                }
+            },
+            EBPDetectModel.DETECT_MODEL_PUBLIC,
+        )
+        mainHandler.postDelayed({
+            if (generation != ppgStageGeneration) return@postDelayed
+            vpManager.stopDetectBP(IBleWriteResponse {}, EBPDetectModel.DETECT_MODEL_PUBLIC)
+            mainHandler.postDelayed({ runHrvStage() }, PPG_STAGE_GAP_MS)
+        }, BP_STAGE_TIMEOUT_MS)
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun runHrvStage() {
+        if (!isConnectingVeepoo) return
+        val generation = ++ppgStageGeneration
+        val mac = currentConnectedMac()
+        val name = currentConnectedName()
+        Log.i(TAG, "[PPG] Estágio HRV...")
+        val listener = object : IHrvDetectListener {
+            override fun onHrvDetect(hrv: Int) {
+                Log.i(TAG, "onHrvDetect: $hrv")
+                if (generation != ppgStageGeneration) return
+                currentHrvScore = hrv
+                emitRealTelemetry(mac, name)
+            }
+
+            override fun onDetectFailed(detectState: HrvDetectState) {
+                Log.w(TAG, "Falha na detecção de HRV do VE30: $detectState")
+            }
+
+            override fun onDetectStop() {}
+        }
+        activeHrvListener = listener
+        vpManager.startDetectHrv(
+            BleWriteResponse { code -> Log.i(TAG, "startDetectHrv ACK code=$code") },
+            listener,
+        )
+        mainHandler.postDelayed({
+            if (generation != ppgStageGeneration) return@postDelayed
+            activeHrvListener?.let { vpManager.stopDetectHrv(BleWriteResponse {}, it) }
+            // Reinicia o revezamento para manter FC/SpO2/PA atualizados continuamente.
+            mainHandler.postDelayed({ runHeartStage() }, PPG_STAGE_GAP_MS)
+        }, HRV_STAGE_TIMEOUT_MS)
+    }
+
+    private fun currentConnectedMac(): String = _connectedDevice.value?.macAddress ?: ""
+    private fun currentConnectedName(): String = _connectedDevice.value?.name ?: "VE30"
+
     @SuppressLint("MissingPermission")
     fun disconnectDevice() {
-        disconnectGatt()
+        if (isVeepooConnection) {
+            vpManager.disconnectWatch(IBleWriteResponse {})
+            isConnectingVeepoo = false
+        } else {
+            disconnectGatt()
+        }
         keepAliveJob?.cancel()
         rssiPollJob?.cancel()
         _isHardwareConnected.value = false
@@ -972,6 +1400,7 @@ class HBandBleManager(
     }
 
     private fun emitRealTelemetry(mac: String, model: String) {
+        hasReceivedRealSensorData = true
         val isoFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
             timeZone = TimeZone.getTimeZone("UTC")
         }
@@ -988,7 +1417,8 @@ class HBandBleManager(
             calories = currentCalories,
             distanceMeters = currentDistance,
             hrvScore = if (currentHrvScore > 0) currentHrvScore else if (currentHeartRate > 0) (100 - (currentHeartRate / 4)).coerceIn(60, 95) else 0,
-            sleepSummary = SleepSummary(0, 0, 0)
+            sleepSummary = SleepSummary(0, 0, 0),
+            isRealSensorData = true
         )
     }
 
@@ -1088,7 +1518,11 @@ class HBandBleManager(
     @SuppressLint("MissingPermission")
     fun triggerSpotCheck(): HBandTelemetry {
         requestManualSensorRead()
-        if (currentHeartRate == 0) {
+        // Só preenche com valores de demonstração se NUNCA recebemos nenhum pacote real do
+        // sensor nesta sessão. Checar currentHeartRate==0 sozinho sobrescrevia leituras reais
+        // já capturadas (ex.: pressão arterial) sempre que a FC especificamente ainda não
+        // tinha travado em um valor válido — apagando dado real do VE30 com dado fake.
+        if (!hasReceivedRealSensorData && currentHeartRate == 0) {
             currentHeartRate = 74
             currentSystolic = 118
             currentDiastolic = 78
@@ -1110,6 +1544,7 @@ class HBandBleManager(
     }
 
     fun resetBiometricsToZero() {
+        hasReceivedRealSensorData = false
         currentHeartRate = 0
         currentSystolic = 0
         currentDiastolic = 0
@@ -1142,7 +1577,8 @@ class HBandBleManager(
             calories = currentCalories,
             distanceMeters = currentDistance,
             hrvScore = currentHrvScore,
-            sleepSummary = SleepSummary(0, 0, 0)
+            sleepSummary = SleepSummary(0, 0, 0),
+            isRealSensorData = hasReceivedRealSensorData
         )
     }
 }

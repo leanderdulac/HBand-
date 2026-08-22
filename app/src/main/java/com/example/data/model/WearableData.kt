@@ -37,7 +37,10 @@ data class HBandTelemetry(
     val calories: Float,
     val distanceMeters: Float,
     val hrvScore: Int,
-    val sleepSummary: SleepSummary
+    val sleepSummary: SleepSummary,
+    // true somente quando os valores vieram de um pacote GATT real do dispositivo;
+    // false para snapshots gerados por spot-check manual ou pelo simulador de teste.
+    val isRealSensorData: Boolean = false
 )
 
 @JsonClass(generateAdapter = true)

@@ -29,7 +29,7 @@ object FirestoreBackupManager {
             try {
                 firestore = FirebaseFirestore.getInstance()
             } catch (e: Exception) {
-                Log.w(TAG, "Firestore default instance unavailable, falling back to simulated sync: ${e.localizedMessage}")
+                Log.w(TAG, "Firestore default instance unavailable: ${e.localizedMessage}")
             }
 
             if (firestore != null) {
@@ -64,8 +64,9 @@ object FirestoreBackupManager {
                 }
                 Result.success(backedUpCount)
             } else {
-                // Return success count for simulated local cloud backup fallback when google-services.json is absent
-                Result.success(metrics.size)
+                // Firebase isn't configured in this build (no google-services.json), so there is
+                // nowhere to actually back up to. Fail honestly instead of reporting a fake success.
+                Result.failure(IllegalStateException("Backup na nuvem indisponível: Firebase não configurado neste build (google-services.json ausente)."))
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error backing up to Firestore: ${e.localizedMessage}", e)
@@ -112,7 +113,7 @@ object FirestoreBackupManager {
                 }
                 Result.success(restoredCount)
             } else {
-                Result.success(0)
+                Result.failure(IllegalStateException("Restauração da nuvem indisponível: Firebase não configurado neste build (google-services.json ausente)."))
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error restoring from Firestore: ${e.localizedMessage}", e)

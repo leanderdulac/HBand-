@@ -421,12 +421,31 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         bleManager.startScanning()
     }
 
+    /**
+     * Envia o perfil biométrico real do usuário para o BLE manager antes de conectar, para
+     * que o VE30 calibre PA/HRV com altura/peso/idade/sexo reais em vez do fallback genérico
+     * (175cm/72kg/32 anos) — essa era a causa da PA estimada não bater com o visor do relógio.
+     */
+    private fun syncBiometricProfileToBleManager() {
+        val profile = userProfile.value ?: return
+        val isMale = !profile.gender.trim().lowercase().startsWith("f")
+        bleManager.updateBiometricProfile(
+            heightCm = profile.heightCm.toInt(),
+            weightKg = profile.weightKg.toInt(),
+            age = profile.age,
+            isMale = isMale,
+            stepGoal = profile.dailyStepGoal,
+        )
+    }
+
     fun connectDevice(device: HBandDevice) {
+        syncBiometricProfileToBleManager()
         bleManager.connectDevice(device)
         showNotification("Conectando a ${device.name} [${device.macAddress}]...")
     }
 
     fun connectByMacAddress(macAddress: String, customName: String = "VE30 Smart Band") {
+        syncBiometricProfileToBleManager()
         val trimmed = macAddress.trim().uppercase()
         val dev = HBandDevice(
             deviceId = trimmed,

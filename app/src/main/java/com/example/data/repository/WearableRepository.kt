@@ -104,10 +104,14 @@ class WearableRepository(
             val backdatedTime = now - (count - i) * 60000L
             val timestampStr = isoFormat.format(Date(backdatedTime))
             val baseTelemetry = bleManager.generateCurrentTelemetry(device)
+            // Sem hardware conectado, a telemetria-base vem zerada; usar uma linha de base
+            // fisiologicamente plausível antes de aplicar o jitter evita FC negativa/zero.
+            val baseHeartRate = if (baseTelemetry.heartRate > 0) baseTelemetry.heartRate else 72
+            val baseSteps = if (baseTelemetry.steps > 0) baseTelemetry.steps else 1000
             val telemetry = baseTelemetry.copy(
                 timestamp = timestampStr,
-                heartRate = baseTelemetry.heartRate + kotlin.random.Random.nextInt(-5, 6),
-                steps = baseTelemetry.steps + i * 50
+                heartRate = (baseHeartRate + kotlin.random.Random.nextInt(-5, 6)).coerceIn(50, 160),
+                steps = baseSteps + i * 50
             )
 
             // Insert into local sensor metric table
