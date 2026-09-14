@@ -1,6 +1,7 @@
 package com.example.data.repository
 
 import com.example.data.hband.HBandBleManager
+import com.example.data.hband.VeepooHistoryMapper
 import com.example.data.ingest.IngestHttpKind
 import com.example.data.ingest.IngestPayloadMapper
 import com.example.data.local.HBandSensorMetricDao
@@ -63,6 +64,8 @@ class WearableRepository(
             val metricEntity = HBandSensorMetricEntity(
                 deviceId = IngestPayloadMapper.resolveDeviceId(telemetry.deviceId),
                 timestamp = telemetry.timestamp,
+                timestampMillis = VeepooHistoryMapper.parseIsoToMillis(telemetry.timestamp)
+                    .takeIf { it > 0L } ?: System.currentTimeMillis(),
                 heartRate = telemetry.heartRate,
                 systolicBp = telemetry.bloodPressure.systolic,
                 diastolicBp = telemetry.bloodPressure.diastolic,
@@ -94,6 +97,63 @@ class WearableRepository(
             }
             id
         }
+
+    /**
+     * Persists multi-day Origin/sleep/HRV/SpO2 samples to Room. HealthTech ingest
+     * only receives hourly samples that already have a real heart rate — never
+     * fabricated vitals and never a 5-minute flood.
+     */
+    suspend fun persistHistorySamples(
+        samples: List<HBandTelemetry>,
+        patientId: String = IngestPayloadMapper.DEFAULT_PATIENT_ID,
+    ): Int = withContext(Dispatchers.IO) {
+        if (samples.isEmpty()) return@withContext 0
+        val entities = samples.map { telemetry ->
+            val epoch = VeepooHistoryMapper.parseIsoToMillis(telemetry.timestamp)
+                .takeIf { it > 0L } ?: System.currentTimeMillis()
+            HBandSensorMetricEntity(
+                deviceId = IngestPayloadMapper.resolveDeviceId(telemetry.deviceId),
+                timestamp = telemetry.timestamp,
+                timestampMillis = epoch,
+                heartRate = telemetry.heartRate,
+                systolicBp = telemetry.bloodPressure.systolic,
+                diastolicBp = telemetry.bloodPressure.diastolic,
+                spO2 = telemetry.spO2,
+                temperatureCelsius = telemetry.temperatureCelsius,
+                steps = telemetry.steps,
+                calories = telemetry.calories,
+                distanceMeters = telemetry.distanceMeters,
+                hrvScore = telemetry.hrvScore,
+                deepSleepMinutes = telemetry.sleepSummary.deepSleepMinutes,
+                lightSleepMinutes = telemetry.sleepSummary.lightSleepMinutes,
+                awakeMinutes = telemetry.sleepSummary.awakeMinutes,
+            )
+        }
+        sensorMetricDao.insertMetrics(entities)
+
+        val hourly = samples
+            .filter { IngestPayloadMapper.isIngestible(it) }
+            .groupBy { telemetry ->
+                val bucket = VeepooHistoryMapper.parseIsoToMillis(telemetry.timestamp) / 3_600_000L
+                telemetry.deviceId to bucket
+            }
+            .values
+            .mapNotNull { group -> group.maxByOrNull { it.heartRate } }
+
+        for (telemetry in hourly) {
+            queueDao.insertItem(
+                IngestQueueEntity(
+                    payloadJson = IngestPayloadMapper.telemetryToJson(telemetry, patientId),
+                    status = QueueStatus.PENDING.name,
+                )
+            )
+        }
+        try {
+            processQueue()
+        } catch (_: Exception) {
+        }
+        entities.size
+    }
 
     suspend fun enqueueRawJson(json: String): Long = withContext(Dispatchers.IO) {
         val entity = IngestQueueEntity(

@@ -4,8 +4,12 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.HBandHealthSyncApp
+import com.example.data.hband.AutoMeasureUiState
+import com.example.data.hband.DeviceCapabilities
 import com.example.data.hband.HBandBleManager
 import com.example.data.hband.HBandBleService
+import com.example.data.hband.HistorySyncUiState
+import com.example.data.hband.WearDetectUiState
 import com.example.data.ingest.IngestDeduper
 import com.example.data.ingest.IngestPayloadMapper
 import com.example.data.local.AppDatabase
@@ -63,6 +67,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val connectedDevice: StateFlow<HBandDevice?> = bleManager.connectedDevice
     val isScanning: StateFlow<Boolean> = bleManager.isScanning
     val latestTelemetry: StateFlow<HBandTelemetry?> = bleManager.latestTelemetry
+    val deviceCapabilities: StateFlow<DeviceCapabilities> = bleManager.capabilities
+    val autoMeasureState: StateFlow<AutoMeasureUiState> = bleManager.autoMeasureState
+    val wearDetectState: StateFlow<WearDetectUiState> = bleManager.wearDetectState
+    val historySyncState: StateFlow<HistorySyncUiState> = bleManager.historySyncState
+    val isHardwareConnected: StateFlow<Boolean> = bleManager.isHardwareConnected
 
     val allSensorMetrics: StateFlow<List<HBandSensorMetricEntity>> = repository.allSensorMetrics
         .stateIn(
@@ -377,6 +386,35 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         bleManager.isAutoReconnectEnabled = enabled
         prefs.edit().putBoolean("auto_reconnect_ble", enabled).apply()
         showNotification(if (enabled) "Reconexão Automática BLE ativada" else "Reconexão Automática BLE desativada")
+    }
+
+    fun setBandAutoMeasure(enabled: Boolean) {
+        bleManager.setAutoMeasureEnabled(enabled)
+        showNotification(
+            if (enabled) "Medição automática da pulseira ativada (se suportada)"
+            else "Medição automática da pulseira desativada"
+        )
+    }
+
+    fun setBandSpo2AutoDetect(enabled: Boolean) {
+        bleManager.setSpo2AutoDetectEnabled(enabled)
+        showNotification(
+            if (enabled) "SpO2 automático noturno ativado (se suportado)"
+            else "SpO2 automático noturno desativado"
+        )
+    }
+
+    fun setBandWearDetect(enabled: Boolean) {
+        bleManager.setWearDetectEnabled(enabled)
+        showNotification(
+            if (enabled) "Detecção de uso (wear) ativada"
+            else "Detecção de uso (wear) desativada"
+        )
+    }
+
+    fun requestHistorySync() {
+        bleManager.requestHistorySync()
+        showNotification("Sincronizando histórico Origin / sono / HRV / SpO2 da pulseira...")
     }
 
     fun saveUserProfile(profile: com.example.data.local.UserProfileEntity) {

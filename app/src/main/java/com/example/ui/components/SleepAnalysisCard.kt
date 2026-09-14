@@ -15,14 +15,11 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.NightsStay
-import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -40,7 +37,6 @@ import com.example.data.local.HBandSensorMetricEntity
 import com.example.ui.theme.MinimalBorder
 import java.text.SimpleDateFormat
 import java.util.Calendar
-import java.util.Date
 import java.util.Locale
 
 data class SleepAnalysisSummary(
@@ -59,109 +55,73 @@ data class SleepAnalysisSummary(
     val dailySleepMinutes: List<Pair<String, Int>>
 )
 
+fun analyzeSleepMetrics(
+    metrics: List<HBandSensorMetricEntity>,
+    now: Long = System.currentTimeMillis(),
+): SleepAnalysisSummary? {
+    val sevenDaysAgo = now - (7 * 24 * 60 * 60 * 1000L)
+    val recentMetrics = metrics.filter { it.timestampMillis >= sevenDaysAgo }
+    val withSleep = recentMetrics.filter { (it.deepSleepMinutes + it.lightSleepMinutes) > 0 }
+    if (withSleep.isEmpty()) return null
+
+    val calendar = Calendar.getInstance()
+    val dayFormat = SimpleDateFormat("EEE", Locale.forLanguageTag("pt-BR"))
+    val dailyMap = linkedMapOf<String, Int>()
+    for (i in 6 downTo 0) {
+        calendar.timeInMillis = now - (i * 24 * 60 * 60 * 1000L)
+        dailyMap[dayFormat.format(calendar.time)] = 0
+    }
+    for (m in withSleep) {
+        calendar.timeInMillis = m.timestampMillis
+        val dayName = dayFormat.format(calendar.time)
+        val totalMins = m.deepSleepMinutes + m.lightSleepMinutes
+        if (totalMins > (dailyMap[dayName] ?: 0)) {
+            dailyMap[dayName] = totalMins
+        }
+    }
+
+    val latestWithSleep = withSleep.maxByOrNull { it.timestampMillis } ?: return null
+    val rawDeep = latestWithSleep.deepSleepMinutes.coerceAtLeast(0)
+    val rawLight = latestWithSleep.lightSleepMinutes.coerceAtLeast(0)
+    val rawAwake = latestWithSleep.awakeMinutes.coerceAtLeast(0)
+    val totalMins = (rawDeep + rawLight + rawAwake).coerceAtLeast(1)
+    val deepPct = ((rawDeep.toFloat() / totalMins) * 100).toInt()
+    val lightPct = ((rawLight.toFloat() / totalMins) * 100).toInt()
+    val awakePct = ((rawAwake.toFloat() / totalMins) * 100).toInt()
+
+    val durationScore = ((totalMins / 480f) * 100).coerceIn(0f, 100f) * 0.6f
+    val deepScore = ((deepPct / 20f) * 100).coerceIn(0f, 100f) * 0.4f
+    val computedScore = (durationScore + deepScore).toInt().coerceIn(0, 100)
+    val (grade, color) = when {
+        computedScore >= 85 -> Pair("Ótimo", Color(0xFF2E7D32))
+        computedScore >= 75 -> Pair("Bom", Color(0xFF0288D1))
+        computedScore >= 65 -> Pair("Regular", Color(0xFFE65100))
+        else -> Pair("Agitado", Color(0xFFD32F2F))
+    }
+
+    return SleepAnalysisSummary(
+        weeklyScore = computedScore,
+        scoreGrade = grade,
+        scoreColor = color,
+        totalSleepMinutes = totalMins,
+        deepSleepMins = rawDeep,
+        remSleepMins = 0,
+        lightSleepMins = rawLight,
+        awakeMins = rawAwake,
+        deepPercentage = deepPct,
+        remPercentage = 0,
+        lightPercentage = lightPct,
+        awakePercentage = awakePct,
+        dailySleepMinutes = dailyMap.map { Pair(it.key, it.value) }
+    )
+}
+
 @Composable
 fun SleepAnalysisCard(
     metrics: List<HBandSensorMetricEntity>,
     modifier: Modifier = Modifier
 ) {
-    val sleepAnalysis = remember(metrics) {
-        val now = System.currentTimeMillis()
-        val sevenDaysAgo = now - (7 * 24 * 60 * 60 * 1000L)
-        val recentMetrics = metrics.filter { it.timestampMillis >= sevenDaysAgo }.ifEmpty { metrics }
-
-        if (recentMetrics.isNotEmpty()) {
-            // Group metrics by day for last 7 days
-            val calendar = Calendar.getInstance()
-            val dayFormat = SimpleDateFormat("EEE", Locale.forLanguageTag("pt-BR"))
-
-            val dailyMap = mutableMapOf<String, Int>()
-            for (i in 6 downTo 0) {
-                calendar.timeInMillis = now - (i * 24 * 60 * 60 * 1000L)
-                val dayName = dayFormat.format(calendar.time)
-                dailyMap[dayName] = 0
-            }
-
-            for (m in recentMetrics) {
-                calendar.timeInMillis = m.timestampMillis
-                val dayName = dayFormat.format(calendar.time)
-                val totalMins = m.deepSleepMinutes + m.lightSleepMinutes
-                if (totalMins > (dailyMap[dayName] ?: 0)) {
-                    dailyMap[dayName] = totalMins
-                }
-            }
-
-            val dailySleepList = dailyMap.map { Pair(it.key, it.value) }
-
-            // Aggregate sleep stage stats
-            val latestWithSleep = recentMetrics.firstOrNull { (it.deepSleepMinutes + it.lightSleepMinutes) > 0 }
-                ?: recentMetrics.first()
-
-            val rawDeep = latestWithSleep.deepSleepMinutes.coerceAtLeast(110)
-            val rawLight = latestWithSleep.lightSleepMinutes.coerceAtLeast(220)
-            val rawAwake = latestWithSleep.awakeMinutes.coerceAtLeast(25)
-
-            // Calculate REM sleep estimated from HRV recovery & sleep distribution
-            val avgHrv = recentMetrics.map { it.hrvScore }.average().toInt()
-            val rawRem = ((rawDeep + rawLight) * (0.22f + (avgHrv - 50) * 0.002f)).toInt().coerceIn(60, 130)
-
-            val totalMins = (rawDeep + rawLight + rawRem + rawAwake).coerceAtLeast(1)
-
-            val deepPct = ((rawDeep.toFloat() / totalMins) * 100).toInt()
-            val remPct = ((rawRem.toFloat() / totalMins) * 100).toInt()
-            val lightPct = ((rawLight.toFloat() / totalMins) * 100).toInt()
-            val awakePct = ((rawAwake.toFloat() / totalMins) * 100).toInt()
-
-            // Weekly Quality Score calculation (35% duration, 25% deep, 20% REM, 20% continuity/HRV)
-            val durationScore = ((totalMins / 480f) * 100).coerceIn(0f, 100f) * 0.35f
-            val deepScore = ((deepPct / 20f) * 100).coerceIn(0f, 100f) * 0.25f
-            val remScore = ((remPct / 22f) * 100).coerceIn(0f, 100f) * 0.20f
-            val hrvRecoveryScore = (avgHrv.toFloat().coerceIn(40f, 90f) / 90f * 100) * 0.20f
-
-            val computedScore = (durationScore + deepScore + remScore + hrvRecoveryScore).toInt().coerceIn(55, 98)
-
-            val (grade, color) = when {
-                computedScore >= 85 -> Pair("Ótimo", Color(0xFF2E7D32))
-                computedScore >= 75 -> Pair("Bom", Color(0xFF0288D1))
-                computedScore >= 65 -> Pair("Regular", Color(0xFFE65100))
-                else -> Pair("Agitado", Color(0xFFD32F2F))
-            }
-
-            SleepAnalysisSummary(
-                weeklyScore = computedScore,
-                scoreGrade = grade,
-                scoreColor = color,
-                totalSleepMinutes = totalMins,
-                deepSleepMins = rawDeep,
-                remSleepMins = rawRem,
-                lightSleepMins = rawLight,
-                awakeMins = rawAwake,
-                deepPercentage = deepPct,
-                remPercentage = remPct,
-                lightPercentage = lightPct,
-                awakePercentage = awakePct,
-                dailySleepMinutes = dailySleepList
-            )
-        } else {
-            SleepAnalysisSummary(
-                weeklyScore = 82,
-                scoreGrade = "Optimal",
-                scoreColor = Color(0xFF2E7D32),
-                totalSleepMinutes = 465,
-                deepSleepMins = 115,
-                remSleepMins = 105,
-                lightSleepMins = 215,
-                awakeMins = 30,
-                deepPercentage = 25,
-                remPercentage = 22,
-                lightPercentage = 46,
-                awakePercentage = 7,
-                dailySleepMinutes = listOf(
-                    Pair("Mon", 440), Pair("Tue", 460), Pair("Wed", 480),
-                    Pair("Thu", 450), Pair("Fri", 475), Pair("Sat", 510), Pair("Sun", 465)
-                )
-            )
-        }
-    }
+    val sleepAnalysis = remember(metrics) { analyzeSleepMetrics(metrics) }
 
     Card(
         modifier = modifier
@@ -172,6 +132,16 @@ fun SleepAnalysisCard(
         colors = CardDefaults.cardColors(containerColor = Color.White)
     ) {
         Column(modifier = Modifier.padding(20.dp)) {
+            if (sleepAnalysis == null) {
+                Text(
+                    text = "Aguardando dados reais de sono da pulseira (readSleepDataFromDay).",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Color(0xFF44474E),
+                    modifier = Modifier.testTag("sleep_waiting_empty_state")
+                )
+                return@Column
+            }
+
             // Header Row
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -305,25 +275,23 @@ fun SleepAnalysisCard(
                     .height(14.dp)
                     .clip(RoundedCornerShape(7.dp))
             ) {
-                // Deep Sleep (Indigo)
                 Box(
                     modifier = Modifier
                         .weight(sleepAnalysis.deepPercentage.coerceAtLeast(1).toFloat())
                         .background(Color(0xFF312E81))
                 )
-                // REM Sleep (Purple/Teal)
-                Box(
-                    modifier = Modifier
-                        .weight(sleepAnalysis.remPercentage.coerceAtLeast(1).toFloat())
-                        .background(Color(0xFF7C3AED))
-                )
-                // Light Sleep (Blue/Cyan)
+                if (sleepAnalysis.remSleepMins > 0) {
+                    Box(
+                        modifier = Modifier
+                            .weight(sleepAnalysis.remPercentage.coerceAtLeast(1).toFloat())
+                            .background(Color(0xFF7C3AED))
+                    )
+                }
                 Box(
                     modifier = Modifier
                         .weight(sleepAnalysis.lightPercentage.coerceAtLeast(1).toFloat())
                         .background(Color(0xFF0288D1))
                 )
-                // Awake (Amber/Orange)
                 Box(
                     modifier = Modifier
                         .weight(sleepAnalysis.awakePercentage.coerceAtLeast(1).toFloat())
@@ -349,8 +317,12 @@ fun SleepAnalysisCard(
 
                 SleepStageItem(
                     stage = "REM",
-                    duration = "${sleepAnalysis.remSleepMins / 60}h ${sleepAnalysis.remSleepMins % 60}m",
-                    percentage = "${sleepAnalysis.remPercentage}%",
+                    duration = if (sleepAnalysis.remSleepMins > 0) {
+                        "${sleepAnalysis.remSleepMins / 60}h ${sleepAnalysis.remSleepMins % 60}m"
+                    } else {
+                        "--"
+                    },
+                    percentage = if (sleepAnalysis.remSleepMins > 0) "${sleepAnalysis.remPercentage}%" else "n/d",
                     color = Color(0xFF7C3AED),
                     testTag = "sleep_stage_rem_display",
                     modifier = Modifier.weight(1f)

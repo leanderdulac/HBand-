@@ -79,6 +79,15 @@ fun SettingsTab(
     onRestoreBackup: () -> Unit = {},
     onTestApiSmoke: () -> Unit = {},
     onResetAllData: () -> Unit = {},
+    capabilities: com.example.data.hband.DeviceCapabilities = com.example.data.hband.DeviceCapabilities(),
+    autoMeasureState: com.example.data.hband.AutoMeasureUiState = com.example.data.hband.AutoMeasureUiState(),
+    wearDetectState: com.example.data.hband.WearDetectUiState = com.example.data.hband.WearDetectUiState(),
+    historySyncState: com.example.data.hband.HistorySyncUiState = com.example.data.hband.HistorySyncUiState(),
+    hardwareConnected: Boolean = false,
+    onAutoMeasureChange: (Boolean) -> Unit = {},
+    onSpo2AutoChange: (Boolean) -> Unit = {},
+    onWearDetectChange: (Boolean) -> Unit = {},
+    onSyncHistory: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val scrollState = rememberScrollState()
@@ -183,6 +192,18 @@ fun SettingsTab(
                 }
             }
         }
+
+        BandSdkSettingsCard(
+            capabilities = capabilities,
+            autoMeasure = autoMeasureState,
+            wearDetect = wearDetectState,
+            historySync = historySyncState,
+            hardwareConnected = hardwareConnected,
+            onAutoMeasureChange = onAutoMeasureChange,
+            onSpo2AutoChange = onSpo2AutoChange,
+            onWearDetectChange = onWearDetectChange,
+            onSyncHistory = onSyncHistory,
+        )
 
         // BLE Auto-Reconnect Card
         Card(

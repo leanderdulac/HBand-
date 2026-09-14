@@ -99,6 +99,11 @@ fun HomeScreen(
 
     val userProfile by viewModel.userProfile.collectAsStateWithLifecycle()
     val autoReconnectBle by viewModel.autoReconnectBle.collectAsStateWithLifecycle()
+    val deviceCapabilities by viewModel.deviceCapabilities.collectAsStateWithLifecycle()
+    val autoMeasureState by viewModel.autoMeasureState.collectAsStateWithLifecycle()
+    val wearDetectState by viewModel.wearDetectState.collectAsStateWithLifecycle()
+    val historySyncState by viewModel.historySyncState.collectAsStateWithLifecycle()
+    val isHardwareConnected by viewModel.isHardwareConnected.collectAsStateWithLifecycle()
     var showProfileDialog by remember { mutableStateOf(false) }
 
     val upperHrThreshold by viewModel.upperHrThreshold.collectAsStateWithLifecycle()
@@ -401,7 +406,16 @@ fun HomeScreen(
                         onTriggerBackup = { viewModel.triggerFirestoreBackup() },
                         onRestoreBackup = { viewModel.restoreFromFirestoreBackup() },
                         onTestApiSmoke = { viewModel.testSmokeHeartConnection(userProfile?.patientId ?: "PAT-HBAND-001") },
-                        onResetAllData = { viewModel.resetAllDataToZero() }
+                        onResetAllData = { viewModel.resetAllDataToZero() },
+                        capabilities = deviceCapabilities,
+                        autoMeasureState = autoMeasureState,
+                        wearDetectState = wearDetectState,
+                        historySyncState = historySyncState,
+                        hardwareConnected = isHardwareConnected,
+                        onAutoMeasureChange = { viewModel.setBandAutoMeasure(it) },
+                        onSpo2AutoChange = { viewModel.setBandSpo2AutoDetect(it) },
+                        onWearDetectChange = { viewModel.setBandWearDetect(it) },
+                        onSyncHistory = { viewModel.requestHistorySync() }
                     )
                 }
             }

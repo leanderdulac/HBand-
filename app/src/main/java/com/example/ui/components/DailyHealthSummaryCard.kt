@@ -90,22 +90,24 @@ fun DailyHealthSummaryCard(
             val count = todayEntries.size
             // Active minutes calculation: count entries with active movement (steps > 0 or HR >= 75)
             val activeEntries = todayEntries.count { it.heartRate >= 75 || it.steps > 0 }
-            val computedActiveMins = (activeEntries * 3.5).toInt().coerceAtLeast(12)
+            val computedActiveMins = (activeEntries * 3.5).toInt().coerceAtLeast(0)
 
             val maxSteps = todayEntries.maxOf { it.steps }
             val maxDistanceMeters = todayEntries.maxOf { it.distanceMeters }
             val maxLoggedCalories = todayEntries.maxOf { it.calories }
 
-            val avgHr = todayEntries.map { it.heartRate }.average().toInt()
-            val avgHrv = todayEntries.map { it.hrvScore }.average().toInt()
+            val measuredHr = todayEntries.map { it.heartRate }.filter { it > 0 }
+            val measuredHrv = todayEntries.map { it.hrvScore }.filter { it > 0 }
+            val avgHr = if (measuredHr.isEmpty()) 0 else measuredHr.average().toInt()
+            val avgHrv = if (measuredHrv.isEmpty()) 0 else measuredHrv.average().toInt()
 
             val latestEntry = todayEntries.maxByOrNull { it.timestampMillis } ?: todayEntries.first()
             val sleepMins = latestEntry.deepSleepMinutes + latestEntry.lightSleepMinutes
 
             // Calorie calculation: Active burn derived from steps/movement + BMR allowance
-            val activeCals = if (maxLoggedCalories > 0f) maxLoggedCalories.toInt() else (maxSteps * 0.045f).toInt()
-            val bmrCals = 1450 // standard daily BMR baseline
-            val totalCals = activeCals + bmrCals
+            val activeCals = if (maxLoggedCalories > 0f) maxLoggedCalories.toInt() else 0
+            val bmrCals = 0
+            val totalCals = activeCals
 
             DailySummaryMetrics(
                 activeMinutes = computedActiveMins,
@@ -122,9 +124,9 @@ fun DailyHealthSummaryCard(
         } else {
             DailySummaryMetrics(
                 activeMinutes = 0,
-                totalCalories = 1450,
+                totalCalories = 0,
                 activeCalories = 0,
-                bmrCalories = 1450,
+                bmrCalories = 0,
                 steps = 0,
                 distanceKm = 0f,
                 avgHeartRate = 0,

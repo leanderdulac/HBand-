@@ -54,7 +54,7 @@ fun DeviceControlCard(
     onSimulateLowBattery: (() -> Unit)? = null,
     onRechargeBattery: (() -> Unit)? = null
 ) {
-    val batteryLevel = device?.batteryLevel ?: 88
+    val batteryLevel = device?.batteryLevel ?: 0
     val (batteryColor, batteryBg) = when {
         batteryLevel <= 20 -> Pair(Color(0xFFD32F2F), Color(0xFFFFEBEE))
         batteryLevel <= 50 -> Pair(Color(0xFFE65100), Color(0xFFFFF3E0))

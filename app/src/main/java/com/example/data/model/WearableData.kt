@@ -13,14 +13,14 @@ data class HBandDevice(
 )
 
 data class BloodPressure(
-    val systolic: Int = 118,
-    val diastolic: Int = 78
+    val systolic: Int = 0,
+    val diastolic: Int = 0
 )
 
 data class SleepSummary(
-    val deepSleepMinutes: Int = 135,
-    val lightSleepMinutes: Int = 245,
-    val awakeMinutes: Int = 15
+    val deepSleepMinutes: Int = 0,
+    val lightSleepMinutes: Int = 0,
+    val awakeMinutes: Int = 0
 ) {
     val totalSleepMinutes: Int get() = deepSleepMinutes + lightSleepMinutes + awakeMinutes
 }
