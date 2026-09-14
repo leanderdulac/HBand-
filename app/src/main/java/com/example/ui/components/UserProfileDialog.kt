@@ -23,6 +23,7 @@ import androidx.compose.material3.Divider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -38,6 +39,27 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.example.data.local.UserProfileEntity
+
+private val ProfileFieldText = Color(0xFF191C1E)
+private val ProfileFieldContainer = Color(0xFFF8F9FF)
+private val ProfileFieldLabel = Color(0xFF44474E)
+
+@Composable
+private fun profileTextFieldColors() = OutlinedTextFieldDefaults.colors(
+    focusedTextColor = ProfileFieldText,
+    unfocusedTextColor = ProfileFieldText,
+    disabledTextColor = ProfileFieldLabel,
+    cursorColor = Color(0xFF00639B),
+    focusedContainerColor = ProfileFieldContainer,
+    unfocusedContainerColor = ProfileFieldContainer,
+    disabledContainerColor = ProfileFieldContainer,
+    focusedBorderColor = Color(0xFF00639B),
+    unfocusedBorderColor = Color(0xFFDCE2F9),
+    focusedLabelColor = Color(0xFF00639B),
+    unfocusedLabelColor = ProfileFieldLabel,
+    focusedPlaceholderColor = ProfileFieldLabel,
+    unfocusedPlaceholderColor = ProfileFieldLabel
+)
 
 @Composable
 fun UserProfileDialog(
@@ -98,6 +120,7 @@ fun UserProfileDialog(
                     onValueChange = { fullName = it },
                     label = { Text("Nome Completo") },
                     singleLine = true,
+                    colors = profileTextFieldColors(),
                     modifier = Modifier
                         .fillMaxWidth()
                         .testTag("input_profile_name")
@@ -109,6 +132,7 @@ fun UserProfileDialog(
                         onValueChange = { patientId = it },
                         label = { Text("ID Paciente GCP") },
                         singleLine = true,
+                        colors = profileTextFieldColors(),
                         modifier = Modifier
                             .weight(1.2f)
                             .testTag("input_patient_id")
@@ -118,6 +142,7 @@ fun UserProfileDialog(
                         onValueChange = { ageStr = it },
                         label = { Text("Idade") },
                         singleLine = true,
+                        colors = profileTextFieldColors(),
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         modifier = Modifier
                             .weight(0.8f)
@@ -131,6 +156,7 @@ fun UserProfileDialog(
                         onValueChange = { gender = it },
                         label = { Text("Gênero") },
                         singleLine = true,
+                        colors = profileTextFieldColors(),
                         modifier = Modifier.weight(1f)
                     )
                     OutlinedTextField(
@@ -138,6 +164,7 @@ fun UserProfileDialog(
                         onValueChange = { heightStr = it },
                         label = { Text("Altura (cm)") },
                         singleLine = true,
+                        colors = profileTextFieldColors(),
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         modifier = Modifier.weight(1f)
                     )
@@ -146,6 +173,7 @@ fun UserProfileDialog(
                         onValueChange = { weightStr = it },
                         label = { Text("Peso (kg)") },
                         singleLine = true,
+                        colors = profileTextFieldColors(),
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         modifier = Modifier.weight(1f)
                     )
@@ -157,6 +185,7 @@ fun UserProfileDialog(
                         onValueChange = { stepGoalStr = it },
                         label = { Text("Meta Passos/Dia") },
                         singleLine = true,
+                        colors = profileTextFieldColors(),
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         modifier = Modifier.weight(1f)
                     )
@@ -165,6 +194,7 @@ fun UserProfileDialog(
                         onValueChange = { waterGoalStr = it },
                         label = { Text("Meta Água (ml)") },
                         singleLine = true,
+                        colors = profileTextFieldColors(),
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         modifier = Modifier.weight(1f)
                     )
@@ -175,6 +205,7 @@ fun UserProfileDialog(
                     onValueChange = { emergencyContact = it },
                     label = { Text("Contato de Emergência") },
                     singleLine = true,
+                    colors = profileTextFieldColors(),
                     modifier = Modifier.fillMaxWidth()
                 )
 
@@ -183,6 +214,7 @@ fun UserProfileDialog(
                     onValueChange = { medicalNotes = it },
                     label = { Text("Notas Médicas / Observações") },
                     maxLines = 3,
+                    colors = profileTextFieldColors(),
                     modifier = Modifier.fillMaxWidth()
                 )
             }

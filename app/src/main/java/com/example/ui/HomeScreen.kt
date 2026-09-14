@@ -748,39 +748,34 @@ private fun BleDevicesTab(
             colors = CardDefaults.cardColors(containerColor = Color.White)
         ) {
             Column(modifier = Modifier.padding(20.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                Text(
+                    text = "Scanner BLE HBand & VE30",
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                    color = Color(0xFF191C1E)
+                )
+                Text(
+                    text = "Descubra e conecte pulseiras Bluetooth VE30 / HBand físicas",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color(0xFF44474E)
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                Button(
+                    onClick = { handleScanClick() },
+                    enabled = !isScanning,
+                    shape = RoundedCornerShape(20.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00639B)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
+                        .testTag("scan_ble_button")
                 ) {
-                    Column {
-                        Text(
-                            text = "Scanner BLE HBand & VE30",
-                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                            color = Color(0xFF191C1E)
-                        )
-                        Text(
-                            text = "Descubra e conecte pulseiras Bluetooth VE30 / HBand físicas",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = Color(0xFF44474E)
-                        )
-                    }
-
-                    Button(
-                        onClick = { handleScanClick() },
-                        enabled = !isScanning,
-                        shape = RoundedCornerShape(20.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00639B)),
-                        modifier = Modifier.testTag("scan_ble_button")
-                    ) {
-                        Icon(
-                            imageVector = if (isScanning) Icons.AutoMirrored.Filled.BluetoothSearching else Icons.Default.Bluetooth,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(if (isScanning) "Buscando..." else "Escanear BLE")
-                    }
+                    Icon(
+                        imageVector = if (isScanning) Icons.AutoMirrored.Filled.BluetoothSearching else Icons.Default.Bluetooth,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(if (isScanning) "Buscando..." else "Buscar dispositivos")
                 }
             }
         }
@@ -854,7 +849,7 @@ private fun BleDevicesTab(
                 contentAlignment = Alignment.Center
             ) {
                 Text(
-                    text = "Toque em 'Escanear BLE' ou insira o MAC acima para conectar seu VE30.",
+                    text = "Toque em 'Buscar dispositivos' ou insira o MAC acima para conectar seu VE30.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = Color(0xFF44474E)
                 )

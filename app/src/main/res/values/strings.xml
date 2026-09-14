@@ -1,3 +1,11 @@
 <resources>
     <string name="app_name">HBand HealthSync</string>
+    <string name="ble_session_channel_name">Sessão Bluetooth</string>
+    <string name="ble_session_channel_desc">Mantém a pulseira VE30 conectada em segundo plano</string>
+    <string name="ble_session_connecting">Conectando à pulseira…</string>
+    <string name="ble_session_connected">Conectado a %1$s</string>
+    <string name="ble_session_reconnecting">Reconectando a %1$s…</string>
+    <string name="ble_session_disconnected">Pulseira desconectada</string>
+    <string name="ble_session_device_fallback">VE30</string>
+    <string name="ble_session_stop">Desconectar</string>
 </resources>

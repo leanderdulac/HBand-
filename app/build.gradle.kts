@@ -21,6 +21,18 @@ android {
     versionName = "1.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+    // sqlcipher-android AAR ships libsqlcipher.so for these ABIs; arm64-v8a is
+    // required on current VE30 companion phones. Do not drop it from the APK.
+    ndk {
+      abiFilters += listOf("armeabi-v7a", "arm64-v8a", "x86_64")
+    }
+  }
+
+  packaging {
+    jniLibs {
+      keepDebugSymbols += setOf("**/libsqlcipher.so")
+    }
   }
 
   signingConfigs {
@@ -107,6 +119,7 @@ dependencies {
   // implementation(libs.androidx.navigation.compose)
   implementation(libs.androidx.room.ktx)
   implementation(libs.androidx.room.runtime)
+  implementation(libs.sqlcipher.android)
   implementation(libs.androidx.work.runtime.ktx)
   // implementation(libs.coil.compose)
   implementation(libs.converter.moshi)
@@ -131,6 +144,7 @@ dependencies {
   testImplementation(libs.androidx.core)
   testImplementation(libs.androidx.junit)
   testImplementation(libs.junit)
+  testImplementation("org.json:json:20240303")
   testImplementation(libs.kotlinx.coroutines.test)
   testImplementation(libs.robolectric)
   testImplementation(libs.roborazzi)
