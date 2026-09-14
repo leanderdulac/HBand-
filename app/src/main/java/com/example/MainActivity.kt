@@ -16,7 +16,6 @@ import androidx.core.content.ContextCompat
 import com.example.ui.HomeScreen
 import com.example.ui.MainViewModel
 import com.example.ui.theme.MyApplicationTheme
-import com.example.worker.HBandWorkScheduler
 
 class MainActivity : ComponentActivity() {
 
@@ -35,14 +34,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        // Initialize Retrofit configuration with saved settings
         com.example.data.remote.RetrofitClient.initialize(this)
-
-        // Check & request Bluetooth & Location permissions
         checkAndRequestBlePermissions()
-
-        // Schedule WorkManager periodic check for queued Room database metrics
-        HBandWorkScheduler.schedulePeriodicIngest(applicationContext)
 
         setContent {
             MyApplicationTheme {
@@ -76,9 +69,14 @@ class MainActivity : ComponentActivity() {
             permissionsToRequest.add(Manifest.permission.ACCESS_FINE_LOCATION)
         }
 
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                permissionsToRequest.add(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
+
         if (permissionsToRequest.isNotEmpty()) {
             requestPermissionLauncher.launch(permissionsToRequest.toTypedArray())
         }
     }
 }
-

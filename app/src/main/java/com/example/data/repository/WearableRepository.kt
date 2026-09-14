@@ -1,6 +1,8 @@
 package com.example.data.repository
 
 import com.example.data.hband.HBandBleManager
+import com.example.data.ingest.IngestHttpKind
+import com.example.data.ingest.IngestPayloadMapper
 import com.example.data.local.HBandSensorMetricDao
 import com.example.data.local.HBandSensorMetricEntity
 import com.example.data.local.IngestQueueDao
@@ -16,7 +18,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.RequestBody.Companion.toRequestBody
-import org.json.JSONObject
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -28,6 +29,15 @@ data class ApiHealthState(
     val latencyMs: Long = 0,
     val message: String = "Not checked",
     val lastCheckTime: Long = 0
+)
+
+data class QueueProcessResult(
+    val syncedCount: Int = 0,
+    val failedCount: Int = 0,
+    val skippedCount: Int = 0,
+    val authError: String? = null,
+    val hadTransientFailure: Boolean = false,
+    val message: String = ""
 )
 
 class WearableRepository(
@@ -48,37 +58,42 @@ class WearableRepository(
     private val _lastSyncResult = MutableStateFlow<String?>(null)
     val lastSyncResult: StateFlow<String?> = _lastSyncResult.asStateFlow()
 
-    suspend fun enqueueTelemetry(telemetry: HBandTelemetry, patientId: String = "PAT-HBAND-001"): Long = withContext(Dispatchers.IO) {
-        // Save local sensor metric snapshot to Room
-        val metricEntity = HBandSensorMetricEntity(
-            deviceId = telemetry.deviceId,
-            timestamp = telemetry.timestamp,
-            heartRate = telemetry.heartRate,
-            systolicBp = telemetry.bloodPressure.systolic,
-            diastolicBp = telemetry.bloodPressure.diastolic,
-            spO2 = telemetry.spO2,
-            temperatureCelsius = telemetry.temperatureCelsius,
-            steps = telemetry.steps,
-            calories = telemetry.calories,
-            distanceMeters = telemetry.distanceMeters,
-            hrvScore = telemetry.hrvScore,
-            deepSleepMinutes = telemetry.sleepSummary.deepSleepMinutes,
-            lightSleepMinutes = telemetry.sleepSummary.lightSleepMinutes,
-            awakeMinutes = telemetry.sleepSummary.awakeMinutes
-        )
-        sensorMetricDao.insertMetric(metricEntity)
+    suspend fun enqueueTelemetry(telemetry: HBandTelemetry, patientId: String = IngestPayloadMapper.DEFAULT_PATIENT_ID): Long =
+        withContext(Dispatchers.IO) {
+            val metricEntity = HBandSensorMetricEntity(
+                deviceId = IngestPayloadMapper.resolveDeviceId(telemetry.deviceId),
+                timestamp = telemetry.timestamp,
+                heartRate = telemetry.heartRate,
+                systolicBp = telemetry.bloodPressure.systolic,
+                diastolicBp = telemetry.bloodPressure.diastolic,
+                spO2 = telemetry.spO2,
+                temperatureCelsius = telemetry.temperatureCelsius,
+                steps = telemetry.steps,
+                calories = telemetry.calories,
+                distanceMeters = telemetry.distanceMeters,
+                hrvScore = telemetry.hrvScore,
+                deepSleepMinutes = telemetry.sleepSummary.deepSleepMinutes,
+                lightSleepMinutes = telemetry.sleepSummary.lightSleepMinutes,
+                awakeMinutes = telemetry.sleepSummary.awakeMinutes
+            )
+            sensorMetricDao.insertMetric(metricEntity)
 
-        // Enqueue payload JSON into Room offline ingest queue with patientId
-        val json = HBandBleManager.telemetryToJson(telemetry, patientId)
-        val entity = IngestQueueEntity(
-            payloadJson = json,
-            status = QueueStatus.PENDING.name
-        )
-        val id = queueDao.insertItem(entity)
-        // Automatically process queue so telemetry is synced immediately
-        try { processQueue() } catch (_: Exception) {}
-        id
-    }
+            if (!IngestPayloadMapper.isIngestible(telemetry)) {
+                return@withContext -1L
+            }
+
+            val json = IngestPayloadMapper.telemetryToJson(telemetry, patientId)
+            val entity = IngestQueueEntity(
+                payloadJson = json,
+                status = QueueStatus.PENDING.name
+            )
+            val id = queueDao.insertItem(entity)
+            try {
+                processQueue()
+            } catch (_: Exception) {
+            }
+            id
+        }
 
     suspend fun enqueueRawJson(json: String): Long = withContext(Dispatchers.IO) {
         val entity = IngestQueueEntity(
@@ -86,7 +101,10 @@ class WearableRepository(
             status = QueueStatus.PENDING.name
         )
         val id = queueDao.insertItem(entity)
-        try { processQueue() } catch (_: Exception) {}
+        try {
+            processQueue()
+        } catch (_: Exception) {
+        }
         id
     }
 
@@ -94,7 +112,7 @@ class WearableRepository(
         bleManager: HBandBleManager,
         count: Int
     ) = withContext(Dispatchers.IO) {
-        val device = bleManager.connectedDevice.value ?: com.example.data.model.HBandDevice()
+        val device = bleManager.connectedDevice.value
         val now = System.currentTimeMillis()
         val isoFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
             timeZone = TimeZone.getTimeZone("UTC")
@@ -103,20 +121,23 @@ class WearableRepository(
         for (i in 0 until count) {
             val backdatedTime = now - (count - i) * 60000L
             val timestampStr = isoFormat.format(Date(backdatedTime))
-            val baseTelemetry = bleManager.generateCurrentTelemetry(device)
-            // Sem hardware conectado, a telemetria-base vem zerada; usar uma linha de base
-            // fisiologicamente plausível antes de aplicar o jitter evita FC negativa/zero.
+            val baseTelemetry = bleManager.generateCurrentTelemetry()
             val baseHeartRate = if (baseTelemetry.heartRate > 0) baseTelemetry.heartRate else 72
             val baseSteps = if (baseTelemetry.steps > 0) baseTelemetry.steps else 1000
+            val deviceId = IngestPayloadMapper.resolveDeviceId(
+                device?.macAddress ?: device?.deviceId,
+                baseTelemetry.deviceId
+            )
             val telemetry = baseTelemetry.copy(
+                deviceId = if (IngestPayloadMapper.isPlaceholderDeviceId(deviceId)) "SIM-${backdatedTime}" else deviceId,
                 timestamp = timestampStr,
                 heartRate = (baseHeartRate + kotlin.random.Random.nextInt(-5, 6)).coerceIn(50, 160),
-                steps = baseSteps + i * 50
+                steps = baseSteps + i * 50,
+                isRealSensorData = false
             )
 
-            // Insert into local sensor metric table
             val metricEntity = HBandSensorMetricEntity(
-                deviceId = device.deviceId,
+                deviceId = telemetry.deviceId,
                 timestamp = timestampStr,
                 timestampMillis = backdatedTime,
                 heartRate = telemetry.heartRate,
@@ -134,7 +155,7 @@ class WearableRepository(
             )
             sensorMetricDao.insertMetric(metricEntity)
 
-            val json = HBandBleManager.telemetryToJson(telemetry)
+            val json = IngestPayloadMapper.telemetryToJson(telemetry, IngestPayloadMapper.DEFAULT_PATIENT_ID)
             queueDao.insertItem(
                 IngestQueueEntity(
                     payloadJson = json,
@@ -143,7 +164,10 @@ class WearableRepository(
                 )
             )
         }
-        try { processQueue() } catch (_: Exception) {}
+        try {
+            processQueue()
+        } catch (_: Exception) {
+        }
     }
 
     suspend fun checkApiHealth(): ApiHealthState = withContext(Dispatchers.IO) {
@@ -160,11 +184,17 @@ class WearableRepository(
                     lastCheckTime = System.currentTimeMillis()
                 )
             } else {
+                val kind = IngestPayloadMapper.classifyHttp(response.code())
+                val message = if (kind == IngestHttpKind.AUTH) {
+                    IngestPayloadMapper.authErrorMessage(response.code(), response.errorBody()?.string())
+                } else {
+                    "API returned HTTP ${response.code()}"
+                }
                 ApiHealthState(
                     isOnline = false,
                     statusCode = response.code(),
                     latencyMs = latency,
-                    message = "API returned HTTP ${response.code()}",
+                    message = message,
                     lastCheckTime = System.currentTimeMillis()
                 )
             }
@@ -184,83 +214,66 @@ class WearableRepository(
         }
     }
 
-    suspend fun processQueue(): Int = withContext(Dispatchers.IO) {
-        if (_isSyncing.value) return@withContext 0
+    suspend fun processQueue(): Int = processQueueDetailed().syncedCount
+
+    suspend fun processQueueDetailed(): QueueProcessResult = withContext(Dispatchers.IO) {
+        if (_isSyncing.value) {
+            return@withContext QueueProcessResult(message = "Sincronização já em andamento.")
+        }
         _isSyncing.value = true
         var syncedCount = 0
+        var failedCount = 0
+        var skippedCount = 0
+        var authError: String? = null
+        var hadTransientFailure = false
 
         try {
-            var pendingList = queueDao.getPendingItems()
-            if (pendingList.isEmpty()) {
-                val failedItems = queueDao.getFailedItems()
-                if (failedItems.isNotEmpty()) {
-                    for (item in failedItems) {
-                        queueDao.updateItem(item.copy(status = QueueStatus.PENDING.name, retries = 0))
-                    }
-                    pendingList = queueDao.getPendingItems()
-                }
-            }
+            val pendingList = queueDao.getPendingItems()
 
             if (pendingList.isEmpty()) {
-                _lastSyncResult.value = "Fila limpa. Nenhum item pendente para sincronizar."
-                _isSyncing.value = false
-                return@withContext 0
+                val message = "Fila limpa. Nenhum item pendente para sincronizar."
+                _lastSyncResult.value = message
+                return@withContext QueueProcessResult(message = message)
             }
 
             var consecutiveNetworkErrors = 0
+            val mediaType = "application/json; charset=utf-8".toMediaTypeOrNull()
+
             for (item in pendingList) {
-                // If consecutive network failures occurred, halt batch processing to avoid inflating retry counters
                 if (consecutiveNetworkErrors >= 2) {
-                    _lastSyncResult.value = "Conexão com servidor indisponível. ${pendingList.size - syncedCount} dados preservados com segurança no banco local (Room DB)."
+                    hadTransientFailure = true
+                    break
+                }
+                if (authError != null) {
                     break
                 }
 
                 val jsonPayload = try {
-                    val jsonObj = JSONObject(item.payloadJson)
-                    if (!jsonObj.has("patient_id") || jsonObj.has("metrics")) {
-                        val patientId = jsonObj.optString("patient_id", "PAT-HBAND-001").ifEmpty { "PAT-HBAND-001" }
-                        val deviceId = if (jsonObj.has("device_id")) jsonObj.getString("device_id") else jsonObj.optString("deviceId", "HBAND-B57-89A4")
-                        val timestamp = jsonObj.optString("timestamp", "2026-08-12T15:00:00Z")
-                        
-                        val metrics = jsonObj.optJSONObject("metrics")
-                        val hr = metrics?.optInt("heartRate") ?: jsonObj.optInt("heart_rate", 72)
-                        val sys = metrics?.optJSONObject("bloodPressure")?.optInt("systolic") ?: jsonObj.optJSONObject("blood_pressure")?.optInt("systolic") ?: 118
-                        val dia = metrics?.optJSONObject("bloodPressure")?.optInt("diastolic") ?: jsonObj.optJSONObject("blood_pressure")?.optInt("diastolic") ?: 78
-                        val spo2 = metrics?.optInt("spO2") ?: jsonObj.optInt("spo2", 98)
-                        val temp = metrics?.optDouble("temperatureCelsius")?.toFloat() ?: jsonObj.optDouble("temperature", 36.6).toFloat()
-                        val steps = metrics?.optInt("steps") ?: jsonObj.optInt("steps", 6000)
-                        val cal = metrics?.optDouble("calories")?.toFloat() ?: jsonObj.optDouble("calories", 250.0).toFloat()
-
-                        val normalized = JSONObject()
-                        normalized.put("patient_id", patientId)
-                        normalized.put("device_id", deviceId)
-                        normalized.put("timestamp", timestamp)
-                        normalized.put("heart_rate", hr)
-                        
-                        val bp = JSONObject()
-                        bp.put("systolic", sys)
-                        bp.put("diastolic", dia)
-                        normalized.put("blood_pressure", bp)
-                        
-                        normalized.put("spo2", spo2)
-                        normalized.put("temperature", temp)
-                        normalized.put("steps", steps)
-                        normalized.put("calories", cal)
-                        normalized.put("service", "healthtech-secure-api")
-                        normalized.toString(2)
-                    } else {
-                        item.payloadJson
-                    }
-                } catch (e: Exception) {
+                    IngestPayloadMapper.normalizeQueuePayload(item.payloadJson)
+                } catch (_: Exception) {
                     item.payloadJson
                 }
 
-                val mediaType = "application/json; charset=utf-8".toMediaTypeOrNull()
+                if (!IngestPayloadMapper.isIngestibleJson(jsonPayload)) {
+                    skippedCount++
+                    failedCount++
+                    queueDao.updateItem(
+                        item.copy(
+                            payloadJson = jsonPayload,
+                            status = QueueStatus.FAILED.name,
+                            lastAttemptAt = System.currentTimeMillis(),
+                            errorMessage = IngestPayloadMapper.MISSING_HR_ERROR
+                        )
+                    )
+                    continue
+                }
+
                 val requestBody = jsonPayload.toRequestBody(mediaType)
 
                 try {
                     val response = apiService.ingestWearableData(requestBody)
                     val now = System.currentTimeMillis()
+                    val kind = IngestPayloadMapper.classifyHttp(response.code())
 
                     if (response.isSuccessful) {
                         consecutiveNetworkErrors = 0
@@ -274,31 +287,65 @@ class WearableRepository(
                         )
                         syncedCount++
                     } else {
-                        consecutiveNetworkErrors++
                         val errorBody = response.errorBody()?.string() ?: response.message()
-                        val newRetries = (item.retries + 1).coerceAtMost(3)
-                        val newStatus = if (newRetries >= 3) {
-                            QueueStatus.FAILED.name
-                        } else {
-                            QueueStatus.PENDING.name
+                        when (kind) {
+                            IngestHttpKind.AUTH -> {
+                                authError = IngestPayloadMapper.authErrorMessage(response.code(), errorBody)
+                                queueDao.updateItem(
+                                    item.copy(
+                                        payloadJson = jsonPayload,
+                                        status = QueueStatus.FAILED.name,
+                                        lastAttemptAt = now,
+                                        errorMessage = authError
+                                    )
+                                )
+                                failedCount++
+                            }
+                            IngestHttpKind.CLIENT -> {
+                                queueDao.updateItem(
+                                    item.copy(
+                                        payloadJson = jsonPayload,
+                                        status = QueueStatus.FAILED.name,
+                                        retries = item.retries + 1,
+                                        lastAttemptAt = now,
+                                        errorMessage = "HTTP ${response.code()}: $errorBody"
+                                    )
+                                )
+                                failedCount++
+                            }
+                            else -> {
+                                consecutiveNetworkErrors++
+                                hadTransientFailure = true
+                                val newRetries = item.retries + 1
+                                val newStatus = if (newRetries >= 5) {
+                                    failedCount++
+                                    QueueStatus.FAILED.name
+                                } else {
+                                    QueueStatus.PENDING.name
+                                }
+                                queueDao.updateItem(
+                                    item.copy(
+                                        payloadJson = jsonPayload,
+                                        status = newStatus,
+                                        retries = newRetries,
+                                        lastAttemptAt = now,
+                                        errorMessage = "HTTP ${response.code()}: $errorBody"
+                                    )
+                                )
+                            }
                         }
-
-                        queueDao.updateItem(
-                            item.copy(
-                                payloadJson = jsonPayload,
-                                status = newStatus,
-                                retries = newRetries,
-                                lastAttemptAt = now,
-                                errorMessage = "HTTP ${response.code()}: $errorBody"
-                            )
-                        )
                     }
                 } catch (e: Exception) {
                     consecutiveNetworkErrors++
+                    hadTransientFailure = true
                     val now = System.currentTimeMillis()
-                    val newRetries = (item.retries + 1).coerceAtMost(3)
-                    val newStatus = if (newRetries >= 3) QueueStatus.FAILED.name else QueueStatus.PENDING.name
-
+                    val newRetries = item.retries + 1
+                    val newStatus = if (newRetries >= 5) {
+                        failedCount++
+                        QueueStatus.FAILED.name
+                    } else {
+                        QueueStatus.PENDING.name
+                    }
                     queueDao.updateItem(
                         item.copy(
                             payloadJson = jsonPayload,
@@ -311,15 +358,31 @@ class WearableRepository(
                 }
             }
 
-            if (syncedCount > 0) {
-                _lastSyncResult.value = "Sincronizados $syncedCount itens com sucesso para o servidor."
-            } else {
-                _lastSyncResult.value = "Dados preservados com segurança no banco local (Room DB). Sincronização pendente aguardando conectividade."
+            val message = when {
+                authError != null -> authError!!
+                consecutiveNetworkErrors >= 2 ->
+                    "Conexão com servidor indisponível. Dados preservados com segurança no banco local (Room DB)."
+                syncedCount > 0 && failedCount == 0 ->
+                    "Sincronizados $syncedCount itens com sucesso para o servidor."
+                syncedCount > 0 ->
+                    "Sincronizados $syncedCount itens. $failedCount falharam."
+                skippedCount > 0 && syncedCount == 0 ->
+                    IngestPayloadMapper.MISSING_HR_ERROR
+                else ->
+                    "Dados preservados com segurança no banco local (Room DB). Sincronização pendente aguardando conectividade."
             }
+            _lastSyncResult.value = message
+            QueueProcessResult(
+                syncedCount = syncedCount,
+                failedCount = failedCount,
+                skippedCount = skippedCount,
+                authError = authError,
+                hadTransientFailure = hadTransientFailure,
+                message = message
+            )
         } finally {
             _isSyncing.value = false
         }
-        syncedCount
     }
 
     suspend fun markAllAsLocalSynced() = withContext(Dispatchers.IO) {

@@ -14,12 +14,14 @@ import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
 import android.content.Context
+import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import androidx.core.content.ContextCompat
+import com.example.data.ingest.IngestPayloadMapper
 import com.example.data.model.BloodPressure
 import com.example.data.model.HBandDevice
 import com.example.data.model.HBandTelemetry
@@ -66,7 +68,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import org.json.JSONObject
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -105,8 +106,23 @@ class HBandBleManager(
     private val _isHardwareConnected = MutableStateFlow(false)
     val isHardwareConnected: StateFlow<Boolean> = _isHardwareConnected.asStateFlow()
 
-    var isAutoReconnectEnabled: Boolean = true
-    var currentPatientId: String = "PAT-HBAND-001"
+    private val prefs: SharedPreferences =
+        context.getSharedPreferences("hband_settings", Context.MODE_PRIVATE)
+
+    var isAutoReconnectEnabled: Boolean = prefs.getBoolean(PREF_AUTO_RECONNECT, true)
+        set(value) {
+            field = value
+            prefs.edit().putBoolean(PREF_AUTO_RECONNECT, value).apply()
+        }
+    var currentPatientId: String = IngestPayloadMapper.DEFAULT_PATIENT_ID
+
+    private val _sessionMessage = MutableStateFlow<String?>(null)
+    val sessionMessage: StateFlow<String?> = _sessionMessage.asStateFlow()
+
+    private var userRequestedDisconnect = false
+    private var veepooStatusListener: IABleConnectStatusListener? = null
+    private var veepooStatusListenerMac: String? = null
+    private var reconnectRunnable: Runnable? = null
 
     // Perfil biométrico real do usuário (sincronizado pelo ViewModel a partir do
     // UserProfileEntity). O VE30 usa altura/peso/idade/sexo para calibrar seus algoritmos
@@ -201,6 +217,10 @@ class HBandBleManager(
 
     companion object {
         const val DEFAULT_VEEPOO_PWD = "0000"
+        const val PREF_AUTO_RECONNECT = "auto_reconnect_ble"
+        const val PREF_LAST_MAC = "last_ble_mac"
+        const val PREF_LAST_NAME = "last_ble_name"
+        private const val MAX_RECONNECT_ATTEMPTS = 8
 
         // Duração de cada estágio do revezamento de sensores PPG (FC/SpO2/PA) antes de
         // avançar para o próximo, mesmo sem uma leitura válida ainda. Observado em campo: o
@@ -253,33 +273,36 @@ class HBandBleManager(
 
         val CLIENT_CONFIG_DESCRIPTOR_UUID: UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
 
-        fun telemetryToJson(telemetry: HBandTelemetry, patientId: String = "PAT-HBAND-001"): String {
-            val json = JSONObject()
-            json.put("patient_id", patientId)
-            json.put("device_id", telemetry.deviceId)
-            json.put("device_model", telemetry.deviceModel)
-            json.put("timestamp", telemetry.timestamp)
-            // A API rejeita com 422 (heart_rate >= 20) qualquer payload sem esse fallback —
-            // diferente de PA/SpO2/temperatura/HRV logo abaixo, este campo não tinha default,
-            // então qualquer leitura sem FC capturada ficava presa em retry infinito na fila
-            // (o valor 0 nunca passa a validar, então o WorkManager nunca conseguia subir).
-            json.put("heart_rate", if (telemetry.heartRate > 0) telemetry.heartRate else 72)
-
-            val bp = JSONObject()
-            bp.put("systolic", if (telemetry.bloodPressure.systolic > 0) telemetry.bloodPressure.systolic else 118)
-            bp.put("diastolic", if (telemetry.bloodPressure.diastolic > 0) telemetry.bloodPressure.diastolic else 78)
-            json.put("blood_pressure", bp)
-
-            json.put("spo2", if (telemetry.spO2 > 0) telemetry.spO2 else 98)
-            json.put("temperature", if (telemetry.temperatureCelsius > 0f) telemetry.temperatureCelsius else 36.6f)
-            json.put("steps", telemetry.steps)
-            json.put("calories", telemetry.calories)
-            json.put("distance", telemetry.distanceMeters)
-            json.put("hrv_score", if (telemetry.hrvScore > 0) telemetry.hrvScore else if (telemetry.heartRate > 0) (100 - (telemetry.heartRate / 4)).coerceIn(60, 95) else 75)
-            json.put("service", "healthtech-secure-api")
-
-            return json.toString(2)
+        fun telemetryToJson(telemetry: HBandTelemetry, patientId: String = IngestPayloadMapper.DEFAULT_PATIENT_ID): String {
+            return IngestPayloadMapper.telemetryToJson(telemetry, patientId)
         }
+    }
+
+    fun consumeSessionMessage() {
+        _sessionMessage.value = null
+    }
+
+    fun hasPersistedSession(): Boolean {
+        val mac = prefs.getString(PREF_LAST_MAC, null)?.trim().orEmpty()
+        return mac.isNotEmpty() && BluetoothAdapter.checkBluetoothAddress(mac)
+    }
+
+    fun reconnectLastDevice() {
+        if (userRequestedDisconnect || _isHardwareConnected.value) return
+        val mac = prefs.getString(PREF_LAST_MAC, null)?.trim().orEmpty()
+        if (mac.isEmpty() || !BluetoothAdapter.checkBluetoothAddress(mac)) return
+        val name = prefs.getString(PREF_LAST_NAME, null)?.takeIf { it.isNotBlank() } ?: "VE30"
+        connectDevice(
+            HBandDevice(
+                deviceId = mac,
+                name = name,
+                macAddress = mac,
+                batteryLevel = _connectedDevice.value?.batteryLevel ?: 0,
+                rssi = _connectedDevice.value?.rssi ?: 0,
+                isConnected = false,
+                firmwareVersion = "Reconexão"
+            )
+        )
     }
 
     init {
@@ -300,20 +323,10 @@ class HBandBleManager(
             try {
                 val bonded = adapter.bondedDevices ?: emptySet()
                 val bondedList = mutableListOf<HBandDevice>()
-                
-                var matchedDevice: BluetoothDevice? = null
+
                 for (dev in bonded) {
                     val name = dev.name ?: "Dispositivo Pareado"
                     val address = dev.address ?: continue
-                    val isSmartWearable = name.contains("Gear", ignoreCase = true) ||
-                            name.contains("Samsung", ignoreCase = true) ||
-                            name.contains("VE30", ignoreCase = true) ||
-                            name.contains("HBand", ignoreCase = true) ||
-                            name.contains("Watch", ignoreCase = true) ||
-                            name.contains("Band", ignoreCase = true) ||
-                            name.contains("Smart", ignoreCase = true) ||
-                            name.contains("Fit", ignoreCase = true)
-
                     val hDev = HBandDevice(
                         deviceId = address,
                         name = name,
@@ -324,31 +337,17 @@ class HBandBleManager(
                         firmwareVersion = "Bluetooth Pareado"
                     )
                     bondedList.add(hDev)
-
-                    if (isSmartWearable && matchedDevice == null) {
-                        matchedDevice = dev
-                    }
                 }
 
                 if (bondedList.isNotEmpty()) {
                     _scannedDevices.value = bondedList
                 }
 
-                // Auto-connect to bonded wearable if not currently connected to hardware
-                if (matchedDevice != null && !_isHardwareConnected.value) {
-                    val address = matchedDevice.address
-                    val name = matchedDevice.name ?: "Smartwatch Pareado"
-                    Log.i(TAG, "Found bonded smartwatch: $name [$address]. Initiating direct GATT connection...")
-                    val realDevice = HBandDevice(
-                        deviceId = address,
-                        name = name,
-                        macAddress = address,
-                        batteryLevel = 90,
-                        rssi = -55,
-                        isConnected = false,
-                        firmwareVersion = "Hardware Pareado"
-                    )
-                    connectDevice(realDevice)
+                // Prefer the last successful MAC. Auto-connecting the first bonded
+                // "Watch/Band/Fit" device used to grab the wrong peripheral.
+                if (isAutoReconnectEnabled && !_isHardwareConnected.value && hasPersistedSession()) {
+                    Log.i(TAG, "Reconectando à última pulseira persistida...")
+                    reconnectLastDevice()
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Error checking bonded devices: ${e.message}")
@@ -466,6 +465,7 @@ class HBandBleManager(
 
     @SuppressLint("MissingPermission")
     fun connectDevice(device: HBandDevice) {
+        userRequestedDisconnect = false
         // Relógios Gear/WearOS/genéricos falam Bluetooth SIG padrão (Heart Rate Service etc.)
         // via GATT direto. VE30/HBand (e qualquer coisa não explicitamente "Gear") usam o
         // protocolo proprietário Veepoo, que exige o SDK oficial para o handshake de senha.
@@ -514,6 +514,9 @@ class HBandBleManager(
                 } else {
                     remoteDevice.connectGatt(context, false, gattCallback)
                 }
+
+                persistLastDevice(_connectedDevice.value ?: device)
+                HBandBleService.start(context)
                 
                 // Real initial empty telemetry snapshot (waiting for sensor)
                 _latestTelemetry.value = createTelemetrySnapshot(_connectedDevice.value!!)
@@ -566,20 +569,10 @@ class HBandBleManager(
 
         Log.i(TAG, "Conectando via SDK Veepoo/HBand ao VE30: ${device.name} [${device.macAddress}]...")
         _connectedDevice.value = device.copy(isConnected = false)
+        persistLastDevice(device)
+        HBandBleService.start(context)
 
-        vpManager.registerConnectStatusListener(device.macAddress, object : IABleConnectStatusListener() {
-            override fun onConnectStatusChanged(mac: String, status: Int) {
-                when (status) {
-                    Constants.STATUS_CONNECTED -> Log.i(TAG, "Veepoo GATT conectado: $mac")
-                    Constants.STATUS_DISCONNECTED -> {
-                        Log.w(TAG, "Veepoo GATT desconectado: $mac")
-                        isConnectingVeepoo = false
-                        _isHardwareConnected.value = false
-                        _connectedDevice.value = _connectedDevice.value?.copy(isConnected = false)
-                    }
-                }
-            }
-        })
+        registerVeepooStatusListener(device.macAddress)
 
         vpManager.connectDevice(
             device.macAddress,
@@ -588,16 +581,22 @@ class HBandBleManager(
                 if (code != Constants.REQUEST_SUCCESS) {
                     Log.e(TAG, "Falha ao conectar via Veepoo SDK (code=$code)")
                     isConnectingVeepoo = false
+                    _sessionMessage.value = "Falha ao conectar ao VE30 (código $code)."
+                    scheduleReconnect(device.macAddress, device.name)
                 }
             },
             INotifyResponse { state ->
                 if (state == Constants.REQUEST_SUCCESS) {
                     _isHardwareConnected.value = true
+                    reconnectAttempt = 0
                     _connectedDevice.value = _connectedDevice.value?.copy(isConnected = true)
+                    persistLastDevice(_connectedDevice.value ?: device)
                     confirmVeepooPassword()
                 } else {
                     Log.e(TAG, "Falha ao ativar notificações Veepoo (state=$state)")
                     isConnectingVeepoo = false
+                    _sessionMessage.value = "Falha ao ativar notificações do VE30."
+                    scheduleReconnect(device.macAddress, device.name)
                 }
             },
         )
@@ -618,6 +617,13 @@ class HBandBleManager(
 
                 override fun onConnectionConfirmTimeout() {
                     Log.e(TAG, "Timeout na confirmação de senha do VE30.")
+                    isConnectingVeepoo = false
+                    _isHardwareConnected.value = false
+                    _sessionMessage.value = "Tempo esgotado ao confirmar a senha do VE30. Tente reconectar."
+                    val device = _connectedDevice.value
+                    if (device != null) {
+                        scheduleReconnect(device.macAddress, device.name)
+                    }
                 }
             },
             object : IDeviceFuctionDataListener {
@@ -824,11 +830,95 @@ class HBandBleManager(
     private fun currentConnectedMac(): String = _connectedDevice.value?.macAddress ?: ""
     private fun currentConnectedName(): String = _connectedDevice.value?.name ?: "VE30"
 
+    private fun persistLastDevice(device: HBandDevice) {
+        val mac = device.macAddress.trim()
+        if (!BluetoothAdapter.checkBluetoothAddress(mac)) return
+        prefs.edit()
+            .putString(PREF_LAST_MAC, mac)
+            .putString(PREF_LAST_NAME, device.name)
+            .apply()
+    }
+
+    private fun registerVeepooStatusListener(mac: String) {
+        if (veepooStatusListenerMac == mac && veepooStatusListener != null) return
+        veepooStatusListenerMac?.let { previous ->
+            veepooStatusListener?.let { listener ->
+                try {
+                    vpManager.unregisterConnectStatusListener(previous, listener)
+                } catch (e: Exception) {
+                    Log.w(TAG, "Não foi possível remover o listener Veepoo anterior: ${e.message}")
+                }
+            }
+        }
+        val listener = object : IABleConnectStatusListener() {
+            override fun onConnectStatusChanged(address: String, status: Int) {
+                when (status) {
+                    Constants.STATUS_CONNECTED -> {
+                        Log.i(TAG, "Veepoo GATT conectado: $address")
+                        reconnectAttempt = 0
+                    }
+                    Constants.STATUS_DISCONNECTED -> {
+                        Log.w(TAG, "Veepoo GATT desconectado: $address")
+                        isConnectingVeepoo = false
+                        hasStartedVeepooSensors = false
+                        isSyncingPersonInfo = false
+                        ppgStageGeneration++
+                        _isHardwareConnected.value = false
+                        _connectedDevice.value = _connectedDevice.value?.copy(isConnected = false)
+                        val name = _connectedDevice.value?.name ?: "VE30"
+                        scheduleReconnect(address, name)
+                    }
+                }
+            }
+        }
+        veepooStatusListener = listener
+        veepooStatusListenerMac = mac
+        vpManager.registerConnectStatusListener(mac, listener)
+    }
+
+    private fun cancelScheduledReconnect() {
+        reconnectRunnable?.let { mainHandler.removeCallbacks(it) }
+        reconnectRunnable = null
+    }
+
+    private fun scheduleReconnect(address: String, name: String) {
+        if (userRequestedDisconnect || !isAutoReconnectEnabled) return
+        if (address.isBlank() || !BluetoothAdapter.checkBluetoothAddress(address)) return
+        if (_isHardwareConnected.value) return
+        if (reconnectAttempt >= MAX_RECONNECT_ATTEMPTS) {
+            _sessionMessage.value = "Não foi possível reconectar à pulseira após várias tentativas."
+            return
+        }
+        cancelScheduledReconnect()
+        reconnectAttempt++
+        val delayMs = (2_000L * (1L shl (reconnectAttempt - 1).coerceAtMost(5))).coerceAtMost(60_000L)
+        Log.i(TAG, "Auto-reconnect attempt $reconnectAttempt in ${delayMs}ms to $address...")
+        val runnable = Runnable {
+            if (userRequestedDisconnect || _isHardwareConnected.value) return@Runnable
+            connectDevice(
+                HBandDevice(
+                    deviceId = address,
+                    name = name,
+                    macAddress = address,
+                    isConnected = false,
+                    firmwareVersion = "Reconexão"
+                )
+            )
+        }
+        reconnectRunnable = runnable
+        mainHandler.postDelayed(runnable, delayMs)
+    }
+
     @SuppressLint("MissingPermission")
     fun disconnectDevice() {
+        userRequestedDisconnect = true
+        cancelScheduledReconnect()
+        ppgStageGeneration++
+        isConnectingVeepoo = false
+        isSyncingPersonInfo = false
+        hasStartedVeepooSensors = false
         if (isVeepooConnection) {
             vpManager.disconnectWatch(IBleWriteResponse {})
-            isConnectingVeepoo = false
         } else {
             disconnectGatt()
         }
@@ -869,6 +959,8 @@ class HBandBleManager(
                     isConnected = true
                 )
                 _connectedDevice.value = devInfo
+                persistLastDevice(devInfo)
+                HBandBleService.start(context)
                 startKeepAliveLoop(devInfo)
 
                 mainHandler.postDelayed({
@@ -888,18 +980,7 @@ class HBandBleManager(
                 clearGattQueue()
                 _isHardwareConnected.value = false
                 _connectedDevice.value = _connectedDevice.value?.copy(isConnected = false)
-
-                if (isAutoReconnectEnabled && reconnectAttempt < 4) {
-                    reconnectAttempt++
-                    val delayMs = 2500L * reconnectAttempt
-                    Log.i(TAG, "Auto-reconnect attempt $reconnectAttempt in ${delayMs}ms to $address...")
-                    mainHandler.postDelayed({
-                        val devToReconnect = _connectedDevice.value
-                        if (devToReconnect != null && !devToReconnect.isConnected) {
-                            connectDevice(devToReconnect)
-                        }
-                    }, delayMs)
-                }
+                scheduleReconnect(address, name)
             }
         }
 
@@ -1416,7 +1497,7 @@ class HBandBleManager(
             steps = currentSteps,
             calories = currentCalories,
             distanceMeters = currentDistance,
-            hrvScore = if (currentHrvScore > 0) currentHrvScore else if (currentHeartRate > 0) (100 - (currentHeartRate / 4)).coerceIn(60, 95) else 0,
+            hrvScore = currentHrvScore,
             sleepSummary = SleepSummary(0, 0, 0),
             isRealSensorData = true
         )
@@ -1518,21 +1599,6 @@ class HBandBleManager(
     @SuppressLint("MissingPermission")
     fun triggerSpotCheck(): HBandTelemetry {
         requestManualSensorRead()
-        // Só preenche com valores de demonstração se NUNCA recebemos nenhum pacote real do
-        // sensor nesta sessão. Checar currentHeartRate==0 sozinho sobrescrevia leituras reais
-        // já capturadas (ex.: pressão arterial) sempre que a FC especificamente ainda não
-        // tinha travado em um valor válido — apagando dado real do VE30 com dado fake.
-        if (!hasReceivedRealSensorData && currentHeartRate == 0) {
-            currentHeartRate = 74
-            currentSystolic = 118
-            currentDiastolic = 78
-            currentSpO2 = 98
-            currentTemp = 36.6f
-            if (currentSteps == 0) currentSteps = 1250
-            currentCalories = currentSteps * 0.042f
-            currentDistance = currentSteps * 0.72f
-            currentHrvScore = 78
-        }
         val dev = _connectedDevice.value ?: HBandDevice()
         val telemetry = createTelemetrySnapshot(dev)
         _latestTelemetry.value = telemetry

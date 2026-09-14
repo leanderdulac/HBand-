@@ -3,7 +3,11 @@ package com.example.ui
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.HBandHealthSyncApp
 import com.example.data.hband.HBandBleManager
+import com.example.data.hband.HBandBleService
+import com.example.data.ingest.IngestDeduper
+import com.example.data.ingest.IngestPayloadMapper
 import com.example.data.local.AppDatabase
 import com.example.data.local.HBandSensorMetricEntity
 import com.example.data.local.IngestQueueEntity
@@ -45,7 +49,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         apiService = RetrofitClient.apiService
     )
 
-    val bleManager = HBandBleManager(application.applicationContext, viewModelScope)
+    val bleManager: HBandBleManager =
+        (application as? HBandHealthSyncApp)?.bleManager
+            ?: HBandBleManager(application.applicationContext, viewModelScope)
+
+    private val ingestDeduper = IngestDeduper()
 
     val apiHealth: StateFlow<ApiHealthState> = repository.apiHealth
     val isSyncing: StateFlow<Boolean> = repository.isSyncing
@@ -170,10 +178,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _selectedQueueItemForPreview = MutableStateFlow<IngestQueueEntity?>(null)
     val selectedQueueItemForPreview: StateFlow<IngestQueueEntity?> = _selectedQueueItemForPreview.asStateFlow()
 
-    private val _autoIngestLiveReadings = MutableStateFlow(true)
-    val autoIngestLiveReadings: StateFlow<Boolean> = _autoIngestLiveReadings.asStateFlow()
-
     private val prefs: SharedPreferences = application.getSharedPreferences("hband_settings", Context.MODE_PRIVATE)
+
+    private val _autoIngestLiveReadings = MutableStateFlow(prefs.getBoolean("auto_ingest_live", true))
+    val autoIngestLiveReadings: StateFlow<Boolean> = _autoIngestLiveReadings.asStateFlow()
 
     private val _upperHrThreshold = MutableStateFlow(prefs.getInt("upper_hr_threshold", 100))
     val upperHrThreshold: StateFlow<Int> = _upperHrThreshold.asStateFlow()
@@ -204,7 +212,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             initialValue = null
         )
 
-    private val _autoReconnectBle = MutableStateFlow(bleManager.isAutoReconnectEnabled)
+    private val _autoReconnectBle = MutableStateFlow(prefs.getBoolean("auto_reconnect_ble", true))
     val autoReconnectBle: StateFlow<Boolean> = _autoReconnectBle.asStateFlow()
 
     val todayHydrationMl: StateFlow<Int> = hydrationDao.getTodayTotalMlFlow(todayDateString)
@@ -268,28 +276,35 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     init {
-        // Initial health check with HealthtechRepository
+        bleManager.isAutoReconnectEnabled = _autoReconnectBle.value
         checkHealth()
 
-        // Schedule background worker tasks on app startup
-        com.example.worker.HBandWorkScheduler.schedulePeriodicIngest(application)
-
-        // Auto-enqueue live telemetry and check HR thresholds if enabled
         viewModelScope.launch {
-            latestTelemetry.collect { telemetry ->
-                if (telemetry != null && (telemetry.heartRate > 0 || telemetry.steps > 0)) {
-                    if (_autoIngestLiveReadings.value) {
-                        val patientId = userProfile.value?.patientId ?: bleManager.currentPatientId
-                        repository.enqueueTelemetry(telemetry, patientId)
-                    }
-                    if (telemetry.heartRate > 0) {
-                        evaluateHeartRateThresholds(telemetry.heartRate)
-                    }
+            userProfileDao.getUserProfile()?.let { bleManager.setPatientId(it.patientId) }
+        }
+
+        viewModelScope.launch {
+            bleManager.sessionMessage.collect { msg ->
+                if (!msg.isNullOrBlank()) {
+                    showNotification(msg, isError = true)
+                    bleManager.consumeSessionMessage()
                 }
             }
         }
 
-        // Auto-trigger Gemini AI Health Insight when 7-day sensor metrics are available
+        viewModelScope.launch {
+            latestTelemetry.collect { telemetry ->
+                if (telemetry == null) return@collect
+                if (_autoIngestLiveReadings.value && ingestDeduper.shouldEnqueue(telemetry)) {
+                    val patientId = userProfile.value?.patientId ?: bleManager.currentPatientId
+                    repository.enqueueTelemetry(telemetry, patientId)
+                }
+                if (telemetry.heartRate > 0) {
+                    evaluateHeartRateThresholds(telemetry.heartRate)
+                }
+            }
+        }
+
         viewModelScope.launch {
             allSensorMetrics.collect { metrics ->
                 if (metrics.isNotEmpty() && _geminiInsightText.value.isEmpty() && !_isGeneratingGeminiInsight.value) {
@@ -374,6 +389,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setAutoIngestLiveReadings(enabled: Boolean) {
         _autoIngestLiveReadings.value = enabled
+        prefs.edit().putBoolean("auto_ingest_live", enabled).apply()
     }
 
     fun triggerWorkManagerSync() {
@@ -462,20 +478,32 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun disconnectDevice() {
         bleManager.disconnectDevice()
-        showNotification("Disconnected HBand device")
+        HBandBleService.stop(getApplication())
+        showNotification("Pulseira desconectada")
     }
 
     fun triggerSpotCheck() {
         viewModelScope.launch {
             val telemetry = bleManager.triggerSpotCheck()
+            if (!IngestPayloadMapper.isIngestible(telemetry)) {
+                showNotification(
+                    "Nenhuma leitura real de FC ainda. Mantenha o VE30 no pulso e aguarde o sensor.",
+                    isError = true
+                )
+                return@launch
+            }
             val patientId = userProfile.value?.patientId ?: bleManager.currentPatientId
             repository.enqueueTelemetry(telemetry, patientId)
             repository.checkApiHealth()
-            val synced = repository.processQueue()
-            if (synced > 0) {
-                showNotification("Sincronizado com sucesso ($synced item): FC ${telemetry.heartRate} BPM, Passos ${telemetry.steps}")
+            val result = repository.processQueueDetailed()
+            if (result.authError != null) {
+                showNotification(result.authError, isError = true)
+            } else if (result.syncedCount > 0) {
+                showNotification("Sincronizado com sucesso (${result.syncedCount} item): FC ${telemetry.heartRate} BPM, Passos ${telemetry.steps}")
             } else {
-                showNotification("Dados vitais salvos no Room DB e enfileirados: FC ${telemetry.heartRate} BPM [${telemetry.deviceId}]")
+                showNotification(result.message.ifBlank {
+                    "Dados vitais salvos no Room DB e enfileirados: FC ${telemetry.heartRate} BPM [${telemetry.deviceId}]"
+                })
             }
         }
     }
@@ -508,12 +536,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             // First re-verify API status
             repository.checkApiHealth()
-            val synced = repository.processQueue()
-            if (synced > 0) {
-                showNotification("Successfully synced $synced items to HealthTech Ingest API!")
+            val result = repository.processQueueDetailed()
+            if (result.authError != null) {
+                showNotification(result.authError, isError = true)
+            } else if (result.syncedCount > 0) {
+                showNotification("Successfully synced ${result.syncedCount} items to HealthTech Ingest API!")
             } else {
-                val res = lastSyncResult.value ?: "Sync complete"
-                showNotification(res)
+                val res = result.message.ifBlank { lastSyncResult.value ?: "Sync complete" }
+                showNotification(res, isError = result.hadTransientFailure)
             }
         }
     }

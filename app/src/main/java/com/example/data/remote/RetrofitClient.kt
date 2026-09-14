@@ -57,7 +57,10 @@ object RetrofitClient {
 
     private fun buildOkHttpClient(): OkHttpClient {
         val loggingInterceptor = HttpLoggingInterceptor().apply {
-            level = HttpLoggingInterceptor.Level.BODY
+            level = HttpLoggingInterceptor.Level.BASIC
+            redactHeader("X-API-Key")
+            redactHeader("x-api-key")
+            redactHeader("Authorization")
         }
         return OkHttpClient.Builder()
             .addInterceptor { chain ->
