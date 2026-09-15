@@ -359,7 +359,7 @@ class HBandBleManager(
     }
 
     fun reconnectLastDevice() {
-        if (userRequestedDisconnect || _isHardwareConnected.value || hasLiveHardwareSession()) return
+        if (userRequestedDisconnect || _isHardwareConnected.value) return
         val mac = prefs.getString(PREF_LAST_MAC, null)?.trim().orEmpty()
         if (mac.isEmpty() || !BluetoothAdapter.checkBluetoothAddress(mac)) return
         val name = prefs.getString(PREF_LAST_NAME, null)?.takeIf { it.isNotBlank() } ?: "VE30"
@@ -612,6 +612,8 @@ class HBandBleManager(
     @SuppressLint("MissingPermission")
     private fun connectDeviceViaVeepooSdk(device: HBandDevice) {
         val liveSession = hasLiveHardwareSession()
+        // Skip only an in-flight connect or a current GATT notify session.
+        // Stale HeartData after Desconectar must not block Conectar.
         if (
             VeepooPasswordHandshake.shouldSkipDuplicateConnect(
                 connecting = isConnectingVeepoo,
@@ -1252,7 +1254,7 @@ class HBandBleManager(
     private fun scheduleReconnect(address: String, name: String) {
         if (userRequestedDisconnect || !isAutoReconnectEnabled) return
         if (address.isBlank() || !BluetoothAdapter.checkBluetoothAddress(address)) return
-        if (_isHardwareConnected.value || hasLiveHardwareSession()) return
+        if (_isHardwareConnected.value) return
         if (reconnectAttempt >= MAX_RECONNECT_ATTEMPTS) {
             _sessionMessage.value = "Não foi possível reconectar à pulseira após várias tentativas."
             return
@@ -1269,7 +1271,7 @@ class HBandBleManager(
                 "(worn=$lastKnownWorn wearDetect=${_wearDetectState.value.enabled})",
         )
         val runnable = Runnable {
-            if (userRequestedDisconnect || _isHardwareConnected.value || hasLiveHardwareSession()) return@Runnable
+            if (userRequestedDisconnect || _isHardwareConnected.value) return@Runnable
             connectDevice(
                 HBandDevice(
                     deviceId = address,
@@ -1302,6 +1304,8 @@ class HBandBleManager(
         passwordHandshakeSucceeded = false
         passwordConfirmInFlight = false
         pwdConfirmAttempt = 0
+        lastHardwareReadTime = 0L
+        resetBiometricsToZero()
         if (isVeepooConnection) {
             vpManager.disconnectWatch(IBleWriteResponse {})
         } else {

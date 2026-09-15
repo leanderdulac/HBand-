@@ -103,7 +103,8 @@ object VeepooPasswordHandshake {
         confirmInFlight: Boolean,
     ): Boolean {
         if (connecting) return true
-        if (liveSession) return true
+        // Stale HeartData after Desconectar is not a live GATT session.
+        if (notifyUp && liveSession) return true
         if (notifyUp && confirmInFlight) return true
         return false
     }

@@ -91,7 +91,7 @@ class VeepooPasswordHandshakeTest {
     }
 
     @Test
-    fun `duplicate connect is skipped while connecting or while live HeartData streams`() {
+    fun `duplicate connect is skipped only for in-flight connect or live notify plus PPG`() {
         assertTrue(
             VeepooPasswordHandshake.shouldSkipDuplicateConnect(
                 connecting = true,
@@ -104,7 +104,7 @@ class VeepooPasswordHandshakeTest {
             VeepooPasswordHandshake.shouldSkipDuplicateConnect(
                 connecting = false,
                 liveSession = true,
-                notifyUp = false,
+                notifyUp = true,
                 confirmInFlight = false,
             ),
         )
@@ -120,6 +120,18 @@ class VeepooPasswordHandshakeTest {
             VeepooPasswordHandshake.shouldSkipDuplicateConnect(
                 connecting = false,
                 liveSession = false,
+                notifyUp = false,
+                confirmInFlight = false,
+            ),
+        )
+    }
+
+    @Test
+    fun `stale telemetry without notify must not skip Desconectar then Conectar`() {
+        assertFalse(
+            VeepooPasswordHandshake.shouldSkipDuplicateConnect(
+                connecting = false,
+                liveSession = true,
                 notifyUp = false,
                 confirmInFlight = false,
             ),
