@@ -66,6 +66,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.BuildConfig
 import com.example.ui.components.ApiHeader
 import com.example.ui.components.DeviceControlCard
 import com.example.ui.components.JsonPayloadModal
@@ -358,8 +359,8 @@ fun HomeScreen(
                         onSpotCheck = { viewModel.triggerSpotCheck() },
                         onSimulateBatch = { viewModel.enqueueBatchSimulated(it) },
                         onShowNotification = { viewModel.showNotification(it) },
-                        onSimulateLowBattery = { viewModel.simulateLowBattery() },
-                        onRechargeBattery = { viewModel.rechargeBattery() },
+                        onSimulateLowBattery = if (BuildConfig.DEBUG) ({ viewModel.simulateLowBattery() }) else null,
+                        onRechargeBattery = if (BuildConfig.DEBUG) ({ viewModel.rechargeBattery() }) else null,
                         onScanClick = { selectedTab = 2 },
                         onDisconnect = { viewModel.disconnectDevice() },
                         geminiInsightText = geminiInsightText,
@@ -524,8 +525,8 @@ private fun DashboardTab(
     onSpotCheck: () -> Unit,
     onSimulateBatch: (Int) -> Unit,
     onShowNotification: (String) -> Unit,
-    onSimulateLowBattery: () -> Unit,
-    onRechargeBattery: () -> Unit,
+    onSimulateLowBattery: (() -> Unit)? = null,
+    onRechargeBattery: (() -> Unit)? = null,
     onScanClick: () -> Unit,
     onDisconnect: () -> Unit,
     geminiInsightText: String = "",

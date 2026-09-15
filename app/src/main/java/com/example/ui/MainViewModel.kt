@@ -554,7 +554,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             deviceId = trimmed,
             name = customName,
             macAddress = trimmed,
-            batteryLevel = 90,
+            batteryLevel = null,
             rssi = -50,
             isConnected = false,
             firmwareVersion = "VE30 Direct MAC"
@@ -731,12 +731,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun simulateLowBattery() {
         bleManager.simulateLowBattery()
-        showNotification("HBand BLE listener reported low battery warning (14%)", isError = true)
+        showNotification("Simulação de teste: aviso de bateria fraca (14%) — não é leitura da pulseira", isError = true)
     }
 
     fun rechargeBattery() {
         bleManager.rechargeBattery()
-        showNotification("HBand Wearable connected to magnetic charger (98%)")
+        showNotification("Simulação de teste: 98% — não é leitura da pulseira")
     }
 
     fun dismissNotification() {

@@ -6,11 +6,18 @@ data class HBandDevice(
     val deviceId: String = "HBAND-B57-89A4",
     val name: String = "HBand V100 Pro",
     val macAddress: String = "E4:A8:B6:12:89:A4",
-    val batteryLevel: Int = 88,
+    val batteryLevel: Int? = null,
+    val batteryIsSimulated: Boolean = false,
     val rssi: Int = -58,
     val isConnected: Boolean = true,
     val firmwareVersion: String = "v2.4.12-HBand"
-)
+) {
+    fun withUnknownBattery(connected: Boolean = isConnected): HBandDevice = copy(
+        isConnected = connected,
+        batteryLevel = null,
+        batteryIsSimulated = false,
+    )
+}
 
 data class BloodPressure(
     val systolic: Int = 0,

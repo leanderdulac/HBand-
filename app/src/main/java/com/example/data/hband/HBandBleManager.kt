@@ -37,6 +37,7 @@ import com.veepoo.protocol.listener.base.IBleWriteResponse
 import com.veepoo.protocol.listener.base.IConnectResponse
 import com.veepoo.protocol.listener.base.INotifyResponse
 import com.veepoo.protocol.listener.data.IBPDetectDataListener
+import com.veepoo.protocol.listener.data.IBatteryDataListener
 import com.veepoo.protocol.listener.data.ICustomSettingDataListener
 import com.veepoo.protocol.listener.data.IDeviceFuctionDataListener
 import com.veepoo.protocol.listener.data.IHeartDataListener
@@ -255,6 +256,7 @@ class HBandBleManager(
     private var historySync: VeepooHistorySync? = null
     private val p1Controller = VeepooP1Controller(vpManager)
     private var postHandshakeJob: Job? = null
+    private var batteryPollJob: Job? = null
     private var lastKnownWorn: Boolean? = null
     private var advancedDetectActive = false
     private var pwdConfirmAttempt = 0
@@ -305,6 +307,7 @@ class HBandBleManager(
         // VE30 can fire STATUS_DISCONNECTED while HeartData still streams.
         // Keep the live latch until packets go quiet for this window.
         private const val LIVE_LINK_STALE_MS = 8_000L
+        private const val SDK_BATTERY_POLL_MS = 5 * 60 * 1000L
 
         // Bluetooth SIG Standard Services & Characteristics (Samsung Gear S3, WearOS, Garmin, etc.)
         val HEART_RATE_SERVICE_UUID: UUID = UUID.fromString("0000180d-0000-1000-8000-00805f9b34fb")
@@ -368,11 +371,10 @@ class HBandBleManager(
                 deviceId = mac,
                 name = name,
                 macAddress = mac,
-                batteryLevel = _connectedDevice.value?.batteryLevel ?: 0,
                 rssi = _connectedDevice.value?.rssi ?: 0,
                 isConnected = false,
                 firmwareVersion = "Reconexão"
-            )
+            ).withUnknownBattery(connected = false)
         )
     }
 
@@ -402,7 +404,6 @@ class HBandBleManager(
                         deviceId = address,
                         name = name,
                         macAddress = address,
-                        batteryLevel = 90,
                         rssi = -60,
                         isConnected = false,
                         firmwareVersion = "Bluetooth Pareado"
@@ -466,7 +467,8 @@ class HBandBleManager(
                                 macAddress = address,
                                 rssi = result.rssi,
                                 isConnected = isCurrent,
-                                batteryLevel = if (isCurrent) (_connectedDevice.value?.batteryLevel ?: 90) else 90,
+                                batteryLevel = liveScanBatteryLevel(isCurrent),
+                                batteryIsSimulated = false,
                                 firmwareVersion = "BLE Real"
                             )
                             discoveredMap[address] = hbandDevice
@@ -488,7 +490,8 @@ class HBandBleManager(
                                     macAddress = address,
                                     rssi = res.rssi,
                                     isConnected = isCurrent,
-                                    batteryLevel = 90,
+                                    batteryLevel = liveScanBatteryLevel(isCurrent),
+                                    batteryIsSimulated = false,
                                     firmwareVersion = "BLE Real"
                                 )
                             }
@@ -556,6 +559,7 @@ class HBandBleManager(
         isVeepooConnection = false
         stopScanning()
         disconnectGatt()
+        cancelSdkBatteryPolling()
 
         // Clear previous cache to ensure NO fake data is presented
         resetBiometricsToZero()
@@ -576,8 +580,7 @@ class HBandBleManager(
                     deviceId = remoteDevice.address,
                     macAddress = remoteDevice.address,
                     name = remoteDevice.name ?: device.name,
-                    isConnected = true
-                )
+                ).withUnknownBattery(connected = true)
                 _isHardwareConnected.value = true
 
                 currentGatt = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
@@ -599,7 +602,7 @@ class HBandBleManager(
         }
 
         Log.i(TAG, "Connecting device placeholder: ${device.name} [${device.macAddress}]")
-        _connectedDevice.value = device.copy(isConnected = true)
+        _connectedDevice.value = device.withUnknownBattery(connected = true)
         _isHardwareConnected.value = false
         _latestTelemetry.value = createTelemetrySnapshot(device)
     }
@@ -646,6 +649,7 @@ class HBandBleManager(
         p1Controller.stopAllDetect()
         cancelLiveLinkWatchdog()
         cancelHistorySync()
+        cancelSdkBatteryPolling()
         _historySyncState.value = HistorySyncUiState()
         ppgStageGeneration++
         stopScanning()
@@ -663,14 +667,14 @@ class HBandBleManager(
         if (!isValidMac) {
             Log.w(TAG, "MAC inválido para conexão Veepoo, usando placeholder: ${device.macAddress}")
             isConnectingVeepoo = false
-            _connectedDevice.value = device.copy(isConnected = true)
+            _connectedDevice.value = device.withUnknownBattery(connected = true)
             _isHardwareConnected.value = false
             _latestTelemetry.value = createTelemetrySnapshot(device)
             return
         }
 
         Log.i(TAG, "Conectando via SDK Veepoo/HBand ao VE30: ${device.name} [${device.macAddress}]...")
-        _connectedDevice.value = device.copy(isConnected = false)
+        _connectedDevice.value = device.withUnknownBattery(connected = false)
         persistLastDevice(device)
         HBandBleService.start(context)
 
@@ -839,6 +843,8 @@ class HBandBleManager(
             _connectedDevice.value = current.copy(isConnected = true)
         }
         Log.i(TAG, "VE30 senha: SUCCESS ($reason)")
+        refreshSdkBattery()
+        startSdkBatteryPolling()
     }
 
     private fun handlePasswordConfirmTimeout(generation: Int) {
@@ -1164,7 +1170,7 @@ class HBandBleManager(
             advancedDetectActive = false
             ppgStageGeneration++
             _isHardwareConnected.value = false
-            _connectedDevice.value = _connectedDevice.value?.copy(isConnected = false)
+            markDeviceDisconnected()
             scheduleReconnect(address, name)
         }
         liveLinkWatchdog = runnable
@@ -1210,7 +1216,7 @@ class HBandBleManager(
                             ppgStageGeneration++
                             cancelLiveLinkWatchdog()
                             _isHardwareConnected.value = false
-                            _connectedDevice.value = _connectedDevice.value?.copy(isConnected = false)
+                            markDeviceDisconnected()
                             return
                         }
                         val liveAge = System.currentTimeMillis() - lastHardwareReadTime
@@ -1234,7 +1240,7 @@ class HBandBleManager(
                         advancedDetectActive = false
                         ppgStageGeneration++
                         _isHardwareConnected.value = false
-                        _connectedDevice.value = _connectedDevice.value?.copy(isConnected = false)
+                        markDeviceDisconnected()
                         val name = _connectedDevice.value?.name ?: "VE30"
                         scheduleReconnect(address, name)
                     }
@@ -1313,8 +1319,9 @@ class HBandBleManager(
         }
         keepAliveJob?.cancel()
         rssiPollJob?.cancel()
+        cancelSdkBatteryPolling()
         _isHardwareConnected.value = false
-        _connectedDevice.value = _connectedDevice.value?.copy(isConnected = false)
+        markDeviceDisconnected()
     }
 
     @SuppressLint("MissingPermission")
@@ -1368,7 +1375,7 @@ class HBandBleManager(
                 rssiPollJob?.cancel()
                 clearGattQueue()
                 _isHardwareConnected.value = false
-                _connectedDevice.value = _connectedDevice.value?.copy(isConnected = false)
+                markDeviceDisconnected()
                 scheduleReconnect(address, name)
             }
         }
@@ -1748,7 +1755,7 @@ class HBandBleManager(
             // 3. STANDARD BATTERY LEVEL (00002a19)
             BATTERY_LEVEL_CHARACTERISTIC_UUID -> {
                 val battery = (data[0].toInt() and 0xFF).coerceIn(0, 100)
-                _connectedDevice.value = _connectedDevice.value?.copy(batteryLevel = battery)
+                setBatteryLevel(battery, simulated = false)
                 Log.i(TAG, "Parsed REAL Battery Level: $battery%")
             }
 
@@ -1942,18 +1949,21 @@ class HBandBleManager(
         currentPatientId = id
     }
 
-    fun setBatteryLevel(level: Int) {
-        val clampedLevel = level.coerceIn(1, 100)
-        _connectedDevice.value = _connectedDevice.value?.copy(batteryLevel = clampedLevel)
-            ?: HBandDevice(batteryLevel = clampedLevel)
+    fun setBatteryLevel(level: Int?, simulated: Boolean = false) {
+        val current = _connectedDevice.value ?: return
+        val clamped = level?.takeIf { it in 0..100 }
+        _connectedDevice.value = current.copy(
+            batteryLevel = clamped,
+            batteryIsSimulated = simulated && clamped != null,
+        )
     }
 
     fun simulateLowBattery() {
-        setBatteryLevel(14)
+        setBatteryLevel(14, simulated = true)
     }
 
     fun rechargeBattery() {
-        setBatteryLevel(98)
+        setBatteryLevel(98, simulated = true)
     }
 
     @SuppressLint("MissingPermission")
@@ -2318,8 +2328,9 @@ class HBandBleManager(
                 val extras = sync.readHandshakeExtras(
                     caps = caps,
                     wearEnabled = _wearDetectState.value.enabled,
+                    onBattery = { setBatteryLevel(it, simulated = false) },
                 )
-                extras.batteryPercent?.let { setBatteryLevel(it) }
+                extras.batteryPercent?.let { setBatteryLevel(it, simulated = false) }
                 extras.steps?.let { currentSteps = it }
                 extras.calories?.let { currentCalories = it }
                 extras.distanceMeters?.let { currentDistance = it }
@@ -2431,6 +2442,50 @@ class HBandBleManager(
         } else {
             "Histórico Veepoo: ${parts.joinToString(", ")}."
         }
+    }
+
+    private fun liveScanBatteryLevel(isCurrent: Boolean): Int? {
+        val current = _connectedDevice.value
+        if (!isCurrent || current == null || current.batteryIsSimulated) return null
+        return current.batteryLevel
+    }
+
+    private fun markDeviceDisconnected() {
+        cancelSdkBatteryPolling()
+        _connectedDevice.value = _connectedDevice.value?.withUnknownBattery(connected = false)
+    }
+
+    private fun cancelSdkBatteryPolling() {
+        batteryPollJob?.cancel()
+        batteryPollJob = null
+    }
+
+    private fun startSdkBatteryPolling() {
+        if (!isVeepooConnection || userRequestedDisconnect) return
+        batteryPollJob?.cancel()
+        batteryPollJob = scope.launch(Dispatchers.Main) {
+            while (true) {
+                delay(SDK_BATTERY_POLL_MS)
+                if (userRequestedDisconnect || !_isHardwareConnected.value) return@launch
+                refreshSdkBattery()
+            }
+        }
+    }
+
+    private fun refreshSdkBattery() {
+        if (!isVeepooConnection || userRequestedDisconnect) return
+        vpManager.readBattery(
+            IBleWriteResponse { },
+            IBatteryDataListener { data ->
+                val percent = VeepooBatteryMapper.fromSdk(data)
+                if (percent != null) {
+                    setBatteryLevel(percent, simulated = false)
+                    Log.i(TAG, "SDK battery: $percent%")
+                } else {
+                    Log.w(TAG, "SDK battery unmapped: $data")
+                }
+            },
+        )
     }
 
     private fun historyClient(): VeepooHistorySync {
