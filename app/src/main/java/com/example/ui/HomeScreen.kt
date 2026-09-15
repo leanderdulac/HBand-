@@ -72,6 +72,7 @@ import com.example.ui.components.JsonPayloadModal
 import com.example.ui.components.QueueInspector
 import com.example.ui.components.TelemetryGauges
 import com.example.ui.theme.MinimalBorder
+import com.example.data.hband.VeepooSessionGate
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -137,6 +138,11 @@ fun HomeScreen(
 
     val snackbarHostState = remember { SnackbarHostState() }
     var selectedTab by remember { mutableIntStateOf(0) }
+    val p1ActionsEnabled = VeepooSessionGate.actionsEnabled(
+        hardwareConnected = isHardwareConnected,
+        connectedMac = connectedDevice?.macAddress,
+        telemetry = latestTelemetry,
+    )
 
     activeShareData?.let { shareData ->
         com.example.ui.components.ShareProgressDialog(
@@ -368,6 +374,7 @@ fun HomeScreen(
                         onGenerateShareData = { activeShareData = it },
                         capabilities = deviceCapabilities,
                         hardwareConnected = isHardwareConnected,
+                        actionsEnabled = p1ActionsEnabled,
                         ecgState = ecgState,
                         glucoseState = glucoseState,
                         bloodComponentState = bloodComponentState,
@@ -421,7 +428,12 @@ fun HomeScreen(
                         onClearSynced = { viewModel.clearSynced() },
                         onClearAll = { viewModel.clearAll() },
                         onInspectItem = { viewModel.selectItemForPreview(it) },
-                        onRefreshWorkManager = { viewModel.triggerWorkManagerSync() }
+                        onRefreshWorkManager = { viewModel.triggerWorkManagerSync() },
+                        p1LocationHint = if (deviceCapabilities.hasAdvancedDetect) {
+                            VeepooSessionGate.FILA_P1_LOCATION_HINT
+                        } else {
+                            null
+                        },
                     )
 
                     4 -> SettingsTab(
@@ -449,6 +461,7 @@ fun HomeScreen(
                         wearDetectState = wearDetectState,
                         historySyncState = historySyncState,
                         hardwareConnected = isHardwareConnected,
+                        actionsEnabled = p1ActionsEnabled,
                         onAutoMeasureChange = { viewModel.setBandAutoMeasure(it) },
                         onSpo2AutoChange = { viewModel.setBandSpo2AutoDetect(it) },
                         onWearDetectChange = { viewModel.setBandWearDetect(it) },
@@ -527,6 +540,7 @@ private fun DashboardTab(
     onGenerateShareData: (com.example.util.ShareProgressData) -> Unit = {},
     capabilities: com.example.data.hband.DeviceCapabilities = com.example.data.hband.DeviceCapabilities(),
     hardwareConnected: Boolean = false,
+    actionsEnabled: Boolean = hardwareConnected,
     ecgState: com.example.data.hband.DetectSessionUiState = com.example.data.hband.DetectSessionUiState(),
     glucoseState: com.example.data.hband.DetectSessionUiState = com.example.data.hband.DetectSessionUiState(),
     bloodComponentState: com.example.data.hband.DetectSessionUiState = com.example.data.hband.DetectSessionUiState(),
@@ -581,24 +595,12 @@ private fun DashboardTab(
             onRechargeBattery = onRechargeBattery
         )
 
-        com.example.ui.components.GeminiHealthInsightCard(
-            insightText = geminiInsightText,
-            isLoading = isGeneratingGeminiInsight,
-            onRefreshInsight = onRefreshGeminiInsight,
-            modifier = Modifier.fillMaxWidth()
-        )
-
-        com.example.ui.components.LowBatteryWarningCard(
-            device = connectedDevice,
-            onRechargeBattery = onRechargeBattery,
-            modifier = Modifier.fillMaxWidth()
-        )
-
         TelemetryGauges(telemetry = latestTelemetry)
 
         com.example.ui.components.AdvancedDetectCard(
             capabilities = capabilities,
             hardwareConnected = hardwareConnected,
+            actionsEnabled = actionsEnabled,
             ecg = ecgState,
             glucose = glucoseState,
             bloodComponent = bloodComponentState,
@@ -621,6 +623,19 @@ private fun DashboardTab(
             onStopFatigue = onStopFatigue,
             onStartBreath = onStartBreath,
             onStopBreath = onStopBreath,
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        com.example.ui.components.GeminiHealthInsightCard(
+            insightText = geminiInsightText,
+            isLoading = isGeneratingGeminiInsight,
+            onRefreshInsight = onRefreshGeminiInsight,
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        com.example.ui.components.LowBatteryWarningCard(
+            device = connectedDevice,
+            onRechargeBattery = onRechargeBattery,
             modifier = Modifier.fillMaxWidth()
         )
 

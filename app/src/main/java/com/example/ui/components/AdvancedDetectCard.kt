@@ -40,12 +40,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.data.hband.DetectSessionUiState
 import com.example.data.hband.DeviceCapabilities
+import com.example.data.hband.VeepooSessionGate
 import com.example.ui.theme.MinimalBorder
 
 @Composable
 fun AdvancedDetectCard(
     capabilities: DeviceCapabilities,
     hardwareConnected: Boolean,
+    actionsEnabled: Boolean = hardwareConnected,
     ecg: DetectSessionUiState,
     glucose: DetectSessionUiState,
     bloodComponent: DetectSessionUiState,
@@ -111,11 +113,28 @@ fun AdvancedDetectCard(
                 }
             }
 
+            if (!hardwareConnected) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Color(0xFFFFF4E5))
+                        .padding(12.dp)
+                        .testTag("advanced_detect_reconnect_hint")
+                ) {
+                    Text(
+                        text = VeepooSessionGate.hintWhenDisconnected(actionsEnabled),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color(0xFF9A3412)
+                    )
+                }
+            }
+
             if (ecg.supported) {
                 DetectActionBlock(
                     title = "ECG",
                     state = ecg,
-                    connected = hardwareConnected,
+                    connected = actionsEnabled,
                     startLabel = "Iniciar ECG",
                     stopLabel = "Parar ECG",
                     extraLabel = "Ler ECG gravado",
@@ -130,7 +149,7 @@ fun AdvancedDetectCard(
                 DetectActionBlock(
                     title = "Glicose",
                     state = glucose,
-                    connected = hardwareConnected,
+                    connected = actionsEnabled,
                     startLabel = "Medir glicose",
                     stopLabel = "Parar glicose",
                     testTag = "glucose",
@@ -142,7 +161,7 @@ fun AdvancedDetectCard(
                 DetectActionBlock(
                     title = "Componentes sanguíneos",
                     state = bloodComponent,
-                    connected = hardwareConnected,
+                    connected = actionsEnabled,
                     startLabel = "Medir sangue",
                     stopLabel = "Parar",
                     testTag = "blood_component",
@@ -154,7 +173,7 @@ fun AdvancedDetectCard(
                 DetectActionBlock(
                     title = "Composição corporal",
                     state = bodyComponent,
-                    connected = hardwareConnected,
+                    connected = actionsEnabled,
                     startLabel = "Medir corpo",
                     stopLabel = "Parar",
                     testTag = "body_component",
@@ -166,7 +185,7 @@ fun AdvancedDetectCard(
                 DetectActionBlock(
                     title = "Emoção",
                     state = emotion,
-                    connected = hardwareConnected,
+                    connected = actionsEnabled,
                     startLabel = "Medir emoção",
                     stopLabel = "Parar",
                     testTag = "emotion",
@@ -178,7 +197,7 @@ fun AdvancedDetectCard(
                 DetectActionBlock(
                     title = "Fadiga",
                     state = fatigue,
-                    connected = hardwareConnected,
+                    connected = actionsEnabled,
                     startLabel = "Medir fadiga",
                     stopLabel = "Parar",
                     testTag = "fatigue",
@@ -190,7 +209,7 @@ fun AdvancedDetectCard(
                 DetectActionBlock(
                     title = "Respiração",
                     state = breath,
-                    connected = hardwareConnected,
+                    connected = actionsEnabled,
                     startLabel = "Medir respiração",
                     stopLabel = "Parar",
                     testTag = "breath",

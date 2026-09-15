@@ -45,6 +45,7 @@ import com.example.data.hband.HistorySyncUiState
 import com.example.data.hband.LongSeatUiState
 import com.example.data.hband.NightTurnUiState
 import com.example.data.hband.WearDetectUiState
+import com.example.data.hband.VeepooSessionGate
 import com.example.ui.theme.MinimalBorder
 
 @Composable
@@ -54,6 +55,7 @@ fun BandSdkSettingsCard(
     wearDetect: WearDetectUiState,
     historySync: HistorySyncUiState,
     hardwareConnected: Boolean,
+    actionsEnabled: Boolean = hardwareConnected,
     onAutoMeasureChange: (Boolean) -> Unit,
     onSpo2AutoChange: (Boolean) -> Unit,
     onWearDetectChange: (Boolean) -> Unit,
@@ -123,6 +125,23 @@ fun BandSdkSettingsCard(
                 color = Color(0xFF44474E),
                 modifier = Modifier.testTag("band_capability_summary")
             )
+
+            if (capabilities.probed && !hardwareConnected) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Color(0xFFFFF4E5))
+                        .padding(12.dp)
+                        .testTag("band_sdk_reconnect_hint")
+                ) {
+                    Text(
+                        text = VeepooSessionGate.hintWhenDisconnected(actionsEnabled),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color(0xFF9A3412)
+                    )
+                }
+            }
 
             SettingToggleRow(
                 title = "Medição automática (Origin contínuo)",
@@ -197,7 +216,7 @@ fun BandSdkSettingsCard(
 
             Button(
                 onClick = onSyncHistory,
-                enabled = hardwareConnected && !historySync.isRunning,
+                enabled = actionsEnabled && !historySync.isRunning,
                 shape = RoundedCornerShape(18.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00639B)),
                 modifier = Modifier
@@ -215,7 +234,7 @@ fun BandSdkSettingsCard(
                     title = "Alarme da pulseira",
                     subtitle = alarm.summary.ifBlank { "readAlarm2 / addAlarm2" },
                     checked = alarm.enabled,
-                    enabled = hardwareConnected,
+                    enabled = actionsEnabled,
                     testTag = "alarm_switch",
                     onCheckedChange = onAlarmChange,
                 )
@@ -225,7 +244,7 @@ fun BandSdkSettingsCard(
                     title = "Alerta de FC na pulseira",
                     subtitle = heartWarning.summary.ifBlank { "settingHeartWarning / readHeartWarning" },
                     checked = heartWarning.enabled,
-                    enabled = hardwareConnected,
+                    enabled = actionsEnabled,
                     testTag = "heart_warning_switch",
                     onCheckedChange = onHeartWarningChange,
                 )
@@ -235,7 +254,7 @@ fun BandSdkSettingsCard(
                     title = "Lembrete de saúde",
                     subtitle = healthRemind.summary.ifBlank { "settingHealthRemind" },
                     checked = healthRemind.enabled,
-                    enabled = hardwareConnected,
+                    enabled = actionsEnabled,
                     testTag = "health_remind_switch",
                     onCheckedChange = onHealthRemindChange,
                 )
@@ -245,7 +264,7 @@ fun BandSdkSettingsCard(
                     title = "Lembrete de sedentarismo",
                     subtitle = longSeat.summary.ifBlank { "settingLongSeat / readLongSeat" },
                     checked = longSeat.enabled,
-                    enabled = hardwareConnected,
+                    enabled = actionsEnabled,
                     testTag = "long_seat_switch",
                     onCheckedChange = onLongSeatChange,
                 )
@@ -255,7 +274,7 @@ fun BandSdkSettingsCard(
                     title = "Virar pulso à noite",
                     subtitle = nightTurn.summary.ifBlank { "settingNightTurnWriste / readNightTurnWriste" },
                     checked = nightTurn.enabled,
-                    enabled = hardwareConnected,
+                    enabled = actionsEnabled,
                     testTag = "night_turn_switch",
                     onCheckedChange = onNightTurnChange,
                 )
@@ -265,7 +284,7 @@ fun BandSdkSettingsCard(
                     title = "Encontrar pulseira",
                     subtitle = findDevice.summary.ifBlank { "settingFindDevice / readFindDevice" },
                     checked = findDevice.enabled,
-                    enabled = hardwareConnected,
+                    enabled = actionsEnabled,
                     testTag = "find_device_switch",
                     onCheckedChange = onFindDeviceChange,
                 )
@@ -277,7 +296,7 @@ fun BandSdkSettingsCard(
                 ) {
                     Button(
                         onClick = onStartFindByPhone,
-                        enabled = hardwareConnected && !findDevice.finding,
+                        enabled = actionsEnabled && !findDevice.finding,
                         shape = RoundedCornerShape(16.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00639B)),
                         modifier = Modifier
@@ -288,7 +307,7 @@ fun BandSdkSettingsCard(
                     }
                     OutlinedButton(
                         onClick = onStopFindByPhone,
-                        enabled = hardwareConnected && findDevice.finding,
+                        enabled = actionsEnabled && findDevice.finding,
                         shape = RoundedCornerShape(16.dp),
                         modifier = Modifier
                             .weight(1f)

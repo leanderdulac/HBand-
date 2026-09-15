@@ -72,6 +72,7 @@ fun QueueInspector(
     onClearAll: () -> Unit,
     onInspectItem: (IngestQueueEntity) -> Unit,
     onRefreshWorkManager: () -> Unit,
+    p1LocationHint: String? = null,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -80,6 +81,23 @@ fun QueueInspector(
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
+        if (!p1LocationHint.isNullOrBlank()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Color(0xFFE0F2FE))
+                    .padding(12.dp)
+                    .testTag("queue_p1_location_hint")
+            ) {
+                Text(
+                    text = p1LocationHint,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color(0xFF00639B)
+                )
+            }
+        }
+
         // Status Summary Cards
         Row(
             modifier = Modifier.fillMaxWidth(),
