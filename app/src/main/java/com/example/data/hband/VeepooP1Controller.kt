@@ -104,9 +104,14 @@ class VeepooP1Controller(
         multiLead: Boolean,
         onState: (DetectSessionUiState) -> Unit,
         onSample: (AdvancedMeasurementEntity) -> Unit,
-    ) {
+    ): Boolean {
+        if (!VeepooEcgNative.ensureLoaded()) {
+            onState(VeepooEcgNative.uiError())
+            return false
+        }
         val waveform = mutableListOf<Int>()
-        if (multiLead) {
+        return try {
+            if (multiLead) {
             val listener = object : IMultiEcgDetectListener {
                 override fun onEcgDetectPreStart(info: MultiEcgPreInfo) {
                     onState(DetectSessionUiState(supported = true, running = true, lastSummary = "ECG multi-lead iniciando"))
@@ -235,6 +240,22 @@ class VeepooP1Controller(
             vpManager.startDetectECG(inukerWrite, true, listener)
         }
         onState(DetectSessionUiState(supported = true, running = true, lastSummary = "Iniciando ECG…"))
+            true
+        } catch (error: UnsatisfiedLinkError) {
+            Log.e(TAG, "ECG JNI missing: ${error.message}", error)
+            onState(VeepooEcgNative.uiError(error))
+            false
+        } catch (error: Exception) {
+            Log.e(TAG, "ECG start failed: ${error.message}", error)
+            onState(
+                DetectSessionUiState(
+                    supported = true,
+                    running = false,
+                    lastError = error.message?.takeIf { it.isNotBlank() } ?: VeepooEcgNative.MISSING_LIB_HINT,
+                ),
+            )
+            false
+        }
     }
 
     fun stopEcg() {

@@ -4,6 +4,7 @@ import android.app.Application
 import android.util.Log
 import com.example.data.hband.HBandBleManager
 import com.example.data.hband.HBandBleService
+import com.example.data.hband.VeepooEcgNative
 import com.example.data.local.AppDatabase
 import com.example.data.remote.RetrofitClient
 import com.example.data.repository.WearableRepository
@@ -23,6 +24,8 @@ class HBandHealthSyncApp : Application() {
         super.onCreate()
         // Native SQLCipher MUST be loaded before any Room / SupportOpenHelperFactory open.
         AppDatabase.loadSqlCipherNativeLibrary()
+        // ECG JNI (`JNIChange` → libnative-lib.so) is missing from vpprotocol AAR.
+        VeepooEcgNative.loadOnce()
         RetrofitClient.initialize(this)
         val db = AppDatabase.getDatabase(this)
         val historyRepository = WearableRepository(

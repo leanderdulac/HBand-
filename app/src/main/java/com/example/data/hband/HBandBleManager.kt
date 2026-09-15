@@ -1881,12 +1881,15 @@ class HBandBleManager(
     }
 
     fun startEcgDetect() = startGatedDetect(_capabilities.value.isSupportEcg, _ecgState) {
-        p1Controller.startEcg(
+        val started = p1Controller.startEcg(
             currentConnectedMac(),
             _capabilities.value.isSupportMultiLeadEcg,
             onDetectState(_ecgState),
             ::publishAdvancedSample,
         )
+        if (!started) {
+            mainHandler.post { endAdvancedDetect() }
+        }
     }
 
     fun stopEcgDetect() {
