@@ -18,7 +18,7 @@ class VeepooEcgNativeTest {
     }
 
     @Test
-    fun `preload never throws when the .so is absent on the test host`() {
+    fun `preload never throws when native-lib is absent on the test host`() {
         val loaded = VeepooEcgNative.loadOnce()
         assertFalse(loaded)
         assertFalse(VeepooEcgNative.ensureLoaded())

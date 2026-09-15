@@ -26,14 +26,16 @@ object VeepooEcgNative {
             return try {
                 System.loadLibrary(LIBRARY)
                 isLoaded = true
-                Log.i(TAG, "Loaded $LIBRARY")
+                runCatching { Log.i(TAG, "Loaded $LIBRARY") }
                 true
             } catch (error: UnsatisfiedLinkError) {
                 isLoaded = false
-                if (isRobolectricRuntime()) {
-                    Log.w(TAG, "native-lib not available in unit tests")
-                } else {
-                    Log.e(TAG, "Failed to preload $LIBRARY: ${error.message}")
+                runCatching {
+                    if (isRobolectricRuntime()) {
+                        Log.w(TAG, "native-lib not available in unit tests")
+                    } else {
+                        Log.e(TAG, "Failed to preload $LIBRARY: ${error.message}")
+                    }
                 }
                 false
             }
