@@ -257,6 +257,12 @@ class HBandBleManager(
     private var postHandshakeJob: Job? = null
     private var lastKnownWorn: Boolean? = null
     private var advancedDetectActive = false
+    private var pwdConfirmAttempt = 0
+    private var pwdConfirmGeneration = 0
+    private var passwordHandshakeSucceeded = false
+    private var passwordConfirmInFlight = false
+    private var pendingPwdTimeout: Runnable? = null
+    private var personInfoFallback: Runnable? = null
 
     // RR intervals cache for real HRV calculation (RMSSD)
     private val rrIntervals = LinkedList<Int>()
@@ -353,7 +359,7 @@ class HBandBleManager(
     }
 
     fun reconnectLastDevice() {
-        if (userRequestedDisconnect || _isHardwareConnected.value) return
+        if (userRequestedDisconnect || _isHardwareConnected.value || hasLiveHardwareSession()) return
         val mac = prefs.getString(PREF_LAST_MAC, null)?.trim().orEmpty()
         if (mac.isEmpty() || !BluetoothAdapter.checkBluetoothAddress(mac)) return
         val name = prefs.getString(PREF_LAST_NAME, null)?.takeIf { it.isNotBlank() } ?: "VE30"
@@ -605,8 +611,24 @@ class HBandBleManager(
      */
     @SuppressLint("MissingPermission")
     private fun connectDeviceViaVeepooSdk(device: HBandDevice) {
-        if (isConnectingVeepoo) {
-            Log.d(TAG, "Conexão Veepoo já em andamento, ignorando toque duplicado em Conectar.")
+        val liveSession = hasLiveHardwareSession()
+        if (
+            VeepooPasswordHandshake.shouldSkipDuplicateConnect(
+                connecting = isConnectingVeepoo,
+                liveSession = liveSession,
+                notifyUp = _isHardwareConnected.value,
+                confirmInFlight = passwordConfirmInFlight,
+            )
+        ) {
+            Log.i(
+                TAG,
+                "VE30 senha: connect ignorado (connecting=$isConnectingVeepoo live=$liveSession " +
+                    "notify=${_isHardwareConnected.value} confirmInFlight=$passwordConfirmInFlight)",
+            )
+            cancelScheduledReconnect()
+            if (!passwordHandshakeSucceeded && _isHardwareConnected.value && !passwordConfirmInFlight) {
+                confirmVeepooPassword(isRetry = false)
+            }
             return
         }
         isConnectingVeepoo = true
@@ -614,6 +636,11 @@ class HBandBleManager(
         isSyncingPersonInfo = false
         hasStartedVeepooSensors = false
         advancedDetectActive = false
+        passwordHandshakeSucceeded = false
+        passwordConfirmInFlight = false
+        pwdConfirmAttempt = 0
+        cancelPendingPwdTimeout()
+        cancelPersonInfoFallback()
         p1Controller.stopAllDetect()
         cancelLiveLinkWatchdog()
         cancelHistorySync()
@@ -621,6 +648,9 @@ class HBandBleManager(
         ppgStageGeneration++
         stopScanning()
         resetBiometricsToZero()
+        runCatching {
+            vpManager.setConnectionConfirmTimeout(VeepooPasswordHandshake.SDK_CONFIRM_TIMEOUT_SEC)
+        }
 
         val isValidMac = try {
             BluetoothAdapter.checkBluetoothAddress(device.macAddress)
@@ -649,22 +679,26 @@ class HBandBleManager(
             device.name,
             IConnectResponse { code, _, _ ->
                 if (code != Constants.REQUEST_SUCCESS) {
-                    Log.e(TAG, "Falha ao conectar via Veepoo SDK (code=$code)")
+                    Log.e(TAG, "VE30 senha: connect GATT falhou (code=$code)")
                     isConnectingVeepoo = false
+                    passwordConfirmInFlight = false
                     _sessionMessage.value = "Falha ao conectar ao VE30 (código $code)."
                     scheduleReconnect(device.macAddress, device.name)
                 }
             },
             INotifyResponse { state ->
                 if (state == Constants.REQUEST_SUCCESS) {
+                    Log.i(TAG, "VE30 senha: notify GATT OK — enviando confirmDevicePwd")
                     _isHardwareConnected.value = true
                     reconnectAttempt = 0
+                    cancelScheduledReconnect()
                     _connectedDevice.value = _connectedDevice.value?.copy(isConnected = true)
                     persistLastDevice(_connectedDevice.value ?: device)
                     confirmVeepooPassword()
                 } else {
-                    Log.e(TAG, "Falha ao ativar notificações Veepoo (state=$state)")
+                    Log.e(TAG, "VE30 senha: notify GATT falhou (state=$state)")
                     isConnectingVeepoo = false
+                    passwordConfirmInFlight = false
                     _sessionMessage.value = "Falha ao ativar notificações do VE30."
                     scheduleReconnect(device.macAddress, device.name)
                 }
@@ -672,28 +706,73 @@ class HBandBleManager(
         )
     }
 
-    private fun confirmVeepooPassword() {
-        Log.i(TAG, "Autenticando senha padrão no VE30...")
+    private fun confirmVeepooPassword(isRetry: Boolean = false) {
+        if (userRequestedDisconnect || passwordHandshakeSucceeded) return
+        if (!isRetry) {
+            pwdConfirmAttempt = 0
+        }
+        if (pwdConfirmAttempt >= VeepooPasswordHandshake.MAX_CONFIRM_ATTEMPTS) {
+            Log.w(TAG, "VE30 senha: confirmDevicePwd não relançado (tentativas esgotadas)")
+            return
+        }
+        pwdConfirmAttempt++
+        val generation = ++pwdConfirmGeneration
+        passwordConfirmInFlight = true
+        Log.i(
+            TAG,
+            "VE30 senha: enviando confirmDevicePwd attempt=$pwdConfirmAttempt/" +
+                "${VeepooPasswordHandshake.MAX_CONFIRM_ATTEMPTS} gen=$generation",
+        )
+        runCatching {
+            vpManager.setConnectionConfirmTimeout(VeepooPasswordHandshake.SDK_CONFIRM_TIMEOUT_SEC)
+        }
         vpManager.confirmDevicePwd(
             IBleWriteResponse { code ->
+                if (generation != pwdConfirmGeneration) return@IBleWriteResponse
                 if (code != Constants.REQUEST_SUCCESS) {
-                    Log.e(TAG, "Falha ao escrever comando de senha (code=$code)")
+                    Log.e(TAG, "VE30 senha: WRITE_FAIL code=$code attempt=$pwdConfirmAttempt gen=$generation")
+                    _sessionMessage.value = VeepooPasswordHandshake.MSG_WRITE_FAIL
+                    if (!passwordHandshakeSucceeded &&
+                        pwdConfirmAttempt < VeepooPasswordHandshake.MAX_CONFIRM_ATTEMPTS
+                    ) {
+                        mainHandler.postDelayed(
+                            { confirmVeepooPassword(isRetry = true) },
+                            VeepooPasswordHandshake.LATE_CALLBACK_GRACE_MS,
+                        )
+                    }
+                } else {
+                    Log.i(TAG, "VE30 senha: escrita GATT OK attempt=$pwdConfirmAttempt gen=$generation")
                 }
             },
             object : IPwdDataListener {
                 override fun onPwdDataChange(pwdData: PwdData) {
-                    Log.i(TAG, "Senha confirmada no VE30. Nº ${pwdData.deviceNumber} v${pwdData.deviceVersion}")
+                    if (generation != pwdConfirmGeneration) {
+                        Log.d(TAG, "VE30 senha: onPwdDataChange ignorado (gen antiga $generation)")
+                        return
+                    }
+                    val status = pwdData.getmStatus()
+                    Log.i(
+                        TAG,
+                        "VE30 senha: resposta status=$status nº ${pwdData.deviceNumber} " +
+                            "v${pwdData.deviceVersion} attempt=$pwdConfirmAttempt",
+                    )
+                    if (VeepooPasswordHandshake.isPwdAccepted(status?.name)) {
+                        onPasswordConfirmed(pwdData)
+                    } else {
+                        Log.e(TAG, "VE30 senha: CHECK_FAIL status=$status — senha padrão recusada")
+                    }
                 }
 
                 override fun onConnectionConfirmTimeout() {
-                    Log.e(TAG, "Timeout na confirmação de senha do VE30.")
-                    isConnectingVeepoo = false
-                    _isHardwareConnected.value = false
-                    _sessionMessage.value = "Tempo esgotado ao confirmar a senha do VE30. Tente reconectar."
-                    val device = _connectedDevice.value
-                    if (device != null) {
-                        scheduleReconnect(device.macAddress, device.name)
-                    }
+                    Log.w(
+                        TAG,
+                        "VE30 senha: CONFIRM_TIMEOUT gen=$generation attempt=$pwdConfirmAttempt " +
+                            "handshake=$passwordHandshakeSucceeded live=${hasLiveHardwareSession()}",
+                    )
+                    val runnable = Runnable { handlePasswordConfirmTimeout(generation) }
+                    cancelPendingPwdTimeout()
+                    pendingPwdTimeout = runnable
+                    mainHandler.postDelayed(runnable, VeepooPasswordHandshake.LATE_CALLBACK_GRACE_MS)
                 }
             },
             object : IDeviceFuctionDataListener {
@@ -724,12 +803,115 @@ class HBandBleManager(
                 // O app demo oficial só chama syncPersonInfo depois deste callback — usar o
                 // overload de 6 args (sem esse listener) deixava o handshake incompleto no
                 // firmware real, mesmo com onPwdDataChange/onFunctionSupportDataChange OK.
-                Log.i(TAG, "Configurações do VE30 confirmadas: $customSettingData")
+                Log.i(TAG, "VE30 senha: custom settings OK ($customSettingData) — syncPersonInfo")
+                markPasswordHandshakeSucceeded("custom-settings")
                 syncVeepooPersonInfo()
             },
             DEFAULT_VEEPOO_PWD,
             true,
         )
+    }
+
+    private fun onPasswordConfirmed(pwdData: PwdData) {
+        markPasswordHandshakeSucceeded("pwd-data nº ${pwdData.deviceNumber}")
+        _sessionMessage.value = null
+        schedulePersonInfoFallback()
+    }
+
+    private fun markPasswordHandshakeSucceeded(reason: String) {
+        if (userRequestedDisconnect) return
+        passwordHandshakeSucceeded = true
+        passwordConfirmInFlight = false
+        cancelPendingPwdTimeout()
+        cancelScheduledReconnect()
+        cancelLiveLinkWatchdog()
+        runCatching { vpManager.removeConnectionConfirmationTask() }
+        if (!_isHardwareConnected.value) {
+            Log.i(TAG, "VE30 senha: latch hardwareConnected após $reason")
+        }
+        _isHardwareConnected.value = true
+        isConnectingVeepoo = true
+        reconnectAttempt = 0
+        val current = _connectedDevice.value
+        if (current != null && !current.isConnected) {
+            _connectedDevice.value = current.copy(isConnected = true)
+        }
+        Log.i(TAG, "VE30 senha: SUCCESS ($reason)")
+    }
+
+    private fun handlePasswordConfirmTimeout(generation: Int) {
+        if (generation != pwdConfirmGeneration) {
+            Log.i(TAG, "VE30 senha: timeout ignorado (geração antiga $generation≠$pwdConfirmGeneration)")
+            return
+        }
+        if (userRequestedDisconnect) return
+        val liveSession = hasLiveHardwareSession() ||
+            (hasStartedVeepooSensors && lastHardwareReadTime > 0L &&
+                System.currentTimeMillis() - lastHardwareReadTime < LIVE_LINK_STALE_MS)
+        val notifyUp = _isHardwareConnected.value
+        val decision = VeepooPasswordHandshake.onConfirmTimeout(
+            attemptIndex = pwdConfirmAttempt,
+            handshakeSucceeded = passwordHandshakeSucceeded,
+            liveSession = liveSession,
+            notifyUp = notifyUp,
+        )
+        Log.w(
+            TAG,
+            "VE30 senha: timeout decision=${decision.logReason} action=${decision.action} " +
+                "keep=${decision.keepLiveSession} live=$liveSession notify=$notifyUp",
+        )
+        when (decision.action) {
+            VeepooPasswordHandshake.Action.IGNORE -> return
+            VeepooPasswordHandshake.Action.RETRY_CONFIRM -> {
+                decision.sessionMessage?.let { _sessionMessage.value = it }
+                confirmVeepooPassword(isRetry = true)
+            }
+            VeepooPasswordHandshake.Action.KEEP_SESSION -> {
+                passwordConfirmInFlight = false
+                decision.sessionMessage?.let { _sessionMessage.value = it }
+                cancelScheduledReconnect()
+                isConnectingVeepoo = true
+                if (decision.keepLiveSession) {
+                    _isHardwareConnected.value = true
+                }
+                if (!isSyncingPersonInfo && !hasStartedVeepooSensors) {
+                    Log.i(TAG, "VE30 senha: timeout esgotado — syncPersonInfo na sessão GATT viva")
+                    syncVeepooPersonInfo()
+                }
+            }
+            VeepooPasswordHandshake.Action.RECONNECT -> {
+                passwordConfirmInFlight = false
+                isConnectingVeepoo = false
+                _isHardwareConnected.value = false
+                _sessionMessage.value = decision.sessionMessage
+                val device = _connectedDevice.value
+                if (device != null) {
+                    scheduleReconnect(device.macAddress, device.name)
+                }
+            }
+        }
+    }
+
+    private fun cancelPendingPwdTimeout() {
+        pendingPwdTimeout?.let { mainHandler.removeCallbacks(it) }
+        pendingPwdTimeout = null
+    }
+
+    private fun cancelPersonInfoFallback() {
+        personInfoFallback?.let { mainHandler.removeCallbacks(it) }
+        personInfoFallback = null
+    }
+
+    private fun schedulePersonInfoFallback() {
+        cancelPersonInfoFallback()
+        val runnable = Runnable {
+            if (userRequestedDisconnect || isSyncingPersonInfo) return@Runnable
+            if (!passwordHandshakeSucceeded) return@Runnable
+            Log.i(TAG, "VE30 senha: fallback syncPersonInfo (custom settings atrasado)")
+            syncVeepooPersonInfo()
+        }
+        personInfoFallback = runnable
+        mainHandler.postDelayed(runnable, VeepooPasswordHandshake.PERSON_INFO_FALLBACK_MS)
     }
 
     private fun syncVeepooPersonInfo() {
@@ -738,6 +920,7 @@ class HBandBleManager(
             return
         }
         isSyncingPersonInfo = true
+        cancelPersonInfoFallback()
         Log.i(TAG, "Sincronizando perfil biométrico com o VE30...")
         vpManager.syncPersonInfo(
             IBleWriteResponse { code ->
@@ -748,9 +931,11 @@ class HBandBleManager(
             IPersonInfoDataListener { status ->
                 if (status == EOprateStauts.OPRATE_SUCCESS) {
                     Log.i(TAG, "VE30 handshake OK — probe + histórico P0, depois sensores ao vivo.")
+                    markPasswordHandshakeSucceeded("syncPersonInfo")
                     startPostHandshakeSync()
                 } else {
                     Log.e(TAG, "Falha ao sincronizar perfil biométrico: $status")
+                    isSyncingPersonInfo = false
                 }
             },
             PersonInfoData(
@@ -1067,7 +1252,7 @@ class HBandBleManager(
     private fun scheduleReconnect(address: String, name: String) {
         if (userRequestedDisconnect || !isAutoReconnectEnabled) return
         if (address.isBlank() || !BluetoothAdapter.checkBluetoothAddress(address)) return
-        if (_isHardwareConnected.value) return
+        if (_isHardwareConnected.value || hasLiveHardwareSession()) return
         if (reconnectAttempt >= MAX_RECONNECT_ATTEMPTS) {
             _sessionMessage.value = "Não foi possível reconectar à pulseira após várias tentativas."
             return
@@ -1084,7 +1269,7 @@ class HBandBleManager(
                 "(worn=$lastKnownWorn wearDetect=${_wearDetectState.value.enabled})",
         )
         val runnable = Runnable {
-            if (userRequestedDisconnect || _isHardwareConnected.value) return@Runnable
+            if (userRequestedDisconnect || _isHardwareConnected.value || hasLiveHardwareSession()) return@Runnable
             connectDevice(
                 HBandDevice(
                     deviceId = address,
@@ -1104,6 +1289,8 @@ class HBandBleManager(
         userRequestedDisconnect = true
         cancelScheduledReconnect()
         cancelLiveLinkWatchdog()
+        cancelPendingPwdTimeout()
+        cancelPersonInfoFallback()
         cancelHistorySync()
         p1Controller.stopAllDetect()
         advancedDetectActive = false
@@ -1112,6 +1299,9 @@ class HBandBleManager(
         isConnectingVeepoo = false
         isSyncingPersonInfo = false
         hasStartedVeepooSensors = false
+        passwordHandshakeSucceeded = false
+        passwordConfirmInFlight = false
+        pwdConfirmAttempt = 0
         if (isVeepooConnection) {
             vpManager.disconnectWatch(IBleWriteResponse {})
         } else {
