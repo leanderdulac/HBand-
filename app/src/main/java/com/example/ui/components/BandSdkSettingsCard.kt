@@ -23,6 +23,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
@@ -34,9 +35,15 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.example.data.hband.AlarmUiState
 import com.example.data.hband.AutoMeasureUiState
 import com.example.data.hband.DeviceCapabilities
+import com.example.data.hband.FindDeviceUiState
+import com.example.data.hband.HealthRemindUiState
+import com.example.data.hband.HeartWarningUiState
 import com.example.data.hband.HistorySyncUiState
+import com.example.data.hband.LongSeatUiState
+import com.example.data.hband.NightTurnUiState
 import com.example.data.hband.WearDetectUiState
 import com.example.ui.theme.MinimalBorder
 
@@ -51,6 +58,20 @@ fun BandSdkSettingsCard(
     onSpo2AutoChange: (Boolean) -> Unit,
     onWearDetectChange: (Boolean) -> Unit,
     onSyncHistory: () -> Unit,
+    alarm: AlarmUiState = AlarmUiState(),
+    heartWarning: HeartWarningUiState = HeartWarningUiState(),
+    longSeat: LongSeatUiState = LongSeatUiState(),
+    nightTurn: NightTurnUiState = NightTurnUiState(),
+    findDevice: FindDeviceUiState = FindDeviceUiState(),
+    healthRemind: HealthRemindUiState = HealthRemindUiState(),
+    onAlarmChange: (Boolean) -> Unit = {},
+    onHeartWarningChange: (Boolean) -> Unit = {},
+    onLongSeatChange: (Boolean) -> Unit = {},
+    onNightTurnChange: (Boolean) -> Unit = {},
+    onFindDeviceChange: (Boolean) -> Unit = {},
+    onStartFindByPhone: () -> Unit = {},
+    onStopFindByPhone: () -> Unit = {},
+    onHealthRemindChange: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     Card(
@@ -80,7 +101,7 @@ fun BandSdkSettingsCard(
                 Spacer(modifier = Modifier.width(12.dp))
                 Column {
                     Text(
-                        text = "Pulseira Veepoo (P0)",
+                        text = "Pulseira Veepoo (P0+P1)",
                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                         color = Color(0xFF191C1E)
                     )
@@ -188,6 +209,95 @@ fun BandSdkSettingsCard(
                     style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
                 )
             }
+
+            if (alarm.supported) {
+                SettingToggleRow(
+                    title = "Alarme da pulseira",
+                    subtitle = alarm.summary.ifBlank { "readAlarm2 / addAlarm2" },
+                    checked = alarm.enabled,
+                    enabled = hardwareConnected,
+                    testTag = "alarm_switch",
+                    onCheckedChange = onAlarmChange,
+                )
+            }
+            if (heartWarning.supported) {
+                SettingToggleRow(
+                    title = "Alerta de FC na pulseira",
+                    subtitle = heartWarning.summary.ifBlank { "settingHeartWarning / readHeartWarning" },
+                    checked = heartWarning.enabled,
+                    enabled = hardwareConnected,
+                    testTag = "heart_warning_switch",
+                    onCheckedChange = onHeartWarningChange,
+                )
+            }
+            if (healthRemind.supported) {
+                SettingToggleRow(
+                    title = "Lembrete de saúde",
+                    subtitle = healthRemind.summary.ifBlank { "settingHealthRemind" },
+                    checked = healthRemind.enabled,
+                    enabled = hardwareConnected,
+                    testTag = "health_remind_switch",
+                    onCheckedChange = onHealthRemindChange,
+                )
+            }
+            if (longSeat.supported) {
+                SettingToggleRow(
+                    title = "Lembrete de sedentarismo",
+                    subtitle = longSeat.summary.ifBlank { "settingLongSeat / readLongSeat" },
+                    checked = longSeat.enabled,
+                    enabled = hardwareConnected,
+                    testTag = "long_seat_switch",
+                    onCheckedChange = onLongSeatChange,
+                )
+            }
+            if (nightTurn.supported) {
+                SettingToggleRow(
+                    title = "Virar pulso à noite",
+                    subtitle = nightTurn.summary.ifBlank { "settingNightTurnWriste / readNightTurnWriste" },
+                    checked = nightTurn.enabled,
+                    enabled = hardwareConnected,
+                    testTag = "night_turn_switch",
+                    onCheckedChange = onNightTurnChange,
+                )
+            }
+            if (findDevice.supported) {
+                SettingToggleRow(
+                    title = "Encontrar pulseira",
+                    subtitle = findDevice.summary.ifBlank { "settingFindDevice / readFindDevice" },
+                    checked = findDevice.enabled,
+                    enabled = hardwareConnected,
+                    testTag = "find_device_switch",
+                    onCheckedChange = onFindDeviceChange,
+                )
+            }
+            if (findDevice.findByPhoneSupported) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Button(
+                        onClick = onStartFindByPhone,
+                        enabled = hardwareConnected && !findDevice.finding,
+                        shape = RoundedCornerShape(16.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00639B)),
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("find_by_phone_start")
+                    ) {
+                        Text("Localizar", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold))
+                    }
+                    OutlinedButton(
+                        onClick = onStopFindByPhone,
+                        enabled = hardwareConnected && findDevice.finding,
+                        shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("find_by_phone_stop")
+                    ) {
+                        Text("Parar busca", style = MaterialTheme.typography.labelMedium)
+                    }
+                }
+            }
         }
     }
 }
@@ -242,6 +352,17 @@ private fun capabilityLine(caps: DeviceCapabilities): String {
         if (caps.isSupportHrv) add("HRV")
         if (caps.isSupportBp) add("PA")
         if (caps.isSupportTemperature) add("temp")
+        if (caps.isSupportEcg) add(if (caps.isSupportMultiLeadEcg) "ECG multi-lead" else "ECG")
+        if (caps.isSupportBloodGlucose) add("glicose")
+        if (caps.isSupportBloodComponent) add("sangue")
+        if (caps.isSupportBodyComponent) add("corpo")
+        if (caps.isSupportEmotion) add("emoção")
+        if (caps.isSupportFatigue) add("fadiga")
+        if (caps.isSupportBreath) add("respiração")
+        if (caps.isSupportAlarm2) add("alarme")
+        if (caps.isSupportHeartWarning) add("alerta FC")
+        if (caps.isSupportLongSeat) add("sedentarismo")
+        if (caps.isSupportFindDevice) add("encontrar")
     }
     return flags.joinToString(" • ")
 }

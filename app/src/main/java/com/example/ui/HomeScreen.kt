@@ -104,6 +104,19 @@ fun HomeScreen(
     val wearDetectState by viewModel.wearDetectState.collectAsStateWithLifecycle()
     val historySyncState by viewModel.historySyncState.collectAsStateWithLifecycle()
     val isHardwareConnected by viewModel.isHardwareConnected.collectAsStateWithLifecycle()
+    val ecgState by viewModel.ecgState.collectAsStateWithLifecycle()
+    val glucoseState by viewModel.glucoseState.collectAsStateWithLifecycle()
+    val bloodComponentState by viewModel.bloodComponentState.collectAsStateWithLifecycle()
+    val bodyComponentState by viewModel.bodyComponentState.collectAsStateWithLifecycle()
+    val emotionState by viewModel.emotionState.collectAsStateWithLifecycle()
+    val fatigueState by viewModel.fatigueState.collectAsStateWithLifecycle()
+    val breathDetectState by viewModel.breathDetectState.collectAsStateWithLifecycle()
+    val alarmState by viewModel.alarmState.collectAsStateWithLifecycle()
+    val heartWarningState by viewModel.heartWarningState.collectAsStateWithLifecycle()
+    val longSeatState by viewModel.longSeatState.collectAsStateWithLifecycle()
+    val nightTurnState by viewModel.nightTurnState.collectAsStateWithLifecycle()
+    val findDeviceState by viewModel.findDeviceState.collectAsStateWithLifecycle()
+    val healthRemindState by viewModel.healthRemindState.collectAsStateWithLifecycle()
     var showProfileDialog by remember { mutableStateOf(false) }
 
     val upperHrThreshold by viewModel.upperHrThreshold.collectAsStateWithLifecycle()
@@ -352,7 +365,31 @@ fun HomeScreen(
                         onResetHydration = { viewModel.resetTodayHydration() },
                         totalBreathingSeconds = totalBreathingSeconds,
                         onSaveBreathingSession = { viewModel.saveBreathingSession(it) },
-                        onGenerateShareData = { activeShareData = it }
+                        onGenerateShareData = { activeShareData = it },
+                        capabilities = deviceCapabilities,
+                        hardwareConnected = isHardwareConnected,
+                        ecgState = ecgState,
+                        glucoseState = glucoseState,
+                        bloodComponentState = bloodComponentState,
+                        bodyComponentState = bodyComponentState,
+                        emotionState = emotionState,
+                        fatigueState = fatigueState,
+                        breathDetectState = breathDetectState,
+                        onStartEcg = { viewModel.startEcgDetect() },
+                        onStopEcg = { viewModel.stopEcgDetect() },
+                        onReadEcg = { viewModel.readStoredEcg() },
+                        onStartGlucose = { viewModel.startGlucoseDetect() },
+                        onStopGlucose = { viewModel.stopGlucoseDetect() },
+                        onStartBloodComponent = { viewModel.startBloodComponentDetect() },
+                        onStopBloodComponent = { viewModel.stopBloodComponentDetect() },
+                        onStartBodyComponent = { viewModel.startBodyComponentDetect() },
+                        onStopBodyComponent = { viewModel.stopBodyComponentDetect() },
+                        onStartEmotion = { viewModel.startEmotionDetect() },
+                        onStopEmotion = { viewModel.stopEmotionDetect() },
+                        onStartFatigue = { viewModel.startFatigueDetect() },
+                        onStopFatigue = { viewModel.stopFatigueDetect() },
+                        onStartBreath = { viewModel.startBreathDetect() },
+                        onStopBreath = { viewModel.stopBreathDetect() },
                     )
 
                     1 -> com.example.ui.components.RechartsSensorDashboard(
@@ -415,7 +452,21 @@ fun HomeScreen(
                         onAutoMeasureChange = { viewModel.setBandAutoMeasure(it) },
                         onSpo2AutoChange = { viewModel.setBandSpo2AutoDetect(it) },
                         onWearDetectChange = { viewModel.setBandWearDetect(it) },
-                        onSyncHistory = { viewModel.requestHistorySync() }
+                        onSyncHistory = { viewModel.requestHistorySync() },
+                        alarmState = alarmState,
+                        heartWarningState = heartWarningState,
+                        longSeatState = longSeatState,
+                        nightTurnState = nightTurnState,
+                        findDeviceState = findDeviceState,
+                        healthRemindState = healthRemindState,
+                        onAlarmChange = { viewModel.setBandAlarm(it) },
+                        onHeartWarningChange = { viewModel.setBandHeartWarning(it) },
+                        onLongSeatChange = { viewModel.setBandLongSeat(it) },
+                        onNightTurnChange = { viewModel.setBandNightTurn(it) },
+                        onFindDeviceChange = { viewModel.setBandFindDevice(it) },
+                        onStartFindByPhone = { viewModel.startFindDeviceByPhone() },
+                        onStopFindByPhone = { viewModel.stopFindDeviceByPhone() },
+                        onHealthRemindChange = { viewModel.setBandHealthRemind(it) },
                     )
                 }
             }
@@ -473,7 +524,31 @@ private fun DashboardTab(
     onResetHydration: () -> Unit = {},
     totalBreathingSeconds: Int = 0,
     onSaveBreathingSession: (Int) -> Unit = {},
-    onGenerateShareData: (com.example.util.ShareProgressData) -> Unit = {}
+    onGenerateShareData: (com.example.util.ShareProgressData) -> Unit = {},
+    capabilities: com.example.data.hband.DeviceCapabilities = com.example.data.hband.DeviceCapabilities(),
+    hardwareConnected: Boolean = false,
+    ecgState: com.example.data.hband.DetectSessionUiState = com.example.data.hband.DetectSessionUiState(),
+    glucoseState: com.example.data.hband.DetectSessionUiState = com.example.data.hband.DetectSessionUiState(),
+    bloodComponentState: com.example.data.hband.DetectSessionUiState = com.example.data.hband.DetectSessionUiState(),
+    bodyComponentState: com.example.data.hband.DetectSessionUiState = com.example.data.hband.DetectSessionUiState(),
+    emotionState: com.example.data.hband.DetectSessionUiState = com.example.data.hband.DetectSessionUiState(),
+    fatigueState: com.example.data.hband.DetectSessionUiState = com.example.data.hband.DetectSessionUiState(),
+    breathDetectState: com.example.data.hband.DetectSessionUiState = com.example.data.hband.DetectSessionUiState(),
+    onStartEcg: () -> Unit = {},
+    onStopEcg: () -> Unit = {},
+    onReadEcg: () -> Unit = {},
+    onStartGlucose: () -> Unit = {},
+    onStopGlucose: () -> Unit = {},
+    onStartBloodComponent: () -> Unit = {},
+    onStopBloodComponent: () -> Unit = {},
+    onStartBodyComponent: () -> Unit = {},
+    onStopBodyComponent: () -> Unit = {},
+    onStartEmotion: () -> Unit = {},
+    onStopEmotion: () -> Unit = {},
+    onStartFatigue: () -> Unit = {},
+    onStopFatigue: () -> Unit = {},
+    onStartBreath: () -> Unit = {},
+    onStopBreath: () -> Unit = {},
 ) {
     Column(
         modifier = Modifier
@@ -520,6 +595,34 @@ private fun DashboardTab(
         )
 
         TelemetryGauges(telemetry = latestTelemetry)
+
+        com.example.ui.components.AdvancedDetectCard(
+            capabilities = capabilities,
+            hardwareConnected = hardwareConnected,
+            ecg = ecgState,
+            glucose = glucoseState,
+            bloodComponent = bloodComponentState,
+            bodyComponent = bodyComponentState,
+            emotion = emotionState,
+            fatigue = fatigueState,
+            breath = breathDetectState,
+            onStartEcg = onStartEcg,
+            onStopEcg = onStopEcg,
+            onReadEcg = onReadEcg,
+            onStartGlucose = onStartGlucose,
+            onStopGlucose = onStopGlucose,
+            onStartBloodComponent = onStartBloodComponent,
+            onStopBloodComponent = onStopBloodComponent,
+            onStartBodyComponent = onStartBodyComponent,
+            onStopBodyComponent = onStopBodyComponent,
+            onStartEmotion = onStartEmotion,
+            onStopEmotion = onStopEmotion,
+            onStartFatigue = onStartFatigue,
+            onStopFatigue = onStopFatigue,
+            onStartBreath = onStartBreath,
+            onStopBreath = onStopBreath,
+            modifier = Modifier.fillMaxWidth()
+        )
 
         com.example.ui.components.DailyHealthSummaryCard(
             metrics = sensorMetrics,

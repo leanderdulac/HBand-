@@ -29,16 +29,30 @@ class HBandHealthSyncApp : Application() {
             queueDao = db.ingestQueueDao(),
             sensorMetricDao = db.sensorMetricDao(),
             apiService = RetrofitClient.apiService,
+            advancedMeasurementDao = db.advancedMeasurementDao(),
         )
-        bleManager = HBandBleManager(this, bleScope) { samples ->
-            bleScope.launch(Dispatchers.IO) {
-                try {
-                    historyRepository.persistHistorySamples(samples, bleManager.currentPatientId)
-                } catch (e: Exception) {
-                    Log.e("HBandHealthSyncApp", "Falha ao persistir histórico Veepoo: ${e.message}", e)
+        bleManager = HBandBleManager(
+            this,
+            bleScope,
+            onHistorySamples = { samples ->
+                bleScope.launch(Dispatchers.IO) {
+                    try {
+                        historyRepository.persistHistorySamples(samples, bleManager.currentPatientId)
+                    } catch (e: Exception) {
+                        Log.e("HBandHealthSyncApp", "Falha ao persistir histórico Veepoo: ${e.message}", e)
+                    }
                 }
-            }
-        }
+            },
+            onAdvancedSample = { sample ->
+                bleScope.launch(Dispatchers.IO) {
+                    try {
+                        historyRepository.persistAdvancedSample(sample, bleManager.currentPatientId)
+                    } catch (e: Exception) {
+                        Log.e("HBandHealthSyncApp", "Falha ao persistir medição P1: ${e.message}", e)
+                    }
+                }
+            },
+        )
         HBandWorkScheduler.schedulePeriodicIngest(this)
         HBandBleService.startIfPersistedSession(this)
     }

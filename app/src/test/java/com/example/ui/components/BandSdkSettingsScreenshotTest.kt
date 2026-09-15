@@ -40,6 +40,12 @@ class BandSdkSettingsScreenshotTest {
                         isSupportHrv = true,
                         isSupportHeart = true,
                         isSupportBp = true,
+                        isSupportEcg = true,
+                        isSupportAlarm2 = true,
+                        isSupportHeartWarning = true,
+                        isSupportLongSeat = true,
+                        isSupportFindDevice = true,
+                        isSupportFindDeviceByPhone = true,
                         probed = true,
                     ),
                     autoMeasure = AutoMeasureUiState(
@@ -67,9 +73,34 @@ class BandSdkSettingsScreenshotTest {
                     onSpo2AutoChange = {},
                     onWearDetectChange = {},
                     onSyncHistory = {},
+                    alarm = com.example.data.hband.AlarmUiState(
+                        supported = true,
+                        alarm2 = true,
+                        enabled = true,
+                        hour = 8,
+                        minute = 0,
+                        summary = "08:00 • 1 alarme(s)",
+                    ),
+                    heartWarning = com.example.data.hband.HeartWarningUiState(
+                        supported = true,
+                        enabled = true,
+                        high = 120,
+                        low = 50,
+                        summary = "Alerta 50–120 bpm",
+                    ),
+                    longSeat = com.example.data.hband.LongSeatUiState(
+                        supported = true,
+                        enabled = true,
+                        summary = "Sedentarismo 09:00–18:00",
+                    ),
+                    findDevice = com.example.data.hband.FindDeviceUiState(
+                        supported = true,
+                        findByPhoneSupported = true,
+                        enabled = true,
+                    ),
                 )
             }
         }
-        composeTestRule.onRoot().captureRoboImage(filePath = "src/test/screenshots/band_sdk_settings_p0.png")
+        composeTestRule.onRoot().captureRoboImage(filePath = "src/test/screenshots/band_sdk_settings_p1.png")
     }
 }

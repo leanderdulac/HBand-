@@ -85,6 +85,7 @@ class HBandBleManager(
     private val context: Context,
     private val scope: CoroutineScope,
     private val onHistorySamples: (List<HBandTelemetry>) -> Unit = {},
+    private val onAdvancedSample: (com.example.data.local.AdvancedMeasurementEntity) -> Unit = {},
 ) {
     private val TAG = "HBandBleManager"
 
@@ -140,6 +141,33 @@ class HBandBleManager(
 
     private val _historySyncState = MutableStateFlow(HistorySyncUiState())
     val historySyncState: StateFlow<HistorySyncUiState> = _historySyncState.asStateFlow()
+
+    private val _ecgState = MutableStateFlow(DetectSessionUiState())
+    val ecgState: StateFlow<DetectSessionUiState> = _ecgState.asStateFlow()
+    private val _glucoseState = MutableStateFlow(DetectSessionUiState())
+    val glucoseState: StateFlow<DetectSessionUiState> = _glucoseState.asStateFlow()
+    private val _bloodComponentState = MutableStateFlow(DetectSessionUiState())
+    val bloodComponentState: StateFlow<DetectSessionUiState> = _bloodComponentState.asStateFlow()
+    private val _bodyComponentState = MutableStateFlow(DetectSessionUiState())
+    val bodyComponentState: StateFlow<DetectSessionUiState> = _bodyComponentState.asStateFlow()
+    private val _emotionState = MutableStateFlow(DetectSessionUiState())
+    val emotionState: StateFlow<DetectSessionUiState> = _emotionState.asStateFlow()
+    private val _fatigueState = MutableStateFlow(DetectSessionUiState())
+    val fatigueState: StateFlow<DetectSessionUiState> = _fatigueState.asStateFlow()
+    private val _breathDetectState = MutableStateFlow(DetectSessionUiState())
+    val breathDetectState: StateFlow<DetectSessionUiState> = _breathDetectState.asStateFlow()
+    private val _alarmState = MutableStateFlow(AlarmUiState())
+    val alarmState: StateFlow<AlarmUiState> = _alarmState.asStateFlow()
+    private val _heartWarningState = MutableStateFlow(HeartWarningUiState())
+    val heartWarningState: StateFlow<HeartWarningUiState> = _heartWarningState.asStateFlow()
+    private val _longSeatState = MutableStateFlow(LongSeatUiState())
+    val longSeatState: StateFlow<LongSeatUiState> = _longSeatState.asStateFlow()
+    private val _nightTurnState = MutableStateFlow(NightTurnUiState())
+    val nightTurnState: StateFlow<NightTurnUiState> = _nightTurnState.asStateFlow()
+    private val _findDeviceState = MutableStateFlow(FindDeviceUiState())
+    val findDeviceState: StateFlow<FindDeviceUiState> = _findDeviceState.asStateFlow()
+    private val _healthRemindState = MutableStateFlow(HealthRemindUiState())
+    val healthRemindState: StateFlow<HealthRemindUiState> = _healthRemindState.asStateFlow()
 
     private var userRequestedDisconnect = false
     private var veepooStatusListener: IABleConnectStatusListener? = null
@@ -223,8 +251,10 @@ class HBandBleManager(
     private var lastFunctionSupport: FunctionDeviceSupportData? = null
     private var lastAutoMeasureSettings: List<AutoMeasureData> = emptyList()
     private var historySync: VeepooHistorySync? = null
+    private val p1Controller = VeepooP1Controller(vpManager)
     private var postHandshakeJob: Job? = null
     private var lastKnownWorn: Boolean? = null
+    private var advancedDetectActive = false
 
     // RR intervals cache for real HRV calculation (RMSSD)
     private val rrIntervals = LinkedList<Int>()
@@ -578,6 +608,8 @@ class HBandBleManager(
         isVeepooConnection = true
         isSyncingPersonInfo = false
         hasStartedVeepooSensors = false
+        advancedDetectActive = false
+        p1Controller.stopAllDetect()
         cancelHistorySync()
         _historySyncState.value = HistorySyncUiState()
         ppgStageGeneration++
@@ -663,6 +695,7 @@ class HBandBleManager(
                     lastFunctionSupport = functionSupport
                     val probed = VeepooCapabilityProbe.fromManager(vpManager, functionSupport)
                     _capabilities.value = probed
+                    applyP1CapabilityFlags(probed)
                     Log.i(
                         TAG,
                         "Funções suportadas pelo VE30: days=${probed.historyDays} " +
@@ -755,7 +788,7 @@ class HBandBleManager(
 
     @SuppressLint("MissingPermission")
     private fun runHeartStage() {
-        if (!isConnectingVeepoo) return
+        if (!isConnectingVeepoo || advancedDetectActive) return
         val generation = ++ppgStageGeneration
         val mac = currentConnectedMac()
         val name = currentConnectedName()
@@ -780,7 +813,7 @@ class HBandBleManager(
 
     @SuppressLint("MissingPermission")
     private fun runSpo2Stage() {
-        if (!isConnectingVeepoo) return
+        if (!isConnectingVeepoo || advancedDetectActive) return
         val generation = ++ppgStageGeneration
         val mac = currentConnectedMac()
         val name = currentConnectedName()
@@ -808,7 +841,7 @@ class HBandBleManager(
 
     @SuppressLint("MissingPermission")
     private fun runBpStage() {
-        if (!isConnectingVeepoo) return
+        if (!isConnectingVeepoo || advancedDetectActive) return
         val generation = ++ppgStageGeneration
         val mac = currentConnectedMac()
         val name = currentConnectedName()
@@ -835,7 +868,7 @@ class HBandBleManager(
 
     @SuppressLint("MissingPermission")
     private fun runHrvStage() {
-        if (!isConnectingVeepoo) return
+        if (!isConnectingVeepoo || advancedDetectActive) return
         val generation = ++ppgStageGeneration
         val mac = currentConnectedMac()
         val name = currentConnectedName()
@@ -903,6 +936,8 @@ class HBandBleManager(
                         hasStartedVeepooSensors = false
                         isSyncingPersonInfo = false
                         cancelHistorySync()
+                        p1Controller.stopAllDetect()
+                        advancedDetectActive = false
                         ppgStageGeneration++
                         _isHardwareConnected.value = false
                         _connectedDevice.value = _connectedDevice.value?.copy(isConnected = false)
@@ -962,6 +997,8 @@ class HBandBleManager(
         userRequestedDisconnect = true
         cancelScheduledReconnect()
         cancelHistorySync()
+        p1Controller.stopAllDetect()
+        advancedDetectActive = false
         ppgStageGeneration++
         isConnectingVeepoo = false
         isSyncingPersonInfo = false
@@ -1730,6 +1767,221 @@ class HBandBleManager(
         }
     }
 
+    fun startEcgDetect() = startGatedDetect(_capabilities.value.isSupportEcg, _ecgState) {
+        p1Controller.startEcg(
+            currentConnectedMac(),
+            _capabilities.value.isSupportMultiLeadEcg,
+            onDetectState(_ecgState),
+            ::publishAdvancedSample,
+        )
+    }
+
+    fun stopEcgDetect() {
+        p1Controller.stopEcg()
+        _ecgState.value = _ecgState.value.copy(running = false, lastSummary = "ECG parado")
+        endAdvancedDetect()
+    }
+
+    fun readStoredEcg() {
+        if (!_capabilities.value.isSupportEcg || !_isHardwareConnected.value) return
+        p1Controller.readStoredEcg(
+            currentConnectedMac(),
+            onDetectState(_ecgState),
+            ::publishAdvancedSample,
+        )
+    }
+
+    fun startGlucoseDetect() = startGatedDetect(_capabilities.value.isSupportBloodGlucose, _glucoseState) {
+        p1Controller.startGlucose(currentConnectedMac(), onDetectState(_glucoseState), ::publishAdvancedSample)
+    }
+
+    fun stopGlucoseDetect() {
+        p1Controller.stopGlucose()
+        _glucoseState.value = _glucoseState.value.copy(running = false, lastSummary = "Glicose interrompida")
+        endAdvancedDetect()
+    }
+
+    fun startBloodComponentDetect() = startGatedDetect(_capabilities.value.isSupportBloodComponent, _bloodComponentState) {
+        p1Controller.startBloodComponent(currentConnectedMac(), onDetectState(_bloodComponentState), ::publishAdvancedSample)
+    }
+
+    fun stopBloodComponentDetect() {
+        p1Controller.stopBloodComponent()
+        _bloodComponentState.value = _bloodComponentState.value.copy(running = false)
+        endAdvancedDetect()
+    }
+
+    fun startBodyComponentDetect() = startGatedDetect(_capabilities.value.isSupportBodyComponent, _bodyComponentState) {
+        p1Controller.startBodyComponent(currentConnectedMac(), onDetectState(_bodyComponentState), ::publishAdvancedSample)
+    }
+
+    fun stopBodyComponentDetect() {
+        p1Controller.stopBodyComponent()
+        _bodyComponentState.value = _bodyComponentState.value.copy(running = false)
+        endAdvancedDetect()
+    }
+
+    fun startEmotionDetect() = startGatedDetect(_capabilities.value.isSupportEmotion, _emotionState) {
+        p1Controller.startEmotion(currentConnectedMac(), onDetectState(_emotionState), ::publishAdvancedSample)
+    }
+
+    fun stopEmotionDetect() {
+        p1Controller.stopEmotion()
+        _emotionState.value = _emotionState.value.copy(running = false)
+        endAdvancedDetect()
+    }
+
+    fun startFatigueDetect() = startGatedDetect(_capabilities.value.isSupportFatigue, _fatigueState) {
+        p1Controller.startFatigue(currentConnectedMac(), onDetectState(_fatigueState), ::publishAdvancedSample)
+    }
+
+    fun stopFatigueDetect() {
+        p1Controller.stopFatigue()
+        _fatigueState.value = _fatigueState.value.copy(running = false)
+        endAdvancedDetect()
+    }
+
+    fun startBreathDetect() = startGatedDetect(_capabilities.value.isSupportBreath, _breathDetectState) {
+        p1Controller.startBreath(currentConnectedMac(), onDetectState(_breathDetectState), ::publishAdvancedSample)
+    }
+
+    fun stopBreathDetect() {
+        p1Controller.stopBreath()
+        _breathDetectState.value = _breathDetectState.value.copy(running = false)
+        endAdvancedDetect()
+    }
+
+    fun setBandAlarmEnabled(enabled: Boolean) {
+        if (!_capabilities.value.isSupportAlarm2 && !_capabilities.value.probed) return
+        if (!_isHardwareConnected.value) return
+        p1Controller.setAlarmEnabled(
+            _capabilities.value,
+            enabled,
+            _alarmState.value.hour,
+            _alarmState.value.minute,
+        ) { _alarmState.value = it.copy(supported = true) }
+    }
+
+    fun setHeartWarningEnabled(enabled: Boolean) {
+        if (!_capabilities.value.isSupportHeartWarning || !_isHardwareConnected.value) return
+        p1Controller.setHeartWarning(
+            _heartWarningState.value.high,
+            _heartWarningState.value.low,
+            enabled,
+        ) { _heartWarningState.value = it.copy(supported = true) }
+    }
+
+    fun setLongSeatEnabled(enabled: Boolean) {
+        if (!_capabilities.value.isSupportLongSeat || !_isHardwareConnected.value) return
+        p1Controller.setLongSeat(_longSeatState.value, enabled) { _longSeatState.value = it }
+    }
+
+    fun setNightTurnEnabled(enabled: Boolean) {
+        if (!_capabilities.value.isSupportNightTurnWrist || !_isHardwareConnected.value) return
+        p1Controller.setNightTurn(enabled) { _nightTurnState.value = it.copy(supported = true) }
+    }
+
+    fun setFindDeviceEnabled(enabled: Boolean) {
+        if (!_capabilities.value.isSupportFindDevice || !_isHardwareConnected.value) return
+        p1Controller.setFindDevice(enabled, _findDeviceState.value) { _findDeviceState.value = it }
+    }
+
+    fun startFindDeviceByPhone() {
+        if (!_capabilities.value.isSupportFindDeviceByPhone || !_isHardwareConnected.value) return
+        p1Controller.startFindByPhone { _findDeviceState.value = it.copy(findByPhoneSupported = true) }
+    }
+
+    fun stopFindDeviceByPhone() {
+        p1Controller.stopFindByPhone()
+        _findDeviceState.value = _findDeviceState.value.copy(finding = false, summary = "Busca encerrada")
+    }
+
+    fun setHealthRemindEnabled(enabled: Boolean) {
+        if (!_capabilities.value.isSupportHealthRemind || !_isHardwareConnected.value) return
+        p1Controller.setHealthRemind(enabled) { _healthRemindState.value = it.copy(supported = true) }
+    }
+
+    private fun onDetectState(
+        target: MutableStateFlow<DetectSessionUiState>,
+    ): (DetectSessionUiState) -> Unit = { next ->
+        target.value = next.copy(supported = true)
+        if (!next.running) {
+            mainHandler.post { endAdvancedDetect() }
+        }
+    }
+
+    private fun startGatedDetect(
+        supported: Boolean,
+        state: MutableStateFlow<DetectSessionUiState>,
+        block: () -> Unit,
+    ) {
+        if (!beginAdvancedDetect(supported)) {
+            state.value = state.value.copy(supported = false, lastError = "Não suportado ou desconectado")
+            return
+        }
+        block()
+    }
+
+    private fun beginAdvancedDetect(supported: Boolean): Boolean {
+        if (!supported || !_isHardwareConnected.value || !isVeepooConnection) return false
+        advancedDetectActive = true
+        ppgStageGeneration++
+        runCatching { vpManager.stopDetectHeart(IBleWriteResponse {}) }
+        activeSpo2Listener?.let { runCatching { vpManager.stopDetectSPO2H(IBleWriteResponse {}, it) } }
+        runCatching { vpManager.stopDetectBP(IBleWriteResponse {}, EBPDetectModel.DETECT_MODEL_PUBLIC) }
+        activeHrvListener?.let { runCatching { vpManager.stopDetectHrv(BleWriteResponse {}, it) } }
+        return true
+    }
+
+    private fun endAdvancedDetect() {
+        val stillRunning = _ecgState.value.running || _glucoseState.value.running ||
+            _bloodComponentState.value.running || _bodyComponentState.value.running ||
+            _emotionState.value.running || _fatigueState.value.running || _breathDetectState.value.running
+        if (stillRunning) return
+        advancedDetectActive = false
+        if (!userRequestedDisconnect && isConnectingVeepoo) {
+            hasStartedVeepooSensors = false
+            startVeepooSensors()
+        }
+    }
+
+    private fun publishAdvancedSample(entity: com.example.data.local.AdvancedMeasurementEntity) {
+        onAdvancedSample(entity)
+        if (entity.kind == com.example.data.local.AdvancedMeasurementKind.ECG && entity.numericValue.toInt() in 30..240) {
+            currentHeartRate = entity.numericValue.toInt()
+            if (entity.secondaryValue > 0f) currentHrvScore = entity.secondaryValue.toInt()
+            emitRealTelemetry(currentConnectedMac(), currentConnectedName())
+        }
+    }
+
+    private fun applyP1CapabilityFlags(caps: DeviceCapabilities) {
+        _ecgState.value = _ecgState.value.copy(supported = caps.isSupportEcg)
+        _glucoseState.value = _glucoseState.value.copy(supported = caps.isSupportBloodGlucose)
+        _bloodComponentState.value = _bloodComponentState.value.copy(supported = caps.isSupportBloodComponent)
+        _bodyComponentState.value = _bodyComponentState.value.copy(supported = caps.isSupportBodyComponent)
+        _emotionState.value = _emotionState.value.copy(supported = caps.isSupportEmotion)
+        _fatigueState.value = _fatigueState.value.copy(supported = caps.isSupportFatigue)
+        _breathDetectState.value = _breathDetectState.value.copy(supported = caps.isSupportBreath)
+        _alarmState.value = _alarmState.value.copy(supported = caps.isSupportAlarm2, alarm2 = caps.isSupportAlarm2)
+        _heartWarningState.value = _heartWarningState.value.copy(supported = caps.isSupportHeartWarning)
+        _longSeatState.value = _longSeatState.value.copy(supported = caps.isSupportLongSeat)
+        _nightTurnState.value = _nightTurnState.value.copy(supported = caps.isSupportNightTurnWrist)
+        _findDeviceState.value = _findDeviceState.value.copy(
+            supported = caps.isSupportFindDevice,
+            findByPhoneSupported = caps.isSupportFindDeviceByPhone,
+        )
+        _healthRemindState.value = _healthRemindState.value.copy(supported = caps.isSupportHealthRemind)
+    }
+
+    private fun readP1Settings(caps: DeviceCapabilities) {
+        if (caps.isSupportAlarm2) p1Controller.readAlarms(caps) { _alarmState.value = it }
+        if (caps.isSupportHeartWarning) p1Controller.readHeartWarning { _heartWarningState.value = it.copy(supported = true) }
+        if (caps.isSupportLongSeat) p1Controller.readLongSeat { _longSeatState.value = it }
+        if (caps.isSupportNightTurnWrist) p1Controller.readNightTurn { _nightTurnState.value = it.copy(supported = true) }
+        if (caps.isSupportFindDevice) p1Controller.readFindDevice { _findDeviceState.value = it.copy(findByPhoneSupported = caps.isSupportFindDeviceByPhone) }
+        if (caps.isSupportHealthRemind) p1Controller.readHealthRemind { _healthRemindState.value = it.copy(supported = true) }
+    }
+
     private fun startPostHandshakeSync(includeLiveSensors: Boolean = true) {
         postHandshakeJob?.cancel()
         historySync?.cancelled = true
@@ -1750,6 +2002,7 @@ class HBandBleManager(
                     spo2AutoSupported = caps.isSupportSpo2AutoDetect,
                 )
                 _wearDetectState.value = _wearDetectState.value.copy(supported = caps.isSupportWearDetect)
+                applyP1CapabilityFlags(caps)
 
                 val extras = sync.readHandshakeExtras(
                     caps = caps,
@@ -1769,6 +2022,7 @@ class HBandBleManager(
                         lastResult = wear.checkWearState?.name.orEmpty(),
                     )
                 }
+                readP1Settings(caps)
                 if (currentSteps > 0) {
                     emitRealTelemetry(currentConnectedMac(), currentConnectedName())
                 }
