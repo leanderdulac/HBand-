@@ -38,6 +38,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.example.data.hband.VeepooBatteryMapper
 import com.example.data.model.HBandDevice
 import com.example.ui.theme.MinimalBorder
 
@@ -54,8 +55,10 @@ fun DeviceControlCard(
     onSimulateLowBattery: (() -> Unit)? = null,
     onRechargeBattery: (() -> Unit)? = null
 ) {
-    val batteryLevel = device?.batteryLevel ?: 0
+    val batteryLevel = device?.batteryLevel
+    val batterySimulated = device?.batteryIsSimulated == true
     val (batteryColor, batteryBg) = when {
+        batteryLevel == null -> Pair(Color(0xFF74777F), Color(0xFFF1F4F9))
         batteryLevel <= 20 -> Pair(Color(0xFFD32F2F), Color(0xFFFFEBEE))
         batteryLevel <= 50 -> Pair(Color(0xFFE65100), Color(0xFFFFF3E0))
         else -> Pair(Color(0xFF2E7D32), Color(0xFFE8F5E9))
@@ -131,9 +134,10 @@ fun DeviceControlCard(
                             )
                             Spacer(modifier = Modifier.width(4.dp))
                             Text(
-                                text = "$batteryLevel%",
+                                text = VeepooBatteryMapper.displayLabel(batteryLevel, batterySimulated),
                                 style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                                color = batteryColor
+                                color = batteryColor,
+                                modifier = Modifier.testTag("device_battery_level")
                             )
                         }
                     }
@@ -179,7 +183,19 @@ fun DeviceControlCard(
                 }
 
                 if (onSimulateLowBattery != null && onRechargeBattery != null) {
-                    if (batteryLevel > 20) {
+                    if (batterySimulated && (batteryLevel ?: 100) <= 20) {
+                        OutlinedButton(
+                            onClick = onRechargeBattery,
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("recharge_battery_button"),
+                            shape = RoundedCornerShape(20.dp),
+                            border = BorderStroke(1.dp, Color(0xFF81C784)),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF2E7D32))
+                        ) {
+                            Text("Sim. recarregar 98%", style = MaterialTheme.typography.labelMedium)
+                        }
+                    } else {
                         OutlinedButton(
                             onClick = onSimulateLowBattery,
                             modifier = Modifier
@@ -190,18 +206,6 @@ fun DeviceControlCard(
                             colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFE65100))
                         ) {
                             Text("Simular Bat. Fraca", style = MaterialTheme.typography.labelMedium)
-                        }
-                    } else {
-                        OutlinedButton(
-                            onClick = onRechargeBattery,
-                            modifier = Modifier
-                                .weight(1f)
-                                .testTag("recharge_battery_button"),
-                            shape = RoundedCornerShape(20.dp),
-                            border = BorderStroke(1.dp, Color(0xFF81C784)),
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF2E7D32))
-                        ) {
-                            Text("Recarregar (98%)", style = MaterialTheme.typography.labelMedium)
                         }
                     }
                 }

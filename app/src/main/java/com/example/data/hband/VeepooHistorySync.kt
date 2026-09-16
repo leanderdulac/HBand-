@@ -71,8 +71,10 @@ class VeepooHistorySync(
     suspend fun readHandshakeExtras(
         caps: DeviceCapabilities,
         wearEnabled: Boolean,
+        onBattery: (Int) -> Unit = {},
     ): HandshakeExtras {
         val battery = retrying(times = 2, timeoutMs = SETTINGS_TIMEOUT_MS) { readBattery() }
+        battery?.let(onBattery)
         val sport = retrying(times = 2, timeoutMs = SETTINGS_TIMEOUT_MS) { readSport() }
         val auto = if (caps.isSupportAutoMeasure) {
             retrying(times = 2, timeoutMs = SETTINGS_TIMEOUT_MS) { readAutoMeasure() } ?: emptyList()
@@ -265,12 +267,7 @@ class VeepooHistorySync(
         vpManager.readBattery(
             ackLogger(),
             IBatteryDataListener { data: BatteryData? ->
-                val percent = when {
-                    data == null -> null
-                    data.batteryPercent in 1..100 -> data.batteryPercent
-                    data.batteryLevel in 1..100 -> data.batteryLevel
-                    else -> null
-                }
+                val percent = VeepooBatteryMapper.fromSdk(data)
                 if (percent == null) fail("empty battery") else done(percent)
             },
         )

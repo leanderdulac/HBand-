@@ -66,12 +66,15 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.BuildConfig
 import com.example.ui.components.ApiHeader
 import com.example.ui.components.DeviceControlCard
+import com.example.ui.components.HomeWelcomeHeader
 import com.example.ui.components.JsonPayloadModal
 import com.example.ui.components.QueueInspector
 import com.example.ui.components.TelemetryGauges
 import com.example.ui.theme.MinimalBorder
+import com.example.data.hband.VeepooSessionGate
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -104,6 +107,19 @@ fun HomeScreen(
     val wearDetectState by viewModel.wearDetectState.collectAsStateWithLifecycle()
     val historySyncState by viewModel.historySyncState.collectAsStateWithLifecycle()
     val isHardwareConnected by viewModel.isHardwareConnected.collectAsStateWithLifecycle()
+    val ecgState by viewModel.ecgState.collectAsStateWithLifecycle()
+    val glucoseState by viewModel.glucoseState.collectAsStateWithLifecycle()
+    val bloodComponentState by viewModel.bloodComponentState.collectAsStateWithLifecycle()
+    val bodyComponentState by viewModel.bodyComponentState.collectAsStateWithLifecycle()
+    val emotionState by viewModel.emotionState.collectAsStateWithLifecycle()
+    val fatigueState by viewModel.fatigueState.collectAsStateWithLifecycle()
+    val breathDetectState by viewModel.breathDetectState.collectAsStateWithLifecycle()
+    val alarmState by viewModel.alarmState.collectAsStateWithLifecycle()
+    val heartWarningState by viewModel.heartWarningState.collectAsStateWithLifecycle()
+    val longSeatState by viewModel.longSeatState.collectAsStateWithLifecycle()
+    val nightTurnState by viewModel.nightTurnState.collectAsStateWithLifecycle()
+    val findDeviceState by viewModel.findDeviceState.collectAsStateWithLifecycle()
+    val healthRemindState by viewModel.healthRemindState.collectAsStateWithLifecycle()
     var showProfileDialog by remember { mutableStateOf(false) }
 
     val upperHrThreshold by viewModel.upperHrThreshold.collectAsStateWithLifecycle()
@@ -124,6 +140,11 @@ fun HomeScreen(
 
     val snackbarHostState = remember { SnackbarHostState() }
     var selectedTab by remember { mutableIntStateOf(0) }
+    val p1ActionsEnabled = VeepooSessionGate.actionsEnabled(
+        hardwareConnected = isHardwareConnected,
+        connectedMac = connectedDevice?.macAddress,
+        telemetry = latestTelemetry,
+    )
 
     activeShareData?.let { shareData ->
         com.example.ui.components.ShareProgressDialog(
@@ -261,56 +282,11 @@ fun HomeScreen(
                 .fillMaxSize()
                 .padding(paddingValues)
         ) {
-            // Clean Minimalism Header (from design HTML) with Profile Editing Trigger
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 16.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Text(
-                        text = "Bem-vindo de volta,",
-                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
-                        color = Color(0xFF44474E)
-                    )
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = userProfile?.fullName ?: "Alex Rivera",
-                            style = MaterialTheme.typography.headlineSmall.copy(
-                                fontWeight = FontWeight.SemiBold,
-                                letterSpacing = (-0.5).sp
-                            ),
-                            color = Color(0xFF001D31)
-                        )
-                    }
-                    Text(
-                        text = "ID: ${userProfile?.patientId ?: "PAT-HBAND-001"} • Toque para editar",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = Color(0xFF00639B)
-                    )
-                }
-
-                Button(
-                    onClick = { showProfileDialog = true },
-                    shape = RoundedCornerShape(20.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE0F2FE), contentColor = Color(0xFF004A77)),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                    modifier = Modifier.testTag("header_edit_profile_button")
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Person,
-                        contentDescription = "Editar Perfil",
-                        tint = Color(0xFF004A77),
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Perfil", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold))
-                }
-            }
+            HomeWelcomeHeader(
+                fullName = userProfile?.fullName ?: "Alex Rivera",
+                patientId = userProfile?.patientId ?: "PAT-HBAND-001",
+                onEditProfile = { showProfileDialog = true },
+            )
 
             // Tab Content Body
             Box(
@@ -339,8 +315,8 @@ fun HomeScreen(
                         onSpotCheck = { viewModel.triggerSpotCheck() },
                         onSimulateBatch = { viewModel.enqueueBatchSimulated(it) },
                         onShowNotification = { viewModel.showNotification(it) },
-                        onSimulateLowBattery = { viewModel.simulateLowBattery() },
-                        onRechargeBattery = { viewModel.rechargeBattery() },
+                        onSimulateLowBattery = if (BuildConfig.DEBUG) ({ viewModel.simulateLowBattery() }) else null,
+                        onRechargeBattery = if (BuildConfig.DEBUG) ({ viewModel.rechargeBattery() }) else null,
                         onScanClick = { selectedTab = 2 },
                         onDisconnect = { viewModel.disconnectDevice() },
                         geminiInsightText = geminiInsightText,
@@ -352,7 +328,32 @@ fun HomeScreen(
                         onResetHydration = { viewModel.resetTodayHydration() },
                         totalBreathingSeconds = totalBreathingSeconds,
                         onSaveBreathingSession = { viewModel.saveBreathingSession(it) },
-                        onGenerateShareData = { activeShareData = it }
+                        onGenerateShareData = { activeShareData = it },
+                        capabilities = deviceCapabilities,
+                        hardwareConnected = isHardwareConnected,
+                        actionsEnabled = p1ActionsEnabled,
+                        ecgState = ecgState,
+                        glucoseState = glucoseState,
+                        bloodComponentState = bloodComponentState,
+                        bodyComponentState = bodyComponentState,
+                        emotionState = emotionState,
+                        fatigueState = fatigueState,
+                        breathDetectState = breathDetectState,
+                        onStartEcg = { viewModel.startEcgDetect() },
+                        onStopEcg = { viewModel.stopEcgDetect() },
+                        onReadEcg = { viewModel.readStoredEcg() },
+                        onStartGlucose = { viewModel.startGlucoseDetect() },
+                        onStopGlucose = { viewModel.stopGlucoseDetect() },
+                        onStartBloodComponent = { viewModel.startBloodComponentDetect() },
+                        onStopBloodComponent = { viewModel.stopBloodComponentDetect() },
+                        onStartBodyComponent = { viewModel.startBodyComponentDetect() },
+                        onStopBodyComponent = { viewModel.stopBodyComponentDetect() },
+                        onStartEmotion = { viewModel.startEmotionDetect() },
+                        onStopEmotion = { viewModel.stopEmotionDetect() },
+                        onStartFatigue = { viewModel.startFatigueDetect() },
+                        onStopFatigue = { viewModel.stopFatigueDetect() },
+                        onStartBreath = { viewModel.startBreathDetect() },
+                        onStopBreath = { viewModel.stopBreathDetect() },
                     )
 
                     1 -> com.example.ui.components.RechartsSensorDashboard(
@@ -384,7 +385,12 @@ fun HomeScreen(
                         onClearSynced = { viewModel.clearSynced() },
                         onClearAll = { viewModel.clearAll() },
                         onInspectItem = { viewModel.selectItemForPreview(it) },
-                        onRefreshWorkManager = { viewModel.triggerWorkManagerSync() }
+                        onRefreshWorkManager = { viewModel.triggerWorkManagerSync() },
+                        p1LocationHint = if (deviceCapabilities.hasAdvancedDetect) {
+                            VeepooSessionGate.FILA_P1_LOCATION_HINT
+                        } else {
+                            null
+                        },
                     )
 
                     4 -> SettingsTab(
@@ -412,10 +418,25 @@ fun HomeScreen(
                         wearDetectState = wearDetectState,
                         historySyncState = historySyncState,
                         hardwareConnected = isHardwareConnected,
+                        actionsEnabled = p1ActionsEnabled,
                         onAutoMeasureChange = { viewModel.setBandAutoMeasure(it) },
                         onSpo2AutoChange = { viewModel.setBandSpo2AutoDetect(it) },
                         onWearDetectChange = { viewModel.setBandWearDetect(it) },
-                        onSyncHistory = { viewModel.requestHistorySync() }
+                        onSyncHistory = { viewModel.requestHistorySync() },
+                        alarmState = alarmState,
+                        heartWarningState = heartWarningState,
+                        longSeatState = longSeatState,
+                        nightTurnState = nightTurnState,
+                        findDeviceState = findDeviceState,
+                        healthRemindState = healthRemindState,
+                        onAlarmChange = { viewModel.setBandAlarm(it) },
+                        onHeartWarningChange = { viewModel.setBandHeartWarning(it) },
+                        onLongSeatChange = { viewModel.setBandLongSeat(it) },
+                        onNightTurnChange = { viewModel.setBandNightTurn(it) },
+                        onFindDeviceChange = { viewModel.setBandFindDevice(it) },
+                        onStartFindByPhone = { viewModel.startFindDeviceByPhone() },
+                        onStopFindByPhone = { viewModel.stopFindDeviceByPhone() },
+                        onHealthRemindChange = { viewModel.setBandHealthRemind(it) },
                     )
                 }
             }
@@ -460,8 +481,8 @@ private fun DashboardTab(
     onSpotCheck: () -> Unit,
     onSimulateBatch: (Int) -> Unit,
     onShowNotification: (String) -> Unit,
-    onSimulateLowBattery: () -> Unit,
-    onRechargeBattery: () -> Unit,
+    onSimulateLowBattery: (() -> Unit)? = null,
+    onRechargeBattery: (() -> Unit)? = null,
     onScanClick: () -> Unit,
     onDisconnect: () -> Unit,
     geminiInsightText: String = "",
@@ -473,7 +494,32 @@ private fun DashboardTab(
     onResetHydration: () -> Unit = {},
     totalBreathingSeconds: Int = 0,
     onSaveBreathingSession: (Int) -> Unit = {},
-    onGenerateShareData: (com.example.util.ShareProgressData) -> Unit = {}
+    onGenerateShareData: (com.example.util.ShareProgressData) -> Unit = {},
+    capabilities: com.example.data.hband.DeviceCapabilities = com.example.data.hband.DeviceCapabilities(),
+    hardwareConnected: Boolean = false,
+    actionsEnabled: Boolean = hardwareConnected,
+    ecgState: com.example.data.hband.DetectSessionUiState = com.example.data.hband.DetectSessionUiState(),
+    glucoseState: com.example.data.hband.DetectSessionUiState = com.example.data.hband.DetectSessionUiState(),
+    bloodComponentState: com.example.data.hband.DetectSessionUiState = com.example.data.hband.DetectSessionUiState(),
+    bodyComponentState: com.example.data.hband.DetectSessionUiState = com.example.data.hband.DetectSessionUiState(),
+    emotionState: com.example.data.hband.DetectSessionUiState = com.example.data.hband.DetectSessionUiState(),
+    fatigueState: com.example.data.hband.DetectSessionUiState = com.example.data.hband.DetectSessionUiState(),
+    breathDetectState: com.example.data.hband.DetectSessionUiState = com.example.data.hband.DetectSessionUiState(),
+    onStartEcg: () -> Unit = {},
+    onStopEcg: () -> Unit = {},
+    onReadEcg: () -> Unit = {},
+    onStartGlucose: () -> Unit = {},
+    onStopGlucose: () -> Unit = {},
+    onStartBloodComponent: () -> Unit = {},
+    onStopBloodComponent: () -> Unit = {},
+    onStartBodyComponent: () -> Unit = {},
+    onStopBodyComponent: () -> Unit = {},
+    onStartEmotion: () -> Unit = {},
+    onStopEmotion: () -> Unit = {},
+    onStartFatigue: () -> Unit = {},
+    onStopFatigue: () -> Unit = {},
+    onStartBreath: () -> Unit = {},
+    onStopBreath: () -> Unit = {},
 ) {
     Column(
         modifier = Modifier
@@ -506,6 +552,37 @@ private fun DashboardTab(
             onRechargeBattery = onRechargeBattery
         )
 
+        TelemetryGauges(telemetry = latestTelemetry)
+
+        com.example.ui.components.AdvancedDetectCard(
+            capabilities = capabilities,
+            hardwareConnected = hardwareConnected,
+            actionsEnabled = actionsEnabled,
+            ecg = ecgState,
+            glucose = glucoseState,
+            bloodComponent = bloodComponentState,
+            bodyComponent = bodyComponentState,
+            emotion = emotionState,
+            fatigue = fatigueState,
+            breath = breathDetectState,
+            onStartEcg = onStartEcg,
+            onStopEcg = onStopEcg,
+            onReadEcg = onReadEcg,
+            onStartGlucose = onStartGlucose,
+            onStopGlucose = onStopGlucose,
+            onStartBloodComponent = onStartBloodComponent,
+            onStopBloodComponent = onStopBloodComponent,
+            onStartBodyComponent = onStartBodyComponent,
+            onStopBodyComponent = onStopBodyComponent,
+            onStartEmotion = onStartEmotion,
+            onStopEmotion = onStopEmotion,
+            onStartFatigue = onStartFatigue,
+            onStopFatigue = onStopFatigue,
+            onStartBreath = onStartBreath,
+            onStopBreath = onStopBreath,
+            modifier = Modifier.fillMaxWidth()
+        )
+
         com.example.ui.components.GeminiHealthInsightCard(
             insightText = geminiInsightText,
             isLoading = isGeneratingGeminiInsight,
@@ -518,8 +595,6 @@ private fun DashboardTab(
             onRechargeBattery = onRechargeBattery,
             modifier = Modifier.fillMaxWidth()
         )
-
-        TelemetryGauges(telemetry = latestTelemetry)
 
         com.example.ui.components.DailyHealthSummaryCard(
             metrics = sensorMetrics,

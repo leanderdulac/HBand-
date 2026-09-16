@@ -39,6 +39,37 @@ object VeepooCapabilityProbe {
             isSupportBp = support?.bp.isSupported() || safeCheck(check) { it.checkBp() },
             isSupportTemperature = support?.temperatureFunction.isSupported() ||
                 safeCheck(check) { it.isSupportReadTemperature() },
+            isSupportEcg = support?.ecg.isSupported() || safeCheck(check) { it.checkECG() },
+            isSupportMultiLeadEcg = safeCheck(check) { it.checkEcgMultiLead() } ||
+                safeCheck(check) { it.isEcgMultiLeadDevice() },
+            isSupportBloodGlucose = support?.bloodGlucose.isSupported(),
+            isSupportBloodGlucoseAdjusting = support?.bloodGlucoseAdjusting.isSupported() ||
+                safeCheck(check) { it.checkBgAdjusting() },
+            isSupportBloodComponent = support?.bloodComponent.isSupported() ||
+                safeCheck(check) { it.checkBloodComponent() },
+            isSupportBodyComponent = support?.bodyComponent.isSupported() ||
+                safeCheck(check) { it.checkBodyComponent() },
+            isSupportEmotion = support?.emotion.isSupported() ||
+                safeCheck(check) { it.checkEmotionDetect() },
+            isSupportFatigue = support?.fatigue.isSupported() ||
+                safeCheck(check) { it.checkFtg() },
+            isSupportBreath = support?.beathFunction.isSupported() ||
+                safeCheck(check) { it.checkBreath() },
+            isSupportAlarm2 = support?.alarm2.isSupported() ||
+                safeCheck(check) { it.checkMultiAlarm() },
+            isSupportTextAlarm = support?.textAlarm.isSupported() ||
+                safeCheck(check) { it.checkTextAlarm() } ||
+                safeCheck(check) { it.isSupportTextAlarm() },
+            isSupportHeartWarning = support?.heartWaring.isSupported() ||
+                safeCheck(check) { it.checkHeartwaring() },
+            isSupportHealthRemind = support?.healthRemind.isSupported(),
+            isSupportLongSeat = support?.longseat.isSupported() ||
+                safeCheck(check) { it.checkLongseat() },
+            isSupportNightTurnWrist = support?.nightTurnSetting.isSupported() ||
+                safeCheck(check) { it.checkNightturnSetting() },
+            isSupportFindDevice = safeCheck(check) { it.checkFindDevice() },
+            isSupportFindDeviceByPhone = support?.findDeviceByPhone.isSupported() ||
+                safeCheck(check) { it.checFindDeviceByPhone() },
             probed = support != null || check != null,
         )
     }

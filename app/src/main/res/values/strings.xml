@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">HBand HealthSync</string>
+    <string name="app_name">next2u SAÚDE</string>
     <string name="ble_session_channel_name">Sessão Bluetooth</string>
     <string name="ble_session_channel_desc">Mantém a pulseira VE30 conectada em segundo plano</string>
     <string name="ble_session_connecting">Conectando à pulseira…</string>
