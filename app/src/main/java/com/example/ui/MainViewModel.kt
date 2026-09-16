@@ -4,8 +4,19 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.HBandHealthSyncApp
+import com.example.data.hband.AlarmUiState
+import com.example.data.hband.AutoMeasureUiState
+import com.example.data.hband.DetectSessionUiState
+import com.example.data.hband.DeviceCapabilities
+import com.example.data.hband.FindDeviceUiState
 import com.example.data.hband.HBandBleManager
 import com.example.data.hband.HBandBleService
+import com.example.data.hband.HealthRemindUiState
+import com.example.data.hband.HeartWarningUiState
+import com.example.data.hband.HistorySyncUiState
+import com.example.data.hband.LongSeatUiState
+import com.example.data.hband.NightTurnUiState
+import com.example.data.hband.WearDetectUiState
 import com.example.data.ingest.IngestDeduper
 import com.example.data.ingest.IngestPayloadMapper
 import com.example.data.local.AppDatabase
@@ -46,7 +57,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val repository = WearableRepository(
         queueDao = db.ingestQueueDao(),
         sensorMetricDao = db.sensorMetricDao(),
-        apiService = RetrofitClient.apiService
+        apiService = RetrofitClient.apiService,
+        advancedMeasurementDao = db.advancedMeasurementDao(),
     )
 
     val bleManager: HBandBleManager =
@@ -63,6 +75,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val connectedDevice: StateFlow<HBandDevice?> = bleManager.connectedDevice
     val isScanning: StateFlow<Boolean> = bleManager.isScanning
     val latestTelemetry: StateFlow<HBandTelemetry?> = bleManager.latestTelemetry
+    val deviceCapabilities: StateFlow<DeviceCapabilities> = bleManager.capabilities
+    val autoMeasureState: StateFlow<AutoMeasureUiState> = bleManager.autoMeasureState
+    val wearDetectState: StateFlow<WearDetectUiState> = bleManager.wearDetectState
+    val historySyncState: StateFlow<HistorySyncUiState> = bleManager.historySyncState
+    val isHardwareConnected: StateFlow<Boolean> = bleManager.isHardwareConnected
+    val ecgState: StateFlow<DetectSessionUiState> = bleManager.ecgState
+    val glucoseState: StateFlow<DetectSessionUiState> = bleManager.glucoseState
+    val bloodComponentState: StateFlow<DetectSessionUiState> = bleManager.bloodComponentState
+    val bodyComponentState: StateFlow<DetectSessionUiState> = bleManager.bodyComponentState
+    val emotionState: StateFlow<DetectSessionUiState> = bleManager.emotionState
+    val fatigueState: StateFlow<DetectSessionUiState> = bleManager.fatigueState
+    val breathDetectState: StateFlow<DetectSessionUiState> = bleManager.breathDetectState
+    val alarmState: StateFlow<AlarmUiState> = bleManager.alarmState
+    val heartWarningState: StateFlow<HeartWarningUiState> = bleManager.heartWarningState
+    val longSeatState: StateFlow<LongSeatUiState> = bleManager.longSeatState
+    val nightTurnState: StateFlow<NightTurnUiState> = bleManager.nightTurnState
+    val findDeviceState: StateFlow<FindDeviceUiState> = bleManager.findDeviceState
+    val healthRemindState: StateFlow<HealthRemindUiState> = bleManager.healthRemindState
 
     val allSensorMetrics: StateFlow<List<HBandSensorMetricEntity>> = repository.allSensorMetrics
         .stateIn(
@@ -379,6 +409,63 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         showNotification(if (enabled) "Reconexão Automática BLE ativada" else "Reconexão Automática BLE desativada")
     }
 
+    fun setBandAutoMeasure(enabled: Boolean) {
+        bleManager.setAutoMeasureEnabled(enabled)
+        showNotification(
+            if (enabled) "Medição automática da pulseira ativada (se suportada)"
+            else "Medição automática da pulseira desativada"
+        )
+    }
+
+    fun setBandSpo2AutoDetect(enabled: Boolean) {
+        bleManager.setSpo2AutoDetectEnabled(enabled)
+        showNotification(
+            if (enabled) "SpO2 automático noturno ativado (se suportado)"
+            else "SpO2 automático noturno desativado"
+        )
+    }
+
+    fun setBandWearDetect(enabled: Boolean) {
+        bleManager.setWearDetectEnabled(enabled)
+        showNotification(
+            if (enabled) "Detecção de uso (wear) ativada"
+            else "Detecção de uso (wear) desativada"
+        )
+    }
+
+    fun requestHistorySync() {
+        bleManager.requestHistorySync()
+        showNotification("Sincronizando histórico Origin / sono / HRV / SpO2 da pulseira...")
+    }
+
+    fun startEcgDetect() {
+        bleManager.startEcgDetect()
+        showNotification("ECG: medição real via VPOperateManager")
+    }
+
+    fun stopEcgDetect() = bleManager.stopEcgDetect()
+    fun readStoredEcg() = bleManager.readStoredEcg()
+    fun startGlucoseDetect() = bleManager.startGlucoseDetect()
+    fun stopGlucoseDetect() = bleManager.stopGlucoseDetect()
+    fun startBloodComponentDetect() = bleManager.startBloodComponentDetect()
+    fun stopBloodComponentDetect() = bleManager.stopBloodComponentDetect()
+    fun startBodyComponentDetect() = bleManager.startBodyComponentDetect()
+    fun stopBodyComponentDetect() = bleManager.stopBodyComponentDetect()
+    fun startEmotionDetect() = bleManager.startEmotionDetect()
+    fun stopEmotionDetect() = bleManager.stopEmotionDetect()
+    fun startFatigueDetect() = bleManager.startFatigueDetect()
+    fun stopFatigueDetect() = bleManager.stopFatigueDetect()
+    fun startBreathDetect() = bleManager.startBreathDetect()
+    fun stopBreathDetect() = bleManager.stopBreathDetect()
+    fun setBandAlarm(enabled: Boolean) = bleManager.setBandAlarmEnabled(enabled)
+    fun setBandHeartWarning(enabled: Boolean) = bleManager.setHeartWarningEnabled(enabled)
+    fun setBandLongSeat(enabled: Boolean) = bleManager.setLongSeatEnabled(enabled)
+    fun setBandNightTurn(enabled: Boolean) = bleManager.setNightTurnEnabled(enabled)
+    fun setBandFindDevice(enabled: Boolean) = bleManager.setFindDeviceEnabled(enabled)
+    fun startFindDeviceByPhone() = bleManager.startFindDeviceByPhone()
+    fun stopFindDeviceByPhone() = bleManager.stopFindDeviceByPhone()
+    fun setBandHealthRemind(enabled: Boolean) = bleManager.setHealthRemindEnabled(enabled)
+
     fun saveUserProfile(profile: com.example.data.local.UserProfileEntity) {
         viewModelScope.launch {
             userProfileDao.saveUserProfile(profile)
@@ -467,7 +554,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             deviceId = trimmed,
             name = customName,
             macAddress = trimmed,
-            batteryLevel = 90,
+            batteryLevel = null,
             rssi = -50,
             isConnected = false,
             firmwareVersion = "VE30 Direct MAC"
@@ -644,12 +731,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun simulateLowBattery() {
         bleManager.simulateLowBattery()
-        showNotification("HBand BLE listener reported low battery warning (14%)", isError = true)
+        showNotification("Simulação de teste: aviso de bateria fraca (14%) — não é leitura da pulseira", isError = true)
     }
 
     fun rechargeBattery() {
         bleManager.rechargeBattery()
-        showNotification("HBand Wearable connected to magnetic charger (98%)")
+        showNotification("Simulação de teste: 98% — não é leitura da pulseira")
     }
 
     fun dismissNotification() {

@@ -13,9 +13,10 @@ import net.zetetic.database.sqlcipher.SupportOpenHelperFactory
         HBandSensorMetricEntity::class,
         HydrationLogEntity::class,
         BreathingSessionEntity::class,
-        UserProfileEntity::class
+        UserProfileEntity::class,
+        AdvancedMeasurementEntity::class,
     ],
-    version = 5,
+    version = 6,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -25,6 +26,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun hydrationDao(): HydrationDao
     abstract fun breathingDao(): BreathingDao
     abstract fun userProfileDao(): UserProfileDao
+    abstract fun advancedMeasurementDao(): AdvancedMeasurementDao
 
     companion object {
         private const val TAG = "AppDatabase"

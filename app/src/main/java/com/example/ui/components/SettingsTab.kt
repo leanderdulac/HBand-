@@ -79,6 +79,30 @@ fun SettingsTab(
     onRestoreBackup: () -> Unit = {},
     onTestApiSmoke: () -> Unit = {},
     onResetAllData: () -> Unit = {},
+    capabilities: com.example.data.hband.DeviceCapabilities = com.example.data.hband.DeviceCapabilities(),
+    autoMeasureState: com.example.data.hband.AutoMeasureUiState = com.example.data.hband.AutoMeasureUiState(),
+    wearDetectState: com.example.data.hband.WearDetectUiState = com.example.data.hband.WearDetectUiState(),
+    historySyncState: com.example.data.hband.HistorySyncUiState = com.example.data.hband.HistorySyncUiState(),
+    hardwareConnected: Boolean = false,
+    actionsEnabled: Boolean = hardwareConnected,
+    onAutoMeasureChange: (Boolean) -> Unit = {},
+    onSpo2AutoChange: (Boolean) -> Unit = {},
+    onWearDetectChange: (Boolean) -> Unit = {},
+    onSyncHistory: () -> Unit = {},
+    alarmState: com.example.data.hband.AlarmUiState = com.example.data.hband.AlarmUiState(),
+    heartWarningState: com.example.data.hband.HeartWarningUiState = com.example.data.hband.HeartWarningUiState(),
+    longSeatState: com.example.data.hband.LongSeatUiState = com.example.data.hband.LongSeatUiState(),
+    nightTurnState: com.example.data.hband.NightTurnUiState = com.example.data.hband.NightTurnUiState(),
+    findDeviceState: com.example.data.hband.FindDeviceUiState = com.example.data.hband.FindDeviceUiState(),
+    healthRemindState: com.example.data.hband.HealthRemindUiState = com.example.data.hband.HealthRemindUiState(),
+    onAlarmChange: (Boolean) -> Unit = {},
+    onHeartWarningChange: (Boolean) -> Unit = {},
+    onLongSeatChange: (Boolean) -> Unit = {},
+    onNightTurnChange: (Boolean) -> Unit = {},
+    onFindDeviceChange: (Boolean) -> Unit = {},
+    onStartFindByPhone: () -> Unit = {},
+    onStopFindByPhone: () -> Unit = {},
+    onHealthRemindChange: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val scrollState = rememberScrollState()
@@ -183,6 +207,33 @@ fun SettingsTab(
                 }
             }
         }
+
+        BandSdkSettingsCard(
+            capabilities = capabilities,
+            autoMeasure = autoMeasureState,
+            wearDetect = wearDetectState,
+            historySync = historySyncState,
+            hardwareConnected = hardwareConnected,
+            actionsEnabled = actionsEnabled,
+            onAutoMeasureChange = onAutoMeasureChange,
+            onSpo2AutoChange = onSpo2AutoChange,
+            onWearDetectChange = onWearDetectChange,
+            onSyncHistory = onSyncHistory,
+            alarm = alarmState,
+            heartWarning = heartWarningState,
+            longSeat = longSeatState,
+            nightTurn = nightTurnState,
+            findDevice = findDeviceState,
+            healthRemind = healthRemindState,
+            onAlarmChange = onAlarmChange,
+            onHeartWarningChange = onHeartWarningChange,
+            onLongSeatChange = onLongSeatChange,
+            onNightTurnChange = onNightTurnChange,
+            onFindDeviceChange = onFindDeviceChange,
+            onStartFindByPhone = onStartFindByPhone,
+            onStopFindByPhone = onStopFindByPhone,
+            onHealthRemindChange = onHealthRemindChange,
+        )
 
         // BLE Auto-Reconnect Card
         Card(

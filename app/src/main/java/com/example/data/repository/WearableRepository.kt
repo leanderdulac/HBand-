@@ -1,8 +1,11 @@
 package com.example.data.repository
 
 import com.example.data.hband.HBandBleManager
+import com.example.data.hband.VeepooHistoryMapper
 import com.example.data.ingest.IngestHttpKind
 import com.example.data.ingest.IngestPayloadMapper
+import com.example.data.local.AdvancedMeasurementDao
+import com.example.data.local.AdvancedMeasurementEntity
 import com.example.data.local.HBandSensorMetricDao
 import com.example.data.local.HBandSensorMetricEntity
 import com.example.data.local.IngestQueueDao
@@ -43,11 +46,14 @@ data class QueueProcessResult(
 class WearableRepository(
     private val queueDao: IngestQueueDao,
     private val sensorMetricDao: HBandSensorMetricDao,
-    private val apiService: HealthTechApiService
+    private val apiService: HealthTechApiService,
+    private val advancedMeasurementDao: AdvancedMeasurementDao? = null,
 ) {
     val allQueueItems: Flow<List<IngestQueueEntity>> = queueDao.getAllItems()
     val allSensorMetrics: Flow<List<HBandSensorMetricEntity>> = sensorMetricDao.getAllMetrics()
     val latestSensorMetric: Flow<HBandSensorMetricEntity?> = sensorMetricDao.getLatestMetric()
+    val allAdvancedMeasurements: Flow<List<AdvancedMeasurementEntity>> =
+        advancedMeasurementDao?.getAll() ?: kotlinx.coroutines.flow.flowOf(emptyList())
 
     private val _apiHealth = MutableStateFlow(ApiHealthState())
     val apiHealth: StateFlow<ApiHealthState> = _apiHealth.asStateFlow()
@@ -63,6 +69,8 @@ class WearableRepository(
             val metricEntity = HBandSensorMetricEntity(
                 deviceId = IngestPayloadMapper.resolveDeviceId(telemetry.deviceId),
                 timestamp = telemetry.timestamp,
+                timestampMillis = VeepooHistoryMapper.parseIsoToMillis(telemetry.timestamp)
+                    .takeIf { it > 0L } ?: System.currentTimeMillis(),
                 heartRate = telemetry.heartRate,
                 systolicBp = telemetry.bloodPressure.systolic,
                 diastolicBp = telemetry.bloodPressure.diastolic,
@@ -94,6 +102,109 @@ class WearableRepository(
             }
             id
         }
+
+    /**
+     * Persists multi-day Origin/sleep/HRV/SpO2 samples to Room. HealthTech ingest
+     * only receives hourly samples that already have a real heart rate — never
+     * fabricated vitals and never a 5-minute flood.
+     */
+    suspend fun persistHistorySamples(
+        samples: List<HBandTelemetry>,
+        patientId: String = IngestPayloadMapper.DEFAULT_PATIENT_ID,
+    ): Int = withContext(Dispatchers.IO) {
+        if (samples.isEmpty()) return@withContext 0
+        val entities = samples.map { telemetry ->
+            val epoch = VeepooHistoryMapper.parseIsoToMillis(telemetry.timestamp)
+                .takeIf { it > 0L } ?: System.currentTimeMillis()
+            HBandSensorMetricEntity(
+                deviceId = IngestPayloadMapper.resolveDeviceId(telemetry.deviceId),
+                timestamp = telemetry.timestamp,
+                timestampMillis = epoch,
+                heartRate = telemetry.heartRate,
+                systolicBp = telemetry.bloodPressure.systolic,
+                diastolicBp = telemetry.bloodPressure.diastolic,
+                spO2 = telemetry.spO2,
+                temperatureCelsius = telemetry.temperatureCelsius,
+                steps = telemetry.steps,
+                calories = telemetry.calories,
+                distanceMeters = telemetry.distanceMeters,
+                hrvScore = telemetry.hrvScore,
+                deepSleepMinutes = telemetry.sleepSummary.deepSleepMinutes,
+                lightSleepMinutes = telemetry.sleepSummary.lightSleepMinutes,
+                awakeMinutes = telemetry.sleepSummary.awakeMinutes,
+            )
+        }
+        sensorMetricDao.insertMetrics(entities)
+
+        val hourly = samples
+            .filter { IngestPayloadMapper.isIngestible(it) }
+            .groupBy { telemetry ->
+                val bucket = VeepooHistoryMapper.parseIsoToMillis(telemetry.timestamp) / 3_600_000L
+                telemetry.deviceId to bucket
+            }
+            .values
+            .mapNotNull { group -> group.maxByOrNull { it.heartRate } }
+
+        for (telemetry in hourly) {
+            queueDao.insertItem(
+                IngestQueueEntity(
+                    payloadJson = IngestPayloadMapper.telemetryToJson(telemetry, patientId),
+                    status = QueueStatus.PENDING.name,
+                )
+            )
+        }
+        try {
+            processQueue()
+        } catch (_: Exception) {
+        }
+        entities.size
+    }
+
+    /**
+     * Persists a real P1 detect sample locally. HealthTech ingest only happens
+     * when the sample includes a real heart rate (ECG average) — glucose and
+     * composition never invent an HR just to pass the API contract.
+     */
+    suspend fun persistAdvancedSample(
+        entity: AdvancedMeasurementEntity,
+        patientId: String = IngestPayloadMapper.DEFAULT_PATIENT_ID,
+    ) = withContext(Dispatchers.IO) {
+        if (!entity.isReal) return@withContext
+        advancedMeasurementDao?.insert(entity)
+        val heart = entity.numericValue.toInt()
+        if (entity.kind == com.example.data.local.AdvancedMeasurementKind.ECG &&
+            IngestPayloadMapper.isIngestibleHeartRate(heart)
+        ) {
+            val json = IngestPayloadMapper.telemetryToJson(
+                HBandTelemetry(
+                    deviceId = entity.deviceId,
+                    deviceModel = "VE30",
+                    timestamp = entity.timestamp,
+                    heartRate = heart,
+                    bloodPressure = com.example.data.model.BloodPressure(0, 0),
+                    spO2 = 0,
+                    temperatureCelsius = 0f,
+                    steps = 0,
+                    calories = 0f,
+                    distanceMeters = 0f,
+                    hrvScore = entity.secondaryValue.toInt().coerceAtLeast(0),
+                    sleepSummary = com.example.data.model.SleepSummary(0, 0, 0),
+                    isRealSensorData = true,
+                ),
+                patientId,
+            )
+            queueDao.insertItem(
+                IngestQueueEntity(
+                    payloadJson = json,
+                    status = QueueStatus.PENDING.name,
+                ),
+            )
+            try {
+                processQueue()
+            } catch (_: Exception) {
+            }
+        }
+    }
 
     suspend fun enqueueRawJson(json: String): Long = withContext(Dispatchers.IO) {
         val entity = IngestQueueEntity(
@@ -444,5 +555,6 @@ class WearableRepository(
 
     suspend fun clearAllSensorMetrics() = withContext(Dispatchers.IO) {
         sensorMetricDao.clearAllMetrics()
+        advancedMeasurementDao?.clearAll()
     }
 }
