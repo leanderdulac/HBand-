@@ -39,7 +39,10 @@ class HealthtechRepository private constructor(
             chain.proceed(requestBuilder.build())
         }
         .addInterceptor(HttpLoggingInterceptor().apply {
-            level = HttpLoggingInterceptor.Level.BODY
+            level = HttpLoggingInterceptor.Level.BASIC
+            redactHeader("X-API-Key")
+            redactHeader("x-api-key")
+            redactHeader("Authorization")
         })
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)

@@ -22,9 +22,9 @@ class HBandIngestWorker(
         )
 
         val result = repository.processQueueDetailed()
-        // Auth / client errors are permanent until the user fixes the key or payload.
+        // Auth / missing-key errors stay queued but must not retry-storm.
         // Retry only when the network or the server was transiently unavailable.
-        return if (result.hadTransientFailure && result.authError == null) {
+        return if (result.hadTransientFailure && result.authError == null && result.configurationError == null) {
             Result.retry()
         } else {
             Result.success()

@@ -1,6 +1,7 @@
 package com.example.data.remote
 
 import android.content.Context
+import com.example.data.ingest.IngestApiKey
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
@@ -43,17 +44,27 @@ object RetrofitClient {
     val currentBaseUrl: String
         get() = customBaseUrl?.takeIf { it.isNotBlank() } ?: DEFAULT_BASE_URL
 
+    val hasSettingsKeyOverride: Boolean
+        get() = !customApiKey.isNullOrBlank()
+
     val apiKey: String
         get() {
-            val custom = customApiKey
-            if (!custom.isNullOrBlank()) return custom
+            val custom = customApiKey?.trim().orEmpty()
+            if (custom.isNotEmpty()) {
+                return if (IngestApiKey.isUsable(custom)) custom else ""
+            }
             return try {
-                val key = com.example.BuildConfig::class.java.getField("HEALTHTECH_INGEST_API_KEY").get(null) as? String ?: ""
-                if (key.isNotEmpty() && key != "PAT-HBAND-001") key else DEFAULT_API_KEY
-            } catch (e: Exception) {
+                val key = com.example.BuildConfig::class.java
+                    .getField("HEALTHTECH_INGEST_API_KEY")
+                    .get(null) as? String ?: ""
+                if (IngestApiKey.isUsable(key)) key else DEFAULT_API_KEY
+            } catch (_: Exception) {
                 DEFAULT_API_KEY
             }
         }
+
+    val isKeyConfigured: Boolean
+        get() = IngestApiKey.isUsable(apiKey)
 
     private fun buildOkHttpClient(): OkHttpClient {
         val loggingInterceptor = HttpLoggingInterceptor().apply {
@@ -67,9 +78,14 @@ object RetrofitClient {
                 val original = chain.request()
                 val requestBuilder = original.newBuilder()
                 val key = apiKey
-                if (key.isNotEmpty()) {
+                if (IngestApiKey.isUsable(key)) {
                     requestBuilder.header("X-API-Key", key)
                     requestBuilder.header("x-api-key", key)
+                } else {
+                    android.util.Log.w(
+                        "RetrofitClient",
+                        "X-API-Key omitted: ${IngestApiKey.configurationError()}",
+                    )
                 }
                 chain.proceed(requestBuilder.build())
             }

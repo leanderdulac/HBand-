@@ -103,6 +103,7 @@ fun SettingsTab(
     onStartFindByPhone: () -> Unit = {},
     onStopFindByPhone: () -> Unit = {},
     onHealthRemindChange: (Boolean) -> Unit = {},
+    ingestDiagnostics: com.example.data.ingest.IngestDiagnostics = com.example.data.ingest.IngestDiagnostics(),
     modifier: Modifier = Modifier
 ) {
     val scrollState = rememberScrollState()
@@ -799,6 +800,52 @@ fun SettingsTab(
                     }
                 }
 
+                Spacer(modifier = Modifier.height(14.dp))
+
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = Color(0xFFF8FAFC),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("ingest_diagnostics_card")
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(
+                            text = "Diagnóstico de ingestão (sem segredos)",
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                            color = Color(0xFF0F172A)
+                        )
+                        DiagnosticRow("URL base", ingestDiagnostics.baseUrl.ifBlank { "—" })
+                        DiagnosticRow(
+                            "Chave configurada",
+                            when {
+                                ingestDiagnostics.keyConfigured && ingestDiagnostics.usingSettingsOverride ->
+                                    "sim (override em Ajustes)"
+                                ingestDiagnostics.keyConfigured ->
+                                    "sim (BuildConfig / .env)"
+                                ingestDiagnostics.usingSettingsOverride ->
+                                    "não (override em Ajustes inválido ou vazio)"
+                                else ->
+                                    "não"
+                            }
+                        )
+                        DiagnosticRow(
+                            "Último HTTP de upload",
+                            ingestDiagnostics.lastHttpStatus?.toString() ?: "—"
+                        )
+                        DiagnosticRow("Fila pendente", ingestDiagnostics.queuedCount.toString())
+                        DiagnosticRow(
+                            "Último erro",
+                            ingestDiagnostics.configurationError
+                                ?: ingestDiagnostics.lastError
+                                ?: "—"
+                        )
+                    }
+                }
+
                 Spacer(modifier = Modifier.height(16.dp))
 
                 Button(
@@ -928,6 +975,27 @@ fun SettingsTab(
                     Text("Cancelar")
                 }
             }
+        )
+    }
+}
+
+@Composable
+private fun DiagnosticRow(label: String, value: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodySmall,
+            color = Color(0xFF64748B),
+            modifier = Modifier.weight(0.42f)
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
+            color = Color(0xFF0F172A),
+            modifier = Modifier.weight(0.58f)
         )
     }
 }

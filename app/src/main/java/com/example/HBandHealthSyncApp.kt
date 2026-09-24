@@ -55,6 +55,15 @@ class HBandHealthSyncApp : Application() {
                     }
                 }
             },
+            onSportSnapshot = { telemetry ->
+                bleScope.launch(Dispatchers.IO) {
+                    try {
+                        historyRepository.persistLocalTelemetry(telemetry)
+                    } catch (e: Exception) {
+                        Log.e("HBandHealthSyncApp", "Falha ao persistir passos/kcal: ${e.message}", e)
+                    }
+                }
+            },
         )
         HBandWorkScheduler.schedulePeriodicIngest(this)
         HBandBleService.startIfPersistedSession(this)

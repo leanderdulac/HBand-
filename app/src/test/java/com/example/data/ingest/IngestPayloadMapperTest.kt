@@ -123,9 +123,26 @@ class IngestPayloadMapperTest {
         assertEquals(IngestHttpKind.AUTH, IngestPayloadMapper.classifyHttp(403))
         assertEquals(IngestHttpKind.CLIENT, IngestPayloadMapper.classifyHttp(422))
         assertEquals(IngestHttpKind.SERVER, IngestPayloadMapper.classifyHttp(503))
-        val message = IngestPayloadMapper.authErrorMessage(401, "invalid api key")
-        assertTrue(message.contains("401"))
-        assertTrue(message.contains("Ajustes"))
+        val message401 = IngestPayloadMapper.authErrorMessage(401, "invalid api key")
+        assertTrue(message401.contains("401"))
+        assertTrue(message401.contains(IngestReconciler.AUTH_INVALID_MESSAGE))
+        assertFalse(message401.contains("invalid api key"))
+        val message403 = IngestPayloadMapper.authErrorMessage(403, null)
+        assertTrue(message403.contains(IngestReconciler.AUTH_FORBIDDEN_MESSAGE))
+    }
+
+    @Test
+    fun `telemetry JSON includes client_reading_id when provided`() {
+        val json = JSONObject(
+            IngestPayloadMapper.telemetryToJson(
+                telemetry(heartRate = 80),
+                "PAT-1",
+                clientReadingId = "8f3a2c1e-4b0d-4a11-9c22-111111111111",
+            )
+        )
+        assertEquals("8f3a2c1e-4b0d-4a11-9c22-111111111111", json.getString("client_reading_id"))
+        assertEquals("2026-09-14T12:00:00Z", json.getString("timestamp"))
+        assertEquals("C4:E3:42:AA:30:A4", json.getString("device_id"))
     }
 }
 

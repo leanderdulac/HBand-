@@ -63,5 +63,9 @@ data class IngestResponse(
     val success: Boolean = true,
     val message: String? = "Wearable telemetry ingested successfully",
     val id: String? = null,
-    val processedAt: String? = null
+    val processedAt: String? = null,
+    val ingest_status: String? = null,
+    val duplicate: Boolean? = null,
+    val client_reading_id: String? = null,
+    val reading_id: String? = null,
 )

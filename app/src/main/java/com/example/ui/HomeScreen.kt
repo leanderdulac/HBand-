@@ -126,6 +126,8 @@ fun HomeScreen(
     val lowerHrThreshold by viewModel.lowerHrThreshold.collectAsStateWithLifecycle()
     val hrAlertsEnabled by viewModel.hrAlertsEnabled.collectAsStateWithLifecycle()
 
+    val ingestDiagnostics by viewModel.ingestDiagnostics.collectAsStateWithLifecycle()
+
     val firestoreSyncStatus by viewModel.firestoreSyncStatus.collectAsStateWithLifecycle()
     val lastFirestoreBackupTime by viewModel.lastFirestoreBackupTime.collectAsStateWithLifecycle()
     val lastFirestoreBackupCount by viewModel.lastFirestoreBackupCount.collectAsStateWithLifecycle()
@@ -437,6 +439,7 @@ fun HomeScreen(
                         onStartFindByPhone = { viewModel.startFindDeviceByPhone() },
                         onStopFindByPhone = { viewModel.stopFindDeviceByPhone() },
                         onHealthRemindChange = { viewModel.setBandHealthRemind(it) },
+                        ingestDiagnostics = ingestDiagnostics,
                     )
                 }
             }
@@ -598,6 +601,9 @@ private fun DashboardTab(
 
         com.example.ui.components.DailyHealthSummaryCard(
             metrics = sensorMetrics,
+            liveSteps = latestTelemetry?.steps ?: 0,
+            liveCalories = latestTelemetry?.calories ?: 0f,
+            liveDistanceMeters = latestTelemetry?.distanceMeters ?: 0f,
             modifier = Modifier.fillMaxWidth()
         )
 

@@ -63,12 +63,19 @@ object IngestPayloadMapper {
         }
     }
 
-    fun telemetryToJson(telemetry: HBandTelemetry, patientId: String): String {
+    fun telemetryToJson(
+        telemetry: HBandTelemetry,
+        patientId: String,
+        clientReadingId: String? = null,
+    ): String {
         val json = JSONObject()
         json.put("patient_id", resolvePatientId(patientId))
         json.put("device_id", resolveDeviceId(telemetry.deviceId))
         json.put("device_model", telemetry.deviceModel)
         json.put("timestamp", telemetry.timestamp)
+        if (!clientReadingId.isNullOrBlank()) {
+            json.put("client_reading_id", clientReadingId)
+        }
         json.put("heart_rate", telemetry.heartRate)
 
         val sys = telemetry.bloodPressure.systolic
@@ -114,6 +121,7 @@ object IngestPayloadMapper {
             else -> ""
         }
         val timestamp = jsonObj.optString("timestamp", "")
+        val clientReadingId = jsonObj.optString("client_reading_id", "")
         val metrics = jsonObj.optJSONObject("metrics")
 
         val hr = firstPresentInt(metrics, "heartRate")
@@ -145,6 +153,7 @@ object IngestPayloadMapper {
         normalized.put("patient_id", patientId)
         if (deviceId.isNotBlank()) normalized.put("device_id", resolveDeviceId(deviceId))
         if (timestamp.isNotBlank()) normalized.put("timestamp", timestamp)
+        if (clientReadingId.isNotBlank()) normalized.put("client_reading_id", clientReadingId)
         if (hr != null) normalized.put("heart_rate", hr)
         if (sys != null && dia != null && sys > 0 && dia > 0) {
             normalized.put(
@@ -174,9 +183,10 @@ object IngestPayloadMapper {
         }
     }
 
-    fun authErrorMessage(httpCode: Int, errorBody: String?): String {
-        val detail = errorBody?.takeIf { it.isNotBlank() }?.let { ": $it" } ?: ""
-        return "Falha de autenticação na API HealthTech (HTTP $httpCode)$detail. Verifique a chave em Ajustes."
+    fun authErrorMessage(httpCode: Int, @Suppress("UNUSED_PARAMETER") errorBody: String? = null): String {
+        // Never include the request key or a body that might echo it.
+        val reason = IngestReconciler.authMessage(httpCode)
+        return "HTTP $httpCode — $reason. Verifique a chave em Ajustes."
     }
 
     private fun firstPresentInt(obj: JSONObject?, key: String): Int? {

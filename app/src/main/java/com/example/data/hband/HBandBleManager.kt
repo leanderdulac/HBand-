@@ -87,6 +87,7 @@ class HBandBleManager(
     private val scope: CoroutineScope,
     private val onHistorySamples: (List<HBandTelemetry>) -> Unit = {},
     private val onAdvancedSample: (com.example.data.local.AdvancedMeasurementEntity) -> Unit = {},
+    private val onSportSnapshot: (HBandTelemetry) -> Unit = {},
 ) {
     private val TAG = "HBandBleManager"
 
@@ -2345,8 +2346,9 @@ class HBandBleManager(
                     )
                 }
                 readP1Settings(caps)
-                if (currentSteps > 0) {
+                if (currentSteps > 0 || currentCalories > 0f || currentDistance > 0f) {
                     emitRealTelemetry(currentConnectedMac(), currentConnectedName())
+                    _latestTelemetry.value?.let(onSportSnapshot)
                 }
 
                 if (sync.cancelled || userRequestedDisconnect) return@launch
@@ -2394,9 +2396,7 @@ class HBandBleManager(
             if (t.heartRate in 30..240) currentHeartRate = t.heartRate
             if (t.bloodPressure.systolic in 60..240) currentSystolic = t.bloodPressure.systolic
             if (t.bloodPressure.diastolic in 30..160) currentDiastolic = t.bloodPressure.diastolic
-            if (t.steps > 0) currentSteps = t.steps
-            if (t.calories > 0f) currentCalories = t.calories
-            if (t.distanceMeters > 0f) currentDistance = t.distanceMeters
+            // Origin 5-min buckets are interval deltas, not the daily readSportStep total.
             if (t.temperatureCelsius in 30f..43f) currentTemp = t.temperatureCelsius
         }
         latestSpo2?.telemetry?.let { t ->

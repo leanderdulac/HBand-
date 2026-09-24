@@ -340,7 +340,8 @@ class VeepooHistorySync(
         onProgress: (Float) -> Unit,
     ): List<VeepooHistoryMapper.MappedSample>? {
         val samples = mutableListOf<VeepooHistoryMapper.MappedSample>()
-        val setting = ReadOriginSetting(watchDay, 0, false, 1)
+        val args = VeepooHistoryReadSettings.originArgs(watchDay)
+        val setting = ReadOriginSetting(args.day, args.position, args.onlyReadOneDay, args.watchday)
         val completed = awaitComplete(ORIGIN_TIMEOUT_MS) { done, fail ->
             val listener = originListener(
                 protocolVersion = caps.originProtocolVersion,
@@ -357,7 +358,13 @@ class VeepooHistorySync(
             } catch (e: Exception) {
                 Log.w(TAG, "readOriginDataBySetting failed, falling back to FromDay: ${e.message}")
                 try {
-                    vpManager.readOriginDataFromDay(ackLogger(), listener, watchDay, 0, 1)
+                    vpManager.readOriginDataFromDay(
+                        ackLogger(),
+                        listener,
+                        args.day,
+                        args.position,
+                        args.watchday,
+                    )
                 } catch (inner: Exception) {
                     fail(inner.message ?: "origin start failed")
                 }
@@ -390,15 +397,16 @@ class VeepooHistorySync(
                     done()
                 }
             }
+            val args = VeepooHistoryReadSettings.sleepArgs(watchDay)
             try {
-                vpManager.readSleepDataFromDay(ackLogger(), listener, watchDay, 0)
+                vpManager.readSleepDataFromDay(ackLogger(), listener, args.day, args.watchday)
             } catch (e: Exception) {
                 Log.w(TAG, "readSleepDataFromDay failed, using BySetting: ${e.message}")
                 try {
                     vpManager.readSleepDataBySetting(
                         ackLogger(),
                         listener,
-                        ReadSleepSetting(watchDay, false, 0),
+                        ReadSleepSetting(args.day, args.onlyReadOneDay, args.watchday),
                     )
                 } catch (inner: Exception) {
                     fail(inner.message ?: "sleep start failed")
@@ -435,10 +443,11 @@ class VeepooHistorySync(
                 }
             }
             try {
+                val args = VeepooHistoryReadSettings.originArgs(watchDay)
                 vpManager.readHRVOriginBySetting(
                     ackLogger(),
                     listener,
-                    ReadOriginSetting(watchDay, 0, false, 1),
+                    ReadOriginSetting(args.day, args.position, args.onlyReadOneDay, args.watchday),
                 )
             } catch (e: Exception) {
                 Log.w(TAG, "readHRVOriginBySetting failed, using readHRVOrigin: ${e.message}")
@@ -477,10 +486,11 @@ class VeepooHistorySync(
                 }
             }
             try {
+                val args = VeepooHistoryReadSettings.originArgs(watchDay)
                 vpManager.readSpo2hOriginBySetting(
                     ackLogger(),
                     listener,
-                    ReadOriginSetting(watchDay, 0, false, 1),
+                    ReadOriginSetting(args.day, args.position, args.onlyReadOneDay, args.watchday),
                 )
             } catch (e: Exception) {
                 Log.w(TAG, "readSpo2hOriginBySetting failed, using readSpo2hOrigin: ${e.message}")

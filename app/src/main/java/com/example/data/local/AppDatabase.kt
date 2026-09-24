@@ -16,7 +16,7 @@ import net.zetetic.database.sqlcipher.SupportOpenHelperFactory
         UserProfileEntity::class,
         AdvancedMeasurementEntity::class,
     ],
-    version = 6,
+    version = AppDatabaseMigrations.VERSION_WITH_CLIENT_READING_ID,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -59,7 +59,11 @@ abstract class AppDatabase : RoomDatabase() {
                 context,
                 AppDatabase::class.java,
                 DATABASE_NAME
-            ).fallbackToDestructiveMigration(dropAllTables = true)
+            )
+                // v6→v7 is additive and backfills queued rows. Versions before the
+                // field-test schema never held the 53-row outbox we must keep.
+                .addMigrations(AppDatabaseMigrations.MIGRATION_6_7)
+                .fallbackToDestructiveMigrationFrom(true, 1, 2, 3, 4, 5)
 
             if (SqlCipherNative.isLoaded) {
                 val passphrase = SqlCipherPassphrase.getPassphrase(context)

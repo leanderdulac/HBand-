@@ -63,9 +63,12 @@ data class DailySummaryMetrics(
 @Composable
 fun DailyHealthSummaryCard(
     metrics: List<HBandSensorMetricEntity>,
+    liveSteps: Int = 0,
+    liveCalories: Float = 0f,
+    liveDistanceMeters: Float = 0f,
     modifier: Modifier = Modifier
 ) {
-    val dailySummary = remember(metrics) {
+    val dailySummary = remember(metrics, liveSteps, liveCalories, liveDistanceMeters) {
         val now = System.currentTimeMillis()
         val cal = Calendar.getInstance().apply {
             timeInMillis = now
@@ -86,23 +89,33 @@ fun DailyHealthSummaryCard(
             todayEntries = metrics.take(20)
         }
 
-        if (todayEntries.isNotEmpty()) {
+        if (todayEntries.isNotEmpty() || liveSteps > 0 || liveCalories > 0f) {
             val count = todayEntries.size
             // Active minutes calculation: count entries with active movement (steps > 0 or HR >= 75)
             val activeEntries = todayEntries.count { it.heartRate >= 75 || it.steps > 0 }
             val computedActiveMins = (activeEntries * 3.5).toInt().coerceAtLeast(0)
 
-            val maxSteps = todayEntries.maxOf { it.steps }
-            val maxDistanceMeters = todayEntries.maxOf { it.distanceMeters }
-            val maxLoggedCalories = todayEntries.maxOf { it.calories }
+            val maxSteps = maxOf(todayEntries.maxOfOrNull { it.steps } ?: 0, liveSteps)
+            val maxDistanceMeters = maxOf(
+                todayEntries.maxOfOrNull { it.distanceMeters } ?: 0f,
+                liveDistanceMeters,
+            )
+            val maxLoggedCalories = maxOf(
+                todayEntries.maxOfOrNull { it.calories } ?: 0f,
+                liveCalories,
+            )
 
             val measuredHr = todayEntries.map { it.heartRate }.filter { it > 0 }
             val measuredHrv = todayEntries.map { it.hrvScore }.filter { it > 0 }
             val avgHr = if (measuredHr.isEmpty()) 0 else measuredHr.average().toInt()
             val avgHrv = if (measuredHrv.isEmpty()) 0 else measuredHrv.average().toInt()
 
-            val latestEntry = todayEntries.maxByOrNull { it.timestampMillis } ?: todayEntries.first()
-            val sleepMins = latestEntry.deepSleepMinutes + latestEntry.lightSleepMinutes
+            val latestEntry = todayEntries.maxByOrNull { it.timestampMillis }
+            val sleepMins = if (latestEntry == null) {
+                0
+            } else {
+                latestEntry.deepSleepMinutes + latestEntry.lightSleepMinutes
+            }
 
             // Calorie calculation: Active burn derived from steps/movement + BMR allowance
             val activeCals = if (maxLoggedCalories > 0f) maxLoggedCalories.toInt() else 0

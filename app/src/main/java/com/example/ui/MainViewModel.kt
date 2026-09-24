@@ -70,6 +70,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val apiHealth: StateFlow<ApiHealthState> = repository.apiHealth
     val isSyncing: StateFlow<Boolean> = repository.isSyncing
     val lastSyncResult: StateFlow<String?> = repository.lastSyncResult
+    val lastUploadHttpStatus: StateFlow<Int?> = repository.lastHttpStatus
+    val lastIngestError: StateFlow<String?> = repository.lastError
 
     val scannedDevices: StateFlow<List<HBandDevice>> = bleManager.scannedDevices
     val connectedDevice: StateFlow<HBandDevice?> = bleManager.connectedDevice
@@ -111,6 +113,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val pendingCount: StateFlow<Int> = allQueueItems.combine(MutableStateFlow(0)) { items, _ ->
         items.count { it.status == QueueStatus.PENDING.name }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
+
+    val ingestDiagnostics: StateFlow<com.example.data.ingest.IngestDiagnostics> = combine(
+        pendingCount,
+        lastUploadHttpStatus,
+        lastIngestError,
+        lastSyncResult,
+    ) { queued, _, _, _ ->
+        repository.currentDiagnostics(queued)
+    }.stateIn(
+        viewModelScope,
+        SharingStarted.WhileSubscribed(5000),
+        repository.currentDiagnostics(0),
+    )
 
     val syncedCount: StateFlow<Int> = allQueueItems.combine(MutableStateFlow(0)) { items, _ ->
         items.count { it.status == QueueStatus.SYNCED.name }
@@ -502,8 +517,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             try {
                 val apiKey = RetrofitClient.apiKey
+                if (!com.example.data.ingest.IngestApiKey.isUsable(apiKey)) {
+                    showNotification(com.example.data.ingest.IngestApiKey.configurationError(), isError = true)
+                    return@launch
+                }
                 val repo = com.healthtech.companion.net.HealthtechRepository.create(
-                    baseUrl = "https://healthtech-secure-api-5794833455.us-central1.run.app",
+                    baseUrl = RetrofitClient.currentBaseUrl,
                     apiKey = apiKey
                 )
                 val response = repo.smokeHeart(patientId)
@@ -615,9 +634,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun updateApiConfig(newBaseUrl: String, newApiKey: String) {
         RetrofitClient.updateConfig(getApplication(), newBaseUrl, newApiKey)
+        repository.clearAuthBackoff()
         checkHealth()
         showNotification("Configurações do endpoint da API atualizadas!")
     }
+
 
     fun syncQueueNow() {
         viewModelScope.launch {

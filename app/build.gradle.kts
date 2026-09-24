@@ -83,6 +83,43 @@ secrets {
   ignoreList.add("FIREBASE_APPCHECK_DEBUG_TOKEN")
 }
 
+val healthtechIngestKeyPlaceholder = "YOUR_HEALTHTECH_API_KEY_HERE"
+fun readHealthtechIngestKey(): String {
+  val envFile = rootProject.file(".env")
+  val exampleFile = rootProject.file(".env.example")
+  val file = if (envFile.exists()) envFile else exampleFile
+  if (!file.exists()) return ""
+  return file.readLines()
+    .firstOrNull { it.trim().startsWith("HEALTHTECH_INGEST_API_KEY=") }
+    ?.substringAfter("=")
+    ?.trim()
+    .orEmpty()
+}
+
+val resolvedIngestKey = readHealthtechIngestKey()
+val ingestKeyIsPlaceholder =
+  resolvedIngestKey.isEmpty() || resolvedIngestKey.equals(healthtechIngestKeyPlaceholder, ignoreCase = true)
+if (ingestKeyIsPlaceholder) {
+  logger.warn(
+    "HEALTHTECH_INGEST_API_KEY is empty or placeholder. Debug builds refuse to call ingest; " +
+      "release assemble/bundle will fail. Set the key in .env (gitignored).",
+  )
+}
+
+gradle.taskGraph.whenReady {
+  val runningRelease = allTasks.any { task ->
+    val name = task.name
+    name.contains("Release", ignoreCase = true) &&
+      (name.startsWith("assemble") || name.startsWith("bundle") || name.contains("assembleRelease") || name.contains("bundleRelease"))
+  }
+  if (runningRelease && ingestKeyIsPlaceholder) {
+    throw GradleException(
+      "Release build blocked: HEALTHTECH_INGEST_API_KEY is placeholder or empty. " +
+        "Set a real ingest key in .env (gitignored). Never commit the key.",
+    )
+  }
+}
+
 googleServices { missingGoogleServicesStrategy = MissingGoogleServicesStrategy.WARN }
 
 // Some unused dependencies are commented out below instead of being removed.
