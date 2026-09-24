@@ -457,7 +457,7 @@ class WearableRepository(
                 val patientId = IngestReconciler.patientIdFrom(payloads.first())
                 val idempotencyKey = IngestReconciler.flushIdempotencyKey(ids)
 
-                val decisions: List<IngestItemDecision>
+                var decisions: List<IngestItemDecision>
                 try {
                     val batchJson = IngestReconciler.buildBatchBody(patientId, payloads)
                     val batchResponse = apiService.batchIngestWearableData(

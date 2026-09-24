@@ -27,7 +27,7 @@ object AppDatabaseMigrations {
                     val uuid = UUID.randomUUID().toString()
                     db.execSQL(
                         "UPDATE ingest_queue SET clientReadingId = ? WHERE id = ?",
-                        arrayOf(uuid, rowId),
+                        arrayOf<Any>(uuid, rowId),
                     )
                 }
             }
