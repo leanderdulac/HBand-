@@ -3,6 +3,7 @@ package com.example.data.ingest
 import com.example.data.model.BloodPressure
 import com.example.data.model.HBandTelemetry
 import com.example.data.model.SleepSummary
+import com.example.data.local.IngestQueueEntity
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -134,17 +135,17 @@ class IngestPayloadMapperTest {
     }
 
     @Test
-    fun `telemetry JSON includes client_reading_id when provided`() {
-        val json = JSONObject(
-            IngestPayloadMapper.telemetryToJson(
-                telemetry(heartRate = 80),
-                "PAT-1",
-                clientReadingId = "8f3a2c1e-4b0d-4a11-9c22-111111111111",
-            )
+    fun `queued telemetry JSON includes durable client_reading_id on every attempt`() {
+        val row = IngestQueueEntity(
+            payloadJson = IngestPayloadMapper.telemetryToJson(telemetry(heartRate = 80), "PAT-1"),
+            clientReadingId = "8f3a2c1e-4b0d-4a11-9c22-111111111111",
         )
+        val first = IngestReconciler.prepare(row).json
+        val json = JSONObject(first)
         assertEquals("8f3a2c1e-4b0d-4a11-9c22-111111111111", json.getString("client_reading_id"))
         assertEquals("2026-09-14T12:00:00Z", json.getString("timestamp"))
         assertEquals("C4:E3:42:AA:30:A4", json.getString("device_id"))
+        assertEquals(first, IngestReconciler.prepare(row.copy(retries = 3, lastAttemptAt = 99)).json)
     }
 }
 
