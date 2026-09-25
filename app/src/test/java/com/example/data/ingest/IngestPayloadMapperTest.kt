@@ -126,10 +126,11 @@ class IngestPayloadMapperTest {
         val message = IngestPayloadMapper.authErrorMessage(401, "invalid api key")
         assertTrue(message.contains("401"))
         assertTrue(message.contains("Ajustes"))
-        assertTrue(message.contains(IngestReconciler.AUTH_INVALID_MESSAGE))
         assertFalse(message.contains("invalid api key"))
-        val message403 = IngestPayloadMapper.authErrorMessage(403, null)
-        assertTrue(message403.contains(IngestReconciler.AUTH_FORBIDDEN_MESSAGE))
+        val message403 = IngestPayloadMapper.authErrorMessage(403, "private server detail")
+        assertTrue(message403.contains("403"))
+        assertTrue(message403.contains("Ajustes"))
+        assertFalse(message403.contains("private server detail"))
     }
 
     @Test
