@@ -110,7 +110,7 @@ class ReceiptRecoveryAndroidLabTest {
             db.advancedMeasurementDao(), maxBatchItems = 2)
 
     /** Intentionally killed after a parsed fake receipt; not a passing JUnit execution. */
-    @Test fun interruptReceiptPersistence() = runBlocking {
+    @Test fun interruptReceiptPersistence(): Unit = runBlocking {
         check(!context.getDatabasePath(name).exists()) { "Seed refuses existing receipt database" }
         check(!evidence.contains("cut_point")) { "Never reuse an interruption marker" }
         val db = open()
