@@ -32,8 +32,13 @@ podendo ser salva, não é descartada para satisfazer o backend. Não tocar mute
 recebimento, schema, chave, persistência, migração, endpoints, autorização ou filas
 existentes. Web, ACS e SMClick não mudam; dados/IDs/donos centrais não são recriados.
 
-Três testes novos: caso misto e retry sem reenviar inválido, limites inclusivos/
-frações/não finitos, e conservação da leitura fora do contrato na captura local.
+Cinco testes novos: caso misto e retry sem reenviar inválido, limites inclusivos/
+frações/não finitos, conservação da leitura fora do contrato na captura local,
+preservação de frações na normalização legada e lote legado com250.1 recusado
+localmente sem bloquear o vizinho válido. Revisão independente identificou que
+a normalização legada truncava250.1 para250 antes da validação; teste vermelho
+confirmou2synced onde se esperava1. Somente a extração do heart_rate legado passa
+a preservar Double; payload armazenado e demais campos permanecem intactos.
 Resultado final/comandos/SHA/revisão em
 C:/CDev/Next2U-Pilot-2026-09-25-leandro-response-validation/.
 

@@ -34,6 +34,16 @@ class IngestPayloadMapperTest {
         assertFalse(IngestPayloadMapper.isIngestibleJson(payload))
     }
 
+    @Test fun `legacy heart rate preserves numeric fractions before transport validation`() {
+        for (value in listOf(72.5, 250.1)) {
+            val raw = JSONObject().put("patient_id", "SYNTHETIC")
+                .put("metrics", JSONObject().put("heartRate", value)).toString()
+            val normalized = IngestPayloadMapper.normalizeQueuePayload(raw)
+            assertEquals(value, JSONObject(normalized).getDouble("heart_rate"), 0.0)
+            assertEquals(value <= 250.0, IngestPayloadMapper.isIngestibleJson(normalized))
+        }
+    }
+
     private fun telemetry(
         heartRate: Int = 76,
         systolic: Int = 0,

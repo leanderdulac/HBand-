@@ -121,9 +121,9 @@ object IngestPayloadMapper {
         val timestamp = jsonObj.optString("timestamp", "")
         val metrics = jsonObj.optJSONObject("metrics")
 
-        val hr = firstPresentInt(metrics, "heartRate")
-            ?: firstPresentInt(jsonObj, "heart_rate")
-            ?: firstPresentInt(jsonObj, "heartRate")
+        val hr = firstPresentDouble(metrics, "heartRate")
+            ?: firstPresentDouble(jsonObj, "heart_rate")
+            ?: firstPresentDouble(jsonObj, "heartRate")
 
         val sys = metrics?.optJSONObject("bloodPressure")?.takeIf { it.has("systolic") }?.optInt("systolic")
             ?: jsonObj.optJSONObject("blood_pressure")?.takeIf { it.has("systolic") }?.optInt("systolic")

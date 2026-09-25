@@ -124,6 +124,20 @@ class WearableBatchIngestTest {
         assertEquals(original, db.ingestQueueDao().getAllItemsSync().associate { it.id to it.payloadJson })
     }
 
+    @Test fun legacy_fraction_above_contract_limit_is_not_truncated_and_sent() = runBlocking {
+        insert(1)
+        val legacy = JSONObject().put("patient_id", "PATIENT-A").put("deviceId", "WATCH-A")
+            .put("timestamp", "2026-09-24T12:00:00Z")
+            .put("metrics", JSONObject().put("heartRate", 250.1)).toString()
+        insert(2, raw = legacy)
+        assertEquals(1, repo().processQueueDetailed().syncedCount)
+        val row = db.ingestQueueDao().getAllItemsSync().single { it.id == 2L }
+        assertEquals("FAILED", row.status)
+        assertEquals(legacy, row.payloadJson)
+        assertEquals("synthetic-2", row.clientReadingId)
+        assertEquals(1, JSONObject(requests.single().second).getJSONArray("readings").length())
+    }
+
     @Test fun partial_receipt_does_not_confirm_neighbor_and_retry_recovers_duplicate() = runBlocking {
         insert(1); insert(2)
         batchHandler = { request ->
