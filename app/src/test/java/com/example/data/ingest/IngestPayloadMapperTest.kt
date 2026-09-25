@@ -12,6 +12,33 @@ import org.junit.Test
 
 class IngestPayloadMapperTest {
 
+    @Test fun `normalization preserves explicitly stored source without reclassification`() {
+        for (value in listOf("companion_manual", "ble_sim", "ble_hband", "http", "", "unknown-source", JSONObject.NULL)) {
+            for (legacy in listOf(false, true)) {
+                val raw = JSONObject().put("patient_id", "SYNTHETIC")
+                    .put("ingest_source", value)
+                if (legacy) raw.put("metrics", JSONObject().put("heartRate", 72))
+                else raw.put("heart_rate", 72)
+                val normalized = JSONObject(IngestPayloadMapper.normalizeQueuePayload(raw.toString()))
+                assertTrue(normalized.has("ingest_source"))
+                assertEquals(value, normalized.get("ingest_source"))
+            }
+        }
+    }
+
+    @Test fun `normalization never infers an absent source from real sensor marker`() {
+        for (legacy in listOf(false, true)) {
+            for (isReal in listOf(false, true)) {
+                val raw = JSONObject().put("patient_id", "SYNTHETIC").put("is_real_sensor_data", isReal)
+                if (legacy) raw.put("metrics", JSONObject().put("heartRate", 72))
+                else raw.put("heart_rate", 72)
+                val normalized = JSONObject(IngestPayloadMapper.normalizeQueuePayload(raw.toString()))
+                assertFalse(normalized.has("ingest_source"))
+                assertEquals(isReal, normalized.getBoolean("is_real_sensor_data"))
+            }
+        }
+    }
+
     @Test fun `queued heart rate obeys inclusive Core bounds without integer truncation`() {
         for (value in listOf(20.0, 72.5, 250.0)) {
             assertTrue(IngestPayloadMapper.isIngestibleJson(JSONObject().put("heart_rate", value).toString()))

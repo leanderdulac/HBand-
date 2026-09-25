@@ -166,6 +166,8 @@ object IngestPayloadMapper {
         if (calories != null) normalized.put("calories", calories)
         if (hrv != null && hrv > 0) normalized.put("hrv_score", hrv)
         if (isReal != null) normalized.put("is_real_sensor_data", isReal)
+        // Preserve declared provenance exactly; absence is not evidence of any source.
+        if (jsonObj.has("ingest_source")) normalized.put("ingest_source", jsonObj.get("ingest_source"))
         normalized.put("service", SERVICE_NAME)
         return normalized.toString(2)
     }

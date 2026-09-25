@@ -82,6 +82,42 @@ class WearableBatchIngestTest {
     }
     private fun success(request: JSONObject) = Response.success(receipt(request).toString().toResponseBody())
 
+    @Test fun explicit_sources_survive_lost_receipt_and_retry_without_rewriting_durable_rows() = runBlocking {
+        val sources = listOf("companion_manual", "ble_sim", "ble_hband", "http")
+        for ((index, source) in sources.withIndex()) {
+            val payload = JSONObject().put("patient_id", "PATIENT-A")
+                .put("timestamp", "2026-09-24T12:00:00Z").put("ingest_source", source)
+            if (index % 2 == 0) payload.put("deviceId", "WATCH-A")
+                .put("metrics", JSONObject().put("heartRate", 72))
+            else payload.put("device_id", "WATCH-A").put("heart_rate", 72)
+            insert(index + 1, raw = payload.toString())
+        }
+        val original = db.ingestQueueDao().getAllItemsSync().associateBy { it.clientReadingId }
+        batchHandler = { request -> receipt(request); throw IOException("Synthetic lost source receipt") }
+        assertEquals(0, repo().processQueueDetailed().syncedCount)
+        assertTrue(db.ingestQueueDao().getAllItemsSync().all { it.status == "PENDING" })
+        val firstRequest = JSONObject(requests.single().second).getJSONArray("readings")
+        assertEquals(sources.size, firstRequest.length())
+        for (index in 0 until firstRequest.length()) {
+            val sent = firstRequest.getJSONObject(index)
+            val durable = original.getValue(sent.getString("client_reading_id"))
+            assertEquals(JSONObject(durable.payloadJson).getString("ingest_source"), sent.getString("ingest_source"))
+        }
+        batchHandler = { success(it) }
+        assertEquals(4, repo().processQueueDetailed().syncedCount)
+        assertEquals(requests[0], requests[1])
+        assertEquals(4, stored.size)
+        val after = db.ingestQueueDao().getAllItemsSync()
+        assertEquals(original.keys, after.map { it.clientReadingId }.toSet())
+        for (row in after) {
+            val before = original.getValue(row.clientReadingId)
+            assertEquals("SYNCED", row.status)
+            assertEquals(before.id, row.id)
+            assertEquals(before.payloadJson, row.payloadJson)
+            assertEquals(before.createdAt, row.createdAt)
+        }
+    }
+
     @Test fun invalid_heart_rate_is_kept_locally_without_rejecting_valid_batch_neighbors() = runBlocking {
         insert(1)
         val invalid = JSONObject().put("patient_id", "PATIENT-A").put("device_id", "WATCH-A")
