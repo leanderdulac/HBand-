@@ -12,6 +12,28 @@ import org.junit.Test
 
 class IngestPayloadMapperTest {
 
+    @Test fun `queued heart rate obeys inclusive Core bounds without integer truncation`() {
+        for (value in listOf(20.0, 72.5, 250.0)) {
+            assertTrue(IngestPayloadMapper.isIngestibleJson(JSONObject().put("heart_rate", value).toString()))
+        }
+        for (value in listOf(19.9, 250.1, 999.0)) {
+            assertFalse(IngestPayloadMapper.isIngestibleJson(JSONObject().put("heart_rate", value).toString()))
+        }
+        for (raw in listOf("{}", "{\"heart_rate\":null}", "{\"heart_rate\":\"NaN\"}", "{\"heart_rate\":\"Infinity\"}")) {
+            assertFalse(IngestPayloadMapper.isIngestibleJson(raw))
+        }
+    }
+
+    @Test fun `out of contract reading remains eligible for durable local capture`() = kotlinx.coroutines.runBlocking {
+        val reading = telemetry(heartRate = 999)
+        val saved = mutableListOf<HBandTelemetry>()
+        IngestDeduper().saveIfNeeded(reading) { saved += it }
+        assertEquals(listOf(reading), saved)
+        val payload = IngestPayloadMapper.telemetryToJson(reading, "SYNTHETIC")
+        assertEquals(999, JSONObject(payload).getInt("heart_rate"))
+        assertFalse(IngestPayloadMapper.isIngestibleJson(payload))
+    }
+
     private fun telemetry(
         heartRate: Int = 76,
         systolic: Int = 0,

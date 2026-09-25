@@ -16,7 +16,8 @@ enum class IngestHttpKind {
  *
  * Contract (from the HealthTech smoke test and observed 422s):
  * - `patient_id`, `device_id`, `timestamp`, `heart_rate` are required
- * - `heart_rate` must be >= [MIN_HEART_RATE] or the API returns HTTP 422
+ * - queued `heart_rate` must be in [MIN_HEART_RATE]..[MAX_HEART_RATE] or the
+ *   confirmed Core schema rejects the entire batch with HTTP 422
  * - optional vitals (BP, SpO2, temperature, HRV) are sent only when a real
  *   reading exists — never filled with demo defaults
  */
@@ -24,13 +25,14 @@ object IngestPayloadMapper {
     const val DEFAULT_PATIENT_ID = "PAT-HBAND-001"
     const val SERVICE_NAME = "healthtech-secure-api"
     const val MIN_HEART_RATE = 20
+    const val MAX_HEART_RATE = 250
 
     /** Placeholder MAC from the old [com.example.data.model.HBandDevice] defaults. */
     const val PLACEHOLDER_DEVICE_ID = "HBAND-B57-89A4"
     const val PLACEHOLDER_MAC = "E4:A8:B6:12:89:A4"
 
     const val MISSING_HR_ERROR =
-        "FC ausente ou inválida (heart_rate < $MIN_HEART_RATE). Amostra não enviada — nenhum valor foi inventado."
+        "FC ausente ou fora do intervalo aceito pela API ($MIN_HEART_RATE a $MAX_HEART_RATE). Registro preservado para revisão, sem envio ou alteração do valor."
 
     fun resolvePatientId(raw: String?): String {
         val trimmed = raw?.trim().orEmpty()
@@ -51,13 +53,16 @@ object IngestPayloadMapper {
             value.equals(PLACEHOLDER_MAC, ignoreCase = true)
     }
 
+    // Existing local capture eligibility: do not discard an out-of-contract reading before saving it.
     fun isIngestibleHeartRate(heartRate: Int): Boolean = heartRate >= MIN_HEART_RATE
 
     fun isIngestible(telemetry: HBandTelemetry): Boolean = isIngestibleHeartRate(telemetry.heartRate)
 
     fun isIngestibleJson(json: String): Boolean {
         return try {
-            isIngestibleHeartRate(JSONObject(json).optInt("heart_rate", 0))
+            // Validate the transport value without truncating fractions or rewriting the durable payload.
+            val heartRate = JSONObject(json).optDouble("heart_rate", Double.NaN)
+            heartRate.isFinite() && heartRate in MIN_HEART_RATE.toDouble()..MAX_HEART_RATE.toDouble()
         } catch (_: Exception) {
             false
         }

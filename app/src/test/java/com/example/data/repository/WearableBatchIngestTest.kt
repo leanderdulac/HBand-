@@ -82,6 +82,38 @@ class WearableBatchIngestTest {
     }
     private fun success(request: JSONObject) = Response.success(receipt(request).toString().toResponseBody())
 
+    @Test fun invalid_heart_rate_is_kept_locally_without_rejecting_valid_batch_neighbors() = runBlocking {
+        insert(1)
+        val invalid = JSONObject().put("patient_id", "PATIENT-A").put("device_id", "WATCH-A")
+            .put("timestamp", "2026-09-24T12:00:00Z").put("heart_rate", 999).toString()
+        insert(2, raw = invalid)
+        val before = db.ingestQueueDao().getAllItemsSync().associateBy { it.id }
+        batchHandler = { request ->
+            // Confirmed Core schema rejects the entire request before any item is stored.
+            val readings = request.getJSONArray("readings")
+            if ((0 until readings.length()).any { readings.getJSONObject(it).getDouble("heart_rate") !in 20.0..250.0 })
+                Response.error(422, "synthetic-whole-batch-validation".toResponseBody())
+            else success(request)
+        }
+        assertEquals(1, repo().processQueueDetailed().syncedCount)
+        val after = db.ingestQueueDao().getAllItemsSync().associateBy { it.id }
+        assertEquals("SYNCED", after[1L]!!.status)
+        assertEquals("FAILED", after[2L]!!.status)
+        for (id in before.keys) {
+            assertEquals(before[id]!!.payloadJson, after[id]!!.payloadJson)
+            assertEquals(before[id]!!.clientReadingId, after[id]!!.clientReadingId)
+            assertEquals(before[id]!!.createdAt, after[id]!!.createdAt)
+        }
+        assertEquals(0, after[2L]!!.retries)
+        assertEquals(1, batchCalls)
+        val sent = JSONObject(requests.single().second).getJSONArray("readings")
+        assertEquals(1, sent.length())
+        assertEquals("synthetic-1", sent.getJSONObject(0).getString("client_reading_id"))
+        repo().retryAllFailed()
+        assertEquals(1, batchCalls) // Invalid record remains local even on explicit retry.
+        assertEquals(invalid, db.ingestQueueDao().getAllItemsSync().single { it.id == 2L }.payloadJson)
+    }
+
     @Test fun mixed_patients_are_sent_in_separate_batches_with_exact_original_ids() = runBlocking {
         insert(1); insert(2, "PATIENT-B"); insert(3); insert(4, "PATIENT-B")
         val original = db.ingestQueueDao().getAllItemsSync().associate { it.id to it.payloadJson }
