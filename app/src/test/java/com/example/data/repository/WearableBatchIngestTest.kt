@@ -249,7 +249,7 @@ class WearableBatchIngestTest {
         try {
             withTimeout(5000) { entered.await() }
             assertTrue(second.isSyncing.value)
-            assertEquals("Sincronização já em andamento.", second.retryAllFailed().message)
+            assertEquals("Outra operação da fila está em andamento. Aguarde e tente novamente.", second.retryAllFailed().message)
             assertEquals(before, db.ingestQueueDao().getAllItemsSync())
             assertEquals(1, batchCalls)
             release.complete(Unit)
