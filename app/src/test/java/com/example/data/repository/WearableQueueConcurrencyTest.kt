@@ -173,6 +173,7 @@ class WearableQueueConcurrencyTest {
         var beforeUpdate: (IngestQueueEntity) -> Unit = {}
         var afterUpdate: (IngestQueueEntity) -> Unit = {}
         var beforeInsert: () -> Unit = {}
+        var beforeRemoval: suspend () -> Unit = {}
         override fun getAllItems() = flowOf(rows.values.toList())
         override suspend fun getAllItemsSync() = rows.values.toList()
         override suspend fun hasAuthorizationBlock(unauthorizedPrefix: String, forbiddenPrefix: String) =
@@ -195,12 +196,12 @@ class WearableQueueConcurrencyTest {
         override suspend fun updateItem(item: IngestQueueEntity) {
             writes.incrementAndGet()
             beforeUpdate(item)
-            rows[item.id] = item
+            rows.computeIfPresent(item.id) { _, _ -> item } // Room @Update never reinserts a deleted row.
             afterUpdate(item)
         }
-        override suspend fun deleteById(id: Long) { rows.remove(id) }
-        override suspend fun clearSyncedItems() { rows.entries.removeIf { it.value.status == QueueStatus.SYNCED.name } }
-        override suspend fun clearAll() { rows.clear() }
+        override suspend fun deleteById(id: Long) { beforeRemoval(); rows.remove(id) }
+        override suspend fun clearSyncedItems() { beforeRemoval(); rows.entries.removeIf { it.value.status == QueueStatus.SYNCED.name } }
+        override suspend fun clearAll() { beforeRemoval(); rows.clear() }
         override fun getPendingCountFlow() = flowOf(rows.values.count { it.status == QueueStatus.PENDING.name })
     }
 
@@ -224,6 +225,101 @@ class WearableQueueConcurrencyTest {
             return com.example.data.ingest.withSyntheticReceipt(ingest(), body)
         }
         override suspend fun checkHealth() = health()
+    }
+
+    private val removals: List<suspend (WearableRepository) -> Any> = listOf(
+        { it.deleteQueueItem(2L) }, { it.clearAllQueue() }, { it.clearSyncedItems() },
+    )
+
+    @Test fun removal_refuses_a_snapshot_already_owned_by_another_sender() = runBlocking {
+        withTimeout(10000) {
+            for (remove in removals) {
+                val first = item()
+                val second = first.copy(id = 2, clientReadingId = "synthetic-removal-second", createdAt = first.createdAt + 1)
+                val queue = Queue(first).apply { rows[2L] = second }
+                val entered = CompletableDeferred<Unit>()
+                val release = CompletableDeferred<Unit>()
+                val api = Api().apply { ingest = { entered.complete(Unit); release.await(); Response.success(IngestResponse(ingest_status = "accepted")) } }
+                val sender = repository(queue, metrics, api)
+                val processing = async { sender.processQueueDetailed() }
+                try {
+                    entered.await()
+                    val refused = remove(repository(queue, metrics, api))
+                    assertEquals(second, queue.rows[2L])
+                    assertEquals(false as Any, refused)
+                } finally { release.complete(Unit) }
+                assertEquals(2, processing.await().syncedCount)
+                assertEquals(2, api.calls.get())
+                assertEquals("SYNCED", queue.rows[2L]?.status)
+                assertFalse(sender.isSyncing.value)
+            }
+        }
+    }
+
+    @Test fun removal_admitted_first_blocks_senders_and_other_removals_without_claiming_sync() = runBlocking {
+        withTimeout(10000) {
+            for ((index, remove) in removals.withIndex()) {
+                val queue = Queue(item()).apply { rows[2L] = item().copy(id = 2, clientReadingId = "synthetic-removal-second") }
+                val entered = CompletableDeferred<Unit>()
+                val release = CompletableDeferred<Unit>()
+                queue.beforeRemoval = { entered.complete(Unit); release.await() }
+                val api = Api()
+                val remover = repository(queue, metrics, api)
+                val removal = async { remove(remover) }
+                try {
+                    entered.await()
+                    val other = repository(queue, metrics, api)
+                    assertFalse(remover.isSyncing.value)
+                    assertEquals(0, other.processQueueDetailed().syncedCount)
+                    assertEquals(0, api.calls.get())
+                    assertEquals(false as Any, other.deleteQueueItem(1L))
+                } finally { release.complete(Unit) }
+                assertEquals(true as Any, removal.await())
+                val expectedRemaining = listOf(1, 0, 2)[index]
+                assertEquals(expectedRemaining, queue.rows.size)
+                assertEquals(expectedRemaining, remover.processQueueDetailed().syncedCount)
+                assertEquals(expectedRemaining, api.calls.get())
+            }
+        }
+    }
+
+    @Test fun removal_failure_or_cancellation_preserves_rows_and_releases_admission() = runBlocking {
+        for (remove in removals) {
+            for (failure in listOf(IllegalStateException("Synthetic storage unavailable"), CancellationException("Synthetic cancellation"))) {
+                val first = item()
+                val queue = Queue(first).apply { beforeRemoval = { throw failure } }
+                val api = Api()
+                val repo = repository(queue, metrics, api)
+                val thrown = runCatching { remove(repo) }.exceptionOrNull()
+                assertEquals(failure.javaClass, thrown?.javaClass)
+                assertEquals(failure.message, thrown?.message)
+                assertEquals(first, queue.rows[1L])
+                assertFalse(repo.isSyncing.value)
+                queue.beforeRemoval = {}
+                assertEquals(1, repository(queue, metrics, api).processQueueDetailed().syncedCount)
+            }
+        }
+    }
+
+    @Test fun cancelling_a_suspended_removal_releases_admission_without_deleting() = runBlocking {
+        withTimeout(10000) {
+            for (remove in removals) {
+                val first = item()
+                val entered = CompletableDeferred<Unit>()
+                val queue = Queue(first).apply { beforeRemoval = { entered.complete(Unit); awaitCancellation() } }
+                val api = Api()
+                val repo = repository(queue, metrics, api)
+                val deletion = launch { remove(repo) }
+                try {
+                    entered.await()
+                    assertEquals(0, repository(queue, metrics, api).processQueueDetailed().syncedCount)
+                    assertEquals(0, api.calls.get())
+                } finally { deletion.cancelAndJoin() }
+                assertEquals(first, queue.rows[1L])
+                assertFalse(repo.isSyncing.value)
+                assertEquals(1, repository(queue, metrics, api).processQueueDetailed().syncedCount)
+            }
+        }
     }
 
     private class RecordingMetrics(delegate: HBandSensorMetricDao) : HBandSensorMetricDao by delegate {

@@ -640,36 +640,39 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun retryAllFailed() = runQueueAction { repository.retryAllFailed() }
 
-    fun deleteQueueItem(id: Long) {
-        viewModelScope.launch {
-            repository.deleteQueueItem(id)
-            showNotification("Deleted queue item #$id")
-        }
+    fun deleteQueueItem(id: Long) = runQueueRemoval("Exclusão do registro #$id concluída.") {
+        repository.deleteQueueItem(id)
     }
 
-    fun clearSynced() {
-        viewModelScope.launch {
-            repository.clearSyncedItems()
-            showNotification("Cleared all synced items from local database")
-        }
+    fun clearSynced() = runQueueRemoval("Exclusão dos registros concluídos da fila finalizada.") {
+        repository.clearSyncedItems()
     }
 
-    fun clearAll() {
-        viewModelScope.launch {
-            repository.clearAllQueue()
-            showNotification("Cleared entire offline ingestion queue")
-        }
+    fun clearAll() = runQueueRemoval("Exclusão dos registros da fila concluída.") {
+        repository.clearAllQueue()
     }
 
-    fun resetAllDataToZero() {
-        viewModelScope.launch {
-            repository.clearAllQueue()
+    fun resetAllDataToZero() = runQueueRemoval("Limpeza dos dados de teste concluída.") {
+        if (!repository.clearAllQueue()) false else {
             repository.clearAllSensorMetrics()
             hydrationDao.clearAll()
             breathingDao.clearAll()
             bleManager.resetBiometricsToZero()
             _geminiInsightText.value = ""
-            showNotification("Todos os dados foram zerados com sucesso para nova instalação!")
+            true
+        }
+    }
+
+    private fun runQueueRemoval(successMessage: String, action: suspend () -> Boolean) {
+        viewModelScope.launch {
+            try {
+                if (action()) showNotification(successMessage)
+                else showNotification("A fila está ocupada. A exclusão não foi iniciada. Aguarde e tente novamente.", isError = true)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                showNotification("Não foi possível concluir a exclusão. Confira os registros antes de tentar novamente.", isError = true)
+            }
         }
     }
 

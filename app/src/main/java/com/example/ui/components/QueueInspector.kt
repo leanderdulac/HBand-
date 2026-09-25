@@ -127,7 +127,7 @@ fun QueueInspector(
                 QueueRemoval.All -> "Todos os registros da fila serão apagados, inclusive os que ainda não foram enviados. Essa ação não pode ser desfeita pelo aplicativo."
                 QueueRemoval.Completed -> "Os registros marcados como concluídos serão apagados da fila. Essa ação não pode ser desfeita pelo aplicativo."
                 is QueueRemoval.One -> "O registro #${requested.id} será apagado da fila. Se ainda não foi enviado, ele deixará de ser enviado por esta fila."
-            }) },
+            } + " A exclusão será recusada se a fila estiver ocupada. Ela não desfaz envios anteriores.") },
             confirmButton = {
                 Button(
                     onClick = {

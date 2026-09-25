@@ -25,6 +25,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.text.SimpleDateFormat
@@ -93,6 +94,7 @@ class WearableRepository(
     // UI, BLE history and WorkManager construct separate repositories for the same
     // app database. Admission and its observable state must be shared in this process.
     private companion object {
+        val queueOperation = Mutex()
         val _isSyncing = MutableStateFlow(false)
     }
     val isSyncing: StateFlow<Boolean> = _isSyncing.asStateFlow()
@@ -413,8 +415,8 @@ class WearableRepository(
         processQueueDetailed(retryFailed = false, retryId = null)
 
     private suspend fun processQueueDetailed(retryFailed: Boolean, retryId: Long?): QueueProcessResult = withContext(Dispatchers.IO) {
-        if (!_isSyncing.compareAndSet(expect = false, update = true)) {
-            return@withContext QueueProcessResult(message = "Sincronização já em andamento.")
+        if (!queueOperation.tryLock()) {
+            return@withContext QueueProcessResult(message = "Outra operação da fila está em andamento. Aguarde e tente novamente.")
         }
         var syncedCount = 0
         var failedCount = 0
@@ -423,6 +425,7 @@ class WearableRepository(
         var hadTransientFailure = false
 
         try {
+            _isSyncing.value = true
             // Persisted queue evidence is shared by UI, BLE and workers, and survives restart.
             // Explicit retry may try again; automatic processing must not repeatedly probe auth.
             val authorizationBlocked = queueDao.hasAuthorizationBlock(
@@ -553,6 +556,7 @@ class WearableRepository(
             result.copy(message = message)
         } finally {
             _isSyncing.value = false
+            queueOperation.unlock()
         }
     }
 
@@ -572,16 +576,27 @@ class WearableRepository(
     suspend fun retryAllFailed(): QueueProcessResult =
         processQueueDetailed(retryFailed = true, retryId = null)
 
-    suspend fun deleteQueueItem(id: Long) = withContext(Dispatchers.IO) {
+    suspend fun deleteQueueItem(id: Long): Boolean = removeFromQueue {
         queueDao.deleteById(id)
     }
 
-    suspend fun clearSyncedItems() = withContext(Dispatchers.IO) {
+    suspend fun clearSyncedItems(): Boolean = removeFromQueue {
         queueDao.clearSyncedItems()
     }
 
-    suspend fun clearAllQueue() = withContext(Dispatchers.IO) {
+    suspend fun clearAllQueue(): Boolean = removeFromQueue {
         queueDao.clearAll()
+    }
+
+    /** Never wait behind an in-flight send and then silently delete its evidence. */
+    private suspend fun removeFromQueue(action: suspend () -> Unit): Boolean = withContext(Dispatchers.IO) {
+        if (!queueOperation.tryLock()) return@withContext false
+        try {
+            action()
+            true
+        } finally {
+            queueOperation.unlock()
+        }
     }
 
     suspend fun clearAllSensorMetrics() = withContext(Dispatchers.IO) {
