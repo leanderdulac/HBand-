@@ -63,19 +63,12 @@ object IngestPayloadMapper {
         }
     }
 
-    fun telemetryToJson(
-        telemetry: HBandTelemetry,
-        patientId: String,
-        clientReadingId: String? = null,
-    ): String {
+    fun telemetryToJson(telemetry: HBandTelemetry, patientId: String): String {
         val json = JSONObject()
         json.put("patient_id", resolvePatientId(patientId))
         json.put("device_id", resolveDeviceId(telemetry.deviceId))
         json.put("device_model", telemetry.deviceModel)
         json.put("timestamp", telemetry.timestamp)
-        if (!clientReadingId.isNullOrBlank()) {
-            json.put("client_reading_id", clientReadingId)
-        }
         json.put("heart_rate", telemetry.heartRate)
 
         val sys = telemetry.bloodPressure.systolic
@@ -121,7 +114,6 @@ object IngestPayloadMapper {
             else -> ""
         }
         val timestamp = jsonObj.optString("timestamp", "")
-        val clientReadingId = jsonObj.optString("client_reading_id", "")
         val metrics = jsonObj.optJSONObject("metrics")
 
         val hr = firstPresentInt(metrics, "heartRate")
@@ -153,7 +145,6 @@ object IngestPayloadMapper {
         normalized.put("patient_id", patientId)
         if (deviceId.isNotBlank()) normalized.put("device_id", resolveDeviceId(deviceId))
         if (timestamp.isNotBlank()) normalized.put("timestamp", timestamp)
-        if (clientReadingId.isNotBlank()) normalized.put("client_reading_id", clientReadingId)
         if (hr != null) normalized.put("heart_rate", hr)
         if (sys != null && dia != null && sys > 0 && dia > 0) {
             normalized.put(
@@ -183,10 +174,9 @@ object IngestPayloadMapper {
         }
     }
 
-    fun authErrorMessage(httpCode: Int, @Suppress("UNUSED_PARAMETER") errorBody: String? = null): String {
-        // Never include the request key or a body that might echo it.
-        val reason = IngestReconciler.authMessage(httpCode)
-        return "HTTP $httpCode — $reason. Verifique a chave em Ajustes."
+    fun authErrorMessage(httpCode: Int, @Suppress("UNUSED_PARAMETER") errorBody: String?): String {
+        // Keep the persisted pause prefix; never store a server body that may echo a credential.
+        return "Falha de autenticação na API HealthTech (HTTP $httpCode). Verifique a chave em Ajustes."
     }
 
     private fun firstPresentInt(obj: JSONObject?, key: String): Int? {
@@ -201,12 +191,28 @@ object IngestPayloadMapper {
 }
 
 class IngestDeduper(
-    private val minIntervalMs: Long = 30_000L
+    private val minIntervalMs: Long = 30_000L,
+    // Process-local interval clock; never a measurement timestamp or persisted value.
+    private val elapsedMs: () -> Long = { System.nanoTime() / 1_000_000L },
 ) {
     private var lastSignature: String? = null
     private var lastAt: Long = 0L
 
-    fun shouldEnqueue(telemetry: HBandTelemetry, nowMs: Long = System.currentTimeMillis()): Boolean {
+    /** Serial collector only: a failed local save must not consume its deduplication slot. */
+    suspend fun saveIfNeeded(telemetry: HBandTelemetry, save: suspend (HBandTelemetry) -> Unit) {
+        val previousSignature = lastSignature
+        val previousAt = lastAt
+        if (!shouldEnqueue(telemetry)) return
+        try {
+            save(telemetry)
+        } catch (error: Throwable) {
+            lastSignature = previousSignature
+            lastAt = previousAt
+            throw error
+        }
+    }
+
+    fun shouldEnqueue(telemetry: HBandTelemetry, nowMs: Long = elapsedMs()): Boolean {
         if (!telemetry.isRealSensorData) return false
         if (!IngestPayloadMapper.isIngestible(telemetry)) return false
         val signature = listOf(
@@ -217,7 +223,9 @@ class IngestDeduper(
             telemetry.bloodPressure.diastolic,
             telemetry.steps
         ).joinToString("|")
-        if (signature == lastSignature && nowMs - lastAt < minIntervalMs) return false
+        val elapsed = nowMs - lastAt
+        // A reset of an injected clock must not leave the recorder stuck behind lastAt.
+        if (signature == lastSignature && elapsed >= 0L && elapsed < minIntervalMs) return false
         lastSignature = signature
         lastAt = nowMs
         return true

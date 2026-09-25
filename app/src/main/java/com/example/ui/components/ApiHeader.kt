@@ -115,7 +115,7 @@ fun ApiHeader(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = if (apiHealth.isOnline) "SEGURO (${apiHealth.latencyMs}ms)" else "DESCONECTADO",
+                            text = if (apiHealth.isOnline) "ACESSÍVEL (${apiHealth.latencyMs}ms)" else "DESCONECTADO",
                             style = MaterialTheme.typography.labelSmall.copy(
                                 fontWeight = FontWeight.Bold,
                                 letterSpacing = 0.8.sp

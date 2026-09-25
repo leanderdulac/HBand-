@@ -64,6 +64,9 @@ import com.veepoo.protocol.model.enums.EOprateStauts
 import com.veepoo.protocol.model.enums.ESex
 import com.veepoo.protocol.model.enums.HrvDetectState
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -87,7 +90,8 @@ class HBandBleManager(
     private val scope: CoroutineScope,
     private val onHistorySamples: (List<HBandTelemetry>) -> Unit = {},
     private val onAdvancedSample: (com.example.data.local.AdvancedMeasurementEntity) -> Unit = {},
-    private val onSportSnapshot: (HBandTelemetry) -> Unit = {},
+    private val onSportReading: (String, VeepooSportReading) -> Unit = { _, _ -> },
+    initiallyDisconnectedByUser: Boolean = false,
 ) {
     private val TAG = "HBandBleManager"
 
@@ -104,6 +108,8 @@ class HBandBleManager(
 
     private val _isScanning = MutableStateFlow(false)
     val isScanning: StateFlow<Boolean> = _isScanning.asStateFlow()
+    private val _scanFailure = MutableStateFlow<BleScanFailure?>(null)
+    val scanFailure: StateFlow<BleScanFailure?> = _scanFailure.asStateFlow()
 
     private val _latestTelemetry = MutableStateFlow<HBandTelemetry?>(null)
     val latestTelemetry: StateFlow<HBandTelemetry?> = _latestTelemetry.asStateFlow()
@@ -119,6 +125,7 @@ class HBandBleManager(
         set(value) {
             field = value
             prefs.edit().putBoolean(PREF_AUTO_RECONNECT, value).apply()
+            if (!value) cancelScheduledReconnect()
         }
     var currentPatientId: String = IngestPayloadMapper.DEFAULT_PATIENT_ID
 
@@ -171,7 +178,7 @@ class HBandBleManager(
     private val _healthRemindState = MutableStateFlow(HealthRemindUiState())
     val healthRemindState: StateFlow<HealthRemindUiState> = _healthRemindState.asStateFlow()
 
-    private var userRequestedDisconnect = false
+    private var userRequestedDisconnect = initiallyDisconnectedByUser
     private var veepooStatusListener: IABleConnectStatusListener? = null
     private var veepooStatusListenerMac: String? = null
     private var reconnectRunnable: Runnable? = null
@@ -196,7 +203,7 @@ class HBandBleManager(
     }
 
     private var currentGatt: BluetoothGatt? = null
-    private var activeScanCallback: ScanCallback? = null
+    private var activeScanner: android.bluetooth.le.BluetoothLeScanner? = null
     private val discoveredMap = ConcurrentHashMap<String, HBandDevice>()
     private val discoveredWriteCharacteristics = mutableListOf<BluetoothGattCharacteristic>()
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -363,7 +370,7 @@ class HBandBleManager(
     }
 
     fun reconnectLastDevice() {
-        if (userRequestedDisconnect || _isHardwareConnected.value) return
+        if (!isAutoReconnectEnabled || userRequestedDisconnect || _isHardwareConnected.value) return
         val mac = prefs.getString(PREF_LAST_MAC, null)?.trim().orEmpty()
         if (mac.isEmpty() || !BluetoothAdapter.checkBluetoothAddress(mac)) return
         val name = prefs.getString(PREF_LAST_NAME, null)?.takeIf { it.isNotBlank() } ?: "VE30"
@@ -379,22 +386,11 @@ class HBandBleManager(
         )
     }
 
-    init {
-        vpManager.init(context.applicationContext)
-        vpManager.setAutoConnectBTBySdk(false)
-        vpManager.registerBluetoothStateListener(object : IABluetoothStateListener() {
-            override fun onBluetoothStateChanged(openOrClosed: Boolean) {
-                Log.i(TAG, "Bluetooth do sistema (Veepoo SDK): ${if (openOrClosed) "ligado" else "desligado"}")
-            }
-        })
-        checkBondedOrAutoConnect()
-    }
-
     @SuppressLint("MissingPermission")
     fun checkBondedOrAutoConnect() {
-        val adapter = bluetoothAdapter
-        if (hasBlePermissions() && adapter != null && adapter.isEnabled) {
-            try {
+        try {
+            val adapter = bluetoothAdapter
+            if (hasBlePermissions() && adapter != null && adapter.isEnabled) {
                 val bonded = adapter.bondedDevices ?: emptySet()
                 val bondedList = mutableListOf<HBandDevice>()
 
@@ -422,9 +418,9 @@ class HBandBleManager(
                     Log.i(TAG, "Reconectando à última pulseira persistida...")
                     reconnectLastDevice()
                 }
-            } catch (e: Exception) {
-                Log.e(TAG, "Error checking bonded devices: ${e.message}")
             }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error checking bonded devices: ${e.message}")
         }
     }
 
@@ -438,108 +434,89 @@ class HBandBleManager(
         }
     }
 
-    @SuppressLint("MissingPermission")
-    fun startScanning() {
-        if (_isScanning.value) return
-        _isScanning.value = true
-        discoveredMap.clear()
-
-        val adapter = bluetoothAdapter
-        val scanner = adapter?.bluetoothLeScanner
-
-        if (hasBlePermissions() && adapter != null && adapter.isEnabled && scanner != null) {
-            Log.i(TAG, "Starting REAL BLE hardware scan...")
-            try {
-                val scanSettings = ScanSettings.Builder()
-                    .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
-                    .build()
-
-                val callback = object : ScanCallback() {
-                    override fun onScanResult(callbackType: Int, result: ScanResult?) {
-                        result?.device?.let { device ->
-                            val address = device.address ?: return@let
-                            val rawName = device.name ?: result.scanRecord?.deviceName ?: ""
-                            val displayName = if (rawName.isNotBlank()) rawName else "Dispositivo BLE ($address)"
-                            val isCurrent = _connectedDevice.value?.macAddress.equals(address, ignoreCase = true) && _connectedDevice.value?.isConnected == true
-
-                            val hbandDevice = HBandDevice(
-                                deviceId = address,
-                                name = displayName,
-                                macAddress = address,
-                                rssi = result.rssi,
-                                isConnected = isCurrent,
-                                batteryLevel = liveScanBatteryLevel(isCurrent),
-                                batteryIsSimulated = false,
-                                firmwareVersion = "BLE Real"
-                            )
-                            discoveredMap[address] = hbandDevice
-                            _scannedDevices.value = discoveredMap.values.toList()
-                        }
-                    }
-
-                    override fun onBatchScanResults(results: MutableList<ScanResult>?) {
-                        results?.forEach { res ->
-                            res.device?.let { dev ->
-                                val address = dev.address ?: return@let
-                                val rawName = dev.name ?: res.scanRecord?.deviceName ?: ""
-                                val displayName = if (rawName.isNotBlank()) rawName else "Dispositivo BLE ($address)"
-                                val isCurrent = _connectedDevice.value?.macAddress.equals(address, ignoreCase = true) && _connectedDevice.value?.isConnected == true
-
-                                discoveredMap[address] = HBandDevice(
-                                    deviceId = address,
-                                    name = displayName,
-                                    macAddress = address,
-                                    rssi = res.rssi,
-                                    isConnected = isCurrent,
-                                    batteryLevel = liveScanBatteryLevel(isCurrent),
-                                    batteryIsSimulated = false,
-                                    firmwareVersion = "BLE Real"
-                                )
-                            }
-                        }
-                        _scannedDevices.value = discoveredMap.values.toList()
-                    }
-
-                    override fun onScanFailed(errorCode: Int) {
-                        Log.e(TAG, "BLE scan failed with error code: $errorCode")
-                        _isScanning.value = false
-                    }
+    private val scanSession by lazy {
+        BleScanSession(
+            handler = mainHandler,
+            canScan = ::hasBlePermissions,
+            startScan = ::startHardwareScan,
+            stopScan = ::stopHardwareScan,
+            onResults = ::acceptScanResults,
+            onScanningChanged = { scanning ->
+                if (scanning) {
+                    _scanFailure.value = null
+                    discoveredMap.clear()
+                    _scannedDevices.value = emptyList()
                 }
+                _isScanning.value = scanning
+            },
+            onFailure = { failure ->
+                _scanFailure.value = failure
+                Log.w(TAG, "BLE scan failure: $failure")
+            },
+        )
+    }
 
-                activeScanCallback = callback
-                scanner.startScan(null, scanSettings, callback)
+    fun startScanning() = scanSession.start()
 
-                // Auto stop scan after 12 seconds
-                mainHandler.postDelayed({
-                    stopScanning()
-                }, 12000)
+    fun stopScanning() = scanSession.stop()
 
-            } catch (e: Exception) {
-                Log.e(TAG, "Exception starting BLE scan: ${e.message}", e)
-                _isScanning.value = false
-            }
-        } else {
-            Log.w(TAG, "BLE hardware scanner unavailable")
-            _isScanning.value = false
-        }
+    @SuppressLint("MissingPermission")
+    private fun startHardwareScan(callback: ScanCallback) {
+        val adapter = bluetoothAdapter ?: throw BleScanUnavailableException(BleScanFailure.SCANNER_UNAVAILABLE)
+        if (!adapter.isEnabled) throw BleScanUnavailableException(BleScanFailure.BLUETOOTH_OFF)
+        val scanner = adapter.bluetoothLeScanner ?: throw BleScanUnavailableException(BleScanFailure.SCANNER_UNAVAILABLE)
+        activeScanner = scanner
+        val settings = ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY).build()
+        scanner.startScan(null, settings, callback)
     }
 
     @SuppressLint("MissingPermission")
-    fun stopScanning() {
-        if (!_isScanning.value) return
-        _isScanning.value = false
-        try {
-            activeScanCallback?.let {
-                bluetoothAdapter?.bluetoothLeScanner?.stopScan(it)
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error stopping scan: ${e.message}")
+    private fun stopHardwareScan(callback: ScanCallback) {
+        val scanner = activeScanner
+        activeScanner = null
+        scanner?.stopScan(callback)
+    }
+
+    private fun acceptScanResults(results: List<ScanResult>) {
+        for (result in results) {
+            val device = result.device ?: continue
+            val address = device.address ?: continue
+            val rawName = bluetoothDeviceNameOrFallback(device, result.scanRecord?.deviceName ?: "")
+            val displayName = if (rawName.isNotBlank()) rawName else "Dispositivo BLE ($address)"
+            val isCurrent = _connectedDevice.value?.macAddress.equals(address, ignoreCase = true) &&
+                _connectedDevice.value?.isConnected == true
+            discoveredMap[address] = HBandDevice(
+                deviceId = address,
+                name = displayName,
+                macAddress = address,
+                rssi = result.rssi,
+                isConnected = isCurrent,
+                batteryLevel = liveScanBatteryLevel(isCurrent),
+                batteryIsSimulated = false,
+                firmwareVersion = "BLE Real",
+            )
         }
-        activeScanCallback = null
+        _scannedDevices.value = discoveredMap.values.toList()
     }
 
     @SuppressLint("MissingPermission")
-    fun connectDevice(device: HBandDevice) {
+    fun connectDevice(device: HBandDevice): Boolean {
+        // Reject before resetting the current session or persisting another device.
+        val failure = try {
+            when {
+                !BluetoothAdapter.checkBluetoothAddress(device.macAddress) -> "O endereço do relógio é inválido. Confira o código informado."
+                !hasBlePermissions() -> "A conexão não começou. Confira as permissões de dispositivos próximos do aplicativo."
+                bluetoothAdapter == null -> "O Bluetooth não está disponível neste aparelho."
+                bluetoothAdapter?.isEnabled != true -> "A conexão não começou porque o Bluetooth estava desligado. Ligue-o e tente novamente."
+                else -> null
+            }
+        } catch (_: SecurityException) {
+            "A conexão não começou. Confira as permissões de dispositivos próximos do aplicativo."
+        }
+        if (failure != null) {
+            _sessionMessage.value = failure
+            return false
+        }
         userRequestedDisconnect = false
         // Relógios Gear/WearOS/genéricos falam Bluetooth SIG padrão (Heart Rate Service etc.)
         // via GATT direto. VE30/HBand (e qualquer coisa não explicitamente "Gear") usam o
@@ -548,7 +525,7 @@ class HBandBleManager(
             device.name.contains("WearOS", ignoreCase = true) ||
             device.name.contains("Galaxy Watch", ignoreCase = true)
 
-        if (looksLikeGenericBleWatch) {
+        return if (looksLikeGenericBleWatch) {
             connectDeviceViaRawGatt(device)
         } else {
             connectDeviceViaVeepooSdk(device)
@@ -556,56 +533,43 @@ class HBandBleManager(
     }
 
     @SuppressLint("MissingPermission")
-    private fun connectDeviceViaRawGatt(device: HBandDevice) {
+    private fun connectDeviceViaRawGatt(device: HBandDevice): Boolean {
         isVeepooConnection = false
         stopScanning()
         disconnectGatt()
+        keepAliveJob?.cancel()
+        rssiPollJob?.cancel()
         cancelSdkBatteryPolling()
 
         // Clear previous cache to ensure NO fake data is presented
         resetBiometricsToZero()
-
-        val adapter = bluetoothAdapter
-        val isHardwareAvailable = hasBlePermissions() && adapter != null && adapter.isEnabled
-        val isValidMac = try {
-            BluetoothAdapter.checkBluetoothAddress(device.macAddress)
-        } catch (e: Exception) {
-            false
-        }
-
-        if (isHardwareAvailable && isValidMac) {
-            Log.i(TAG, "Connecting REAL Bluetooth GATT to device: ${device.name} [${device.macAddress}]...")
-            try {
-                val remoteDevice = adapter!!.getRemoteDevice(device.macAddress)
-                _connectedDevice.value = device.copy(
-                    deviceId = remoteDevice.address,
-                    macAddress = remoteDevice.address,
-                    name = remoteDevice.name ?: device.name,
-                ).withUnknownBattery(connected = true)
-                _isHardwareConnected.value = true
-
-                currentGatt = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                    remoteDevice.connectGatt(context, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
-                } else {
-                    remoteDevice.connectGatt(context, false, gattCallback)
-                }
-
-                persistLastDevice(_connectedDevice.value ?: device)
-                HBandBleService.start(context)
-                
-                // Real initial empty telemetry snapshot (waiting for sensor)
-                _latestTelemetry.value = createTelemetrySnapshot(_connectedDevice.value!!)
-                startKeepAliveLoop(_connectedDevice.value!!)
-                return
-            } catch (e: Exception) {
-                Log.e(TAG, "GATT connect failed: ${e.message}", e)
-            }
-        }
-
-        Log.i(TAG, "Connecting device placeholder: ${device.name} [${device.macAddress}]")
-        _connectedDevice.value = device.withUnknownBattery(connected = true)
         _isHardwareConnected.value = false
-        _latestTelemetry.value = createTelemetrySnapshot(device)
+        _connectedDevice.value = device.withUnknownBattery(connected = false)
+        try {
+            val adapter = bluetoothAdapter ?: error("Bluetooth adapter unavailable")
+            if (!adapter.isEnabled) error("Bluetooth disabled during connection")
+            val remoteDevice = adapter.getRemoteDevice(device.macAddress)
+            _connectedDevice.value = device.copy(
+                deviceId = remoteDevice.address,
+                macAddress = remoteDevice.address,
+                name = bluetoothDeviceNameOrFallback(remoteDevice, device.name),
+            ).withUnknownBattery(connected = false)
+
+            currentGatt = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                remoteDevice.connectGatt(context, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
+            } else {
+                remoteDevice.connectGatt(context, false, gattCallback)
+            } ?: error("Android did not create a GATT connection")
+            // Only the successful connection callback may mark connected, persist,
+            // start the service or publish telemetry.
+            return true
+        } catch (e: Exception) {
+            Log.e(TAG, "GATT connect failed: ${e.message}", e)
+            disconnectGatt()
+            markDeviceDisconnected()
+            _sessionMessage.value = "Não foi possível iniciar a conexão. Confira o Bluetooth e as permissões e tente novamente."
+            return false
+        }
     }
 
     /**
@@ -614,7 +578,7 @@ class HBandBleManager(
      * antes de liberar qualquer sensor. GATT genérico não decodifica esse protocolo.
      */
     @SuppressLint("MissingPermission")
-    private fun connectDeviceViaVeepooSdk(device: HBandDevice) {
+    private fun connectDeviceViaVeepooSdk(device: HBandDevice): Boolean {
         val liveSession = hasLiveHardwareSession()
         // Skip only an in-flight connect or a current GATT notify session.
         // Stale HeartData after Desconectar must not block Conectar.
@@ -635,7 +599,7 @@ class HBandBleManager(
             if (!passwordHandshakeSucceeded && _isHardwareConnected.value && !passwordConfirmInFlight) {
                 confirmVeepooPassword(isRetry = false)
             }
-            return
+            return false
         }
         isConnectingVeepoo = true
         isVeepooConnection = true
@@ -657,21 +621,6 @@ class HBandBleManager(
         resetBiometricsToZero()
         runCatching {
             vpManager.setConnectionConfirmTimeout(VeepooPasswordHandshake.SDK_CONFIRM_TIMEOUT_SEC)
-        }
-
-        val isValidMac = try {
-            BluetoothAdapter.checkBluetoothAddress(device.macAddress)
-        } catch (e: Exception) {
-            false
-        }
-
-        if (!isValidMac) {
-            Log.w(TAG, "MAC inválido para conexão Veepoo, usando placeholder: ${device.macAddress}")
-            isConnectingVeepoo = false
-            _connectedDevice.value = device.withUnknownBattery(connected = true)
-            _isHardwareConnected.value = false
-            _latestTelemetry.value = createTelemetrySnapshot(device)
-            return
         }
 
         Log.i(TAG, "Conectando via SDK Veepoo/HBand ao VE30: ${device.name} [${device.macAddress}]...")
@@ -711,6 +660,7 @@ class HBandBleManager(
                 }
             },
         )
+        return true
     }
 
     private fun confirmVeepooPassword(isRetry: Boolean = false) {
@@ -1278,7 +1228,7 @@ class HBandBleManager(
                 "(worn=$lastKnownWorn wearDetect=${_wearDetectState.value.enabled})",
         )
         val runnable = Runnable {
-            if (userRequestedDisconnect || _isHardwareConnected.value) return@Runnable
+            if (!isAutoReconnectEnabled || userRequestedDisconnect || _isHardwareConnected.value) return@Runnable
             connectDevice(
                 HBandDevice(
                     deviceId = address,
@@ -1327,26 +1277,34 @@ class HBandBleManager(
 
     @SuppressLint("MissingPermission")
     private fun disconnectGatt() {
+        val previous = currentGatt
+        currentGatt = null // Closing may deliver a callback from the abandoned attempt.
         try {
             clearGattQueue()
-            currentGatt?.disconnect()
-            currentGatt?.close()
+            previous?.disconnect()
+            previous?.close()
         } catch (e: Exception) {
             Log.e(TAG, "Error closing GATT: ${e.message}")
         }
-        currentGatt = null
     }
 
     private val gattCallback = object : BluetoothGattCallback() {
-        @SuppressLint("MissingPermission")
         override fun onConnectionStateChange(gatt: BluetoothGatt?, status: Int, newState: Int) {
+            // A platform callback can arrive before connectGatt returns its handle.
+            // Queue it after the current main-thread request, then check ownership.
+            mainHandler.post { handleConnectionState(gatt, status, newState) }
+        }
+
+        @SuppressLint("MissingPermission")
+        private fun handleConnectionState(gatt: BluetoothGatt?, status: Int, newState: Int) {
+            if (gatt == null || gatt !== currentGatt || isVeepooConnection || userRequestedDisconnect) return
             val dev = gatt?.device
             val address = dev?.address ?: _connectedDevice.value?.macAddress ?: ""
-            val name = dev?.name ?: _connectedDevice.value?.name ?: "Gear S3 (9A7E) LE"
+            val name = bluetoothDeviceNameOrFallback(dev, _connectedDevice.value?.name ?: "Relógio")
 
             Log.i(TAG, "onConnectionStateChange -> Device: $name [$address], status: $status, newState: $newState")
 
-            if (newState == BluetoothProfile.STATE_CONNECTED) {
+            if (newState == BluetoothProfile.STATE_CONNECTED && status == BluetoothGatt.GATT_SUCCESS) {
                 reconnectAttempt = 0
                 _isHardwareConnected.value = true
                 val devInfo = (_connectedDevice.value ?: HBandDevice()).copy(
@@ -1371,12 +1329,15 @@ class HBandBleManager(
 
                 startRssiMonitoring(gatt)
 
-            } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
+            } else if (newState == BluetoothProfile.STATE_DISCONNECTED || status != BluetoothGatt.GATT_SUCCESS) {
                 Log.w(TAG, "GATT disconnected from $address (status: $status)")
                 rssiPollJob?.cancel()
-                clearGattQueue()
+                disconnectGatt()
                 _isHardwareConnected.value = false
                 markDeviceDisconnected()
+                if (status != BluetoothGatt.GATT_SUCCESS) {
+                    _sessionMessage.value = "Não foi possível conectar ao relógio. Aproxime-o deste aparelho e tente novamente."
+                }
                 scheduleReconnect(address, name)
             }
         }
@@ -1638,7 +1599,7 @@ class HBandBleManager(
         if (data.isEmpty()) return
         val currentDev = _connectedDevice.value ?: HBandDevice()
         val realMac = gatt?.device?.address ?: currentDev.macAddress
-        val realName = gatt?.device?.name ?: currentDev.name
+        val realName = bluetoothDeviceNameOrFallback(gatt?.device, currentDev.name)
 
         val hexString = data.joinToString(" ") { "%02X".format(it) }
         Log.i(TAG, "GATT Packet RX on ${characteristic.uuid} ($realMac): $hexString (len=${data.size})")
@@ -2310,6 +2271,9 @@ class HBandBleManager(
         val sync = VeepooHistorySync(vpManager, mainHandler)
         historySync = sync
         postHandshakeJob = scope.launch(Dispatchers.Main) {
+            val queryContext = currentCoroutineContext()
+            val queryDeviceId = currentConnectedMac()
+            val queryDeviceModel = currentConnectedName()
             try {
                 if (includeLiveSensors) {
                     startTemperatureMonitoring()
@@ -2331,10 +2295,15 @@ class HBandBleManager(
                     wearEnabled = _wearDetectState.value.enabled,
                     onBattery = { setBatteryLevel(it, simulated = false) },
                 )
+                if (historySync !== sync || sync.cancelled || !queryContext.isActive || userRequestedDisconnect) return@launch
                 extras.batteryPercent?.let { setBatteryLevel(it, simulated = false) }
-                extras.steps?.let { currentSteps = it }
-                extras.calories?.let { currentCalories = it }
-                extras.distanceMeters?.let { currentDistance = it }
+                extras.sport?.let { reading ->
+                    // Do not republish cached HR/BP with this counter observation's time.
+                    currentSteps = reading.steps ?: 0
+                    currentCalories = reading.calories ?: 0f
+                    currentDistance = reading.distanceMeters ?: 0f
+                    onSportReading(queryDeviceId, reading)
+                }
                 lastAutoMeasureSettings = extras.autoMeasure
                 applyAutoMeasureUi(extras.autoMeasure, extras.spo2Auto?.let { it.isOpen == 1 || it.openState == 1 }
                     ?: _autoMeasureState.value.spo2NightAutoEnabled)
@@ -2346,27 +2315,34 @@ class HBandBleManager(
                     )
                 }
                 readP1Settings(caps)
-                if (currentSteps > 0 || currentCalories > 0f || currentDistance > 0f) {
-                    emitRealTelemetry(currentConnectedMac(), currentConnectedName())
-                    _latestTelemetry.value?.let(onSportSnapshot)
-                }
-
                 if (sync.cancelled || userRequestedDisconnect) return@launch
                 val pull = sync.pullHistory(
                     caps = caps,
-                    deviceId = currentConnectedMac(),
-                    deviceModel = currentConnectedName(),
-                    onProgress = { _historySyncState.value = it },
+                    deviceId = queryDeviceId,
+                    deviceModel = queryDeviceModel,
+                    onProgress = {
+                        if (historySync === sync && !sync.cancelled && queryContext.isActive) {
+                            _historySyncState.value = it
+                        }
+                    },
                 )
+                if (historySync !== sync || sync.cancelled || !queryContext.isActive || userRequestedDisconnect) return@launch
                 _historySyncState.value = pull.state
                 lastKnownWorn = pull.samples.mapNotNull { it.worn }.lastOrNull() ?: lastKnownWorn
                 _wearDetectState.value = _wearDetectState.value.copy(lastWorn = lastKnownWorn)
                 val telemetries = pull.samples.map { it.telemetry }
                 if (telemetries.isNotEmpty()) {
                     onHistorySamples(telemetries)
-                    applyLatestHistoryToLiveCache(pull.samples)
+                    // History retains its original measurement times in the repository.
+                    // Never re-emit interval counters or old vitals as live measurements.
                 }
-                Log.i(TAG, historySummaryMessage(pull))
+                Log.i(TAG, "Histórico Veepoo: ${historyReadStatusText(pull.state)}")
+            } catch (e: CancellationException) {
+                // An abandoned query must not overwrite a newer session or restart its sensors.
+                if (historySync === sync && _historySyncState.value.isRunning) {
+                    _historySyncState.value = _historySyncState.value.copy(isRunning = false, phase = "cancelado")
+                }
+                throw e
             } catch (e: Exception) {
                 Log.e(TAG, "Falha no sync P0 pós-handshake: ${e.message}", e)
                 _historySyncState.value = _historySyncState.value.copy(
@@ -2375,41 +2351,10 @@ class HBandBleManager(
                     phase = "error",
                 )
             } finally {
-                if (includeLiveSensors && !userRequestedDisconnect && isConnectingVeepoo) {
+                if (includeLiveSensors && historySync === sync && !sync.cancelled &&
+                    currentCoroutineContext().isActive && !userRequestedDisconnect && isConnectingVeepoo) {
                     startVeepooSensors()
                 }
-            }
-        }
-    }
-
-    private fun applyLatestHistoryToLiveCache(samples: List<VeepooHistoryMapper.MappedSample>) {
-        val latestOrigin = samples.filter { it.kind == VeepooHistoryMapper.MappedSample.Kind.ORIGIN }
-            .maxByOrNull { it.epochMs }
-        val latestHrv = samples.filter { it.kind == VeepooHistoryMapper.MappedSample.Kind.HRV }
-            .maxByOrNull { it.epochMs }
-        val latestSpo2 = samples.filter { it.kind == VeepooHistoryMapper.MappedSample.Kind.SPO2 }
-            .maxByOrNull { it.epochMs }
-        val latestSleep = samples.filter { it.kind == VeepooHistoryMapper.MappedSample.Kind.SLEEP }
-            .maxByOrNull { it.epochMs }
-
-        latestOrigin?.telemetry?.let { t ->
-            if (t.heartRate in 30..240) currentHeartRate = t.heartRate
-            if (t.bloodPressure.systolic in 60..240) currentSystolic = t.bloodPressure.systolic
-            if (t.bloodPressure.diastolic in 30..160) currentDiastolic = t.bloodPressure.diastolic
-            // Origin 5-min buckets are interval deltas, not the daily readSportStep total.
-            if (t.temperatureCelsius in 30f..43f) currentTemp = t.temperatureCelsius
-        }
-        latestSpo2?.telemetry?.let { t ->
-            if (t.spO2 in 50..100) currentSpO2 = t.spO2
-            if (t.heartRate in 30..240 && currentHeartRate == 0) currentHeartRate = t.heartRate
-        }
-        latestHrv?.telemetry?.let { t ->
-            if (t.hrvScore > 0) currentHrvScore = t.hrvScore
-        }
-        if (currentHeartRate > 0 || currentSteps > 0 || currentSpO2 > 0 || latestSleep != null) {
-            emitRealTelemetry(currentConnectedMac(), currentConnectedName())
-            latestSleep?.telemetry?.sleepSummary?.let { sleep ->
-                _latestTelemetry.value = _latestTelemetry.value?.copy(sleepSummary = sleep)
             }
         }
     }
@@ -2426,21 +2371,6 @@ class HBandBleManager(
         )
         pulse?.let {
             prefs.edit().putBoolean(PREF_AUTO_MEASURE, it.isSwitchOpen).apply()
-        }
-    }
-
-    private fun historySummaryMessage(pull: VeepooHistorySync.HistoryPull): String {
-        val state = pull.state
-        val parts = buildList {
-            if (state.originSamples > 0) add("${state.originSamples} Origin")
-            if (state.sleepDays > 0) add("${state.sleepDays} sono")
-            if (state.hrvSamples > 0) add("${state.hrvSamples} HRV")
-            if (state.spo2Samples > 0) add("${state.spo2Samples} SpO2")
-        }
-        return if (parts.isEmpty()) {
-            "Histórico Veepoo lido — nenhum sample real nesta janela."
-        } else {
-            "Histórico Veepoo: ${parts.joinToString(", ")}."
         }
     }
 
@@ -2523,5 +2453,18 @@ class HBandBleManager(
             sleepSummary = SleepSummary(0, 0, 0),
             isRealSensorData = hasReceivedRealSensorData
         )
+    }
+
+    // Kotlin initializes properties in declaration order. Restoring a saved watch
+    // calls stopScanning and uses gattCallback, so their fields must exist first.
+    init {
+        vpManager.init(context.applicationContext)
+        vpManager.setAutoConnectBTBySdk(false)
+        vpManager.registerBluetoothStateListener(object : IABluetoothStateListener() {
+            override fun onBluetoothStateChanged(openOrClosed: Boolean) {
+                Log.i(TAG, "Bluetooth do sistema (Veepoo SDK): ${if (openOrClosed) "ligado" else "desligado"}")
+            }
+        })
+        checkBondedOrAutoConnect()
     }
 }

@@ -1,173 +1,134 @@
 package com.example.data.ingest
 
+import com.example.data.local.IngestQueueEntity
+import com.example.data.model.IngestResponse
+import org.json.JSONArray
 import org.json.JSONObject
-import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
-import org.junit.Assert.assertTrue
+import org.junit.Assert.*
 import org.junit.Test
 
 class IngestReconcilerTest {
+    private fun reading(id: String, patient: String = "TEST-PATIENT") = IngestReconciler.prepare(
+        IngestQueueEntity(payloadJson = """{"patient_id":"$patient","device_id":"TEST-WATCH",
+            "timestamp":"2026-09-24T12:00:00Z","heart_rate":72}""", clientReadingId = id))
 
-    private val ids = listOf(
-        "11111111-1111-1111-1111-111111111111",
-        "22222222-2222-2222-2222-222222222222",
-    )
+    private fun entry(index: Int, id: String, status: String = "accepted") = JSONObject()
+        .put("index", index).put("client_reading_id", id).put("status", status)
+        .put("result", JSONObject().put("patient_id", "TEST-PATIENT")
+            .put("reading_id", "stored-$id").put("ingest_status", status))
 
-    @Test
-    fun `accepted and duplicate are synced`() {
-        val body = """
-            {
-              "status": "success",
-              "processed_count": 2,
-              "results": [
-                {"index": 0, "status": "accepted", "client_reading_id": "${ids[0]}"},
-                {"index": 1, "status": "duplicate", "client_reading_id": "${ids[1]}"}
-              ]
-            }
-        """.trimIndent()
-        val decisions = IngestReconciler.decisionsForHttp(ids, 200, body)
-        assertEquals(2, decisions.size)
-        assertTrue(decisions.all { it.markSynced })
-        assertFalse(decisions.any { it.keepQueued })
-        assertEquals(IngestItemOutcome.ACCEPTED, decisions[0].outcome)
-        assertEquals(IngestItemOutcome.DUPLICATE, decisions[1].outcome)
+    private fun body(vararg entries: JSONObject) = JSONObject().put("patient_id", "TEST-PATIENT")
+        .put("status", "success").put("results", JSONArray(entries.toList())).toString()
+
+    private val readings get() = listOf(reading("A"), reading("B"))
+
+    @Test fun empty_malformed_legacy_counters_and_unknown_status_never_confirm() {
+        for (raw in listOf(null, "", "not-json", "{}", "[]", """{"processed_count":2}""",
+            body(), body(entry(0, "A", "unknown"), entry(1, "B", "unknown")))) {
+            assertTrue(IngestReconciler.batch(readings, 200, raw).none { it.confirmed })
+        }
     }
 
-    @Test
-    fun `rejected stays local with reason and is not synced`() {
-        val body = """
-            {
-              "status": "partial",
-              "processed_count": 1,
-              "results": [
-                {"index": 0, "status": "accepted", "client_reading_id": "${ids[0]}"},
-                {"index": 1, "status": "rejected", "client_reading_id": "${ids[1]}", "error": "heart_rate out of range"}
-              ]
-            }
-        """.trimIndent()
-        val decisions = IngestReconciler.decisionsForHttp(ids, 200, body)
-        assertTrue(decisions[0].markSynced)
-        assertFalse(decisions[1].markSynced)
-        assertFalse(decisions[1].keepQueued)
-        assertEquals(IngestItemOutcome.REJECTED, decisions[1].outcome)
-        assertEquals("heart_rate out of range", decisions[1].errorMessage)
+    @Test fun partial_reply_confirms_only_identified_item_never_array_neighbor() {
+        val result = IngestReconciler.batch(readings, 200, body(entry(1, "B")))
+        assertFalse(result[0].confirmed)
+        assertTrue(result[1].confirmed)
     }
 
-    @Test
-    fun `401 is invalid key and stays queued`() {
-        val decisions = IngestReconciler.decisionsForHttp(ids, 401, """{"detail":"no"}""")
-        assertTrue(decisions.all { it.outcome == IngestItemOutcome.AUTH_INVALID })
-        assertTrue(decisions.all { it.keepQueued })
-        assertFalse(decisions.any { it.markSynced })
-        assertEquals(IngestReconciler.AUTH_INVALID_MESSAGE, decisions[0].errorMessage)
+    @Test fun reordered_reply_uses_matching_explicit_index_and_identity() {
+        assertTrue(IngestReconciler.batch(readings, 200,
+            body(entry(1, "B", "duplicate"), entry(0, "A"))).all { it.confirmed })
     }
 
-    @Test
-    fun `403 is write-scope denial and stays queued`() {
-        val decisions = IngestReconciler.decisionsForHttp(ids, 403, null)
-        assertTrue(decisions.all { it.outcome == IngestItemOutcome.AUTH_FORBIDDEN })
-        assertTrue(decisions.all { it.keepQueued })
-        assertEquals(IngestReconciler.AUTH_FORBIDDEN_MESSAGE, decisions[0].errorMessage)
+    @Test fun mismatched_duplicate_unknown_or_invalid_indices_are_conservative() {
+        for (raw in listOf(body(entry(0, "B")), body(entry(0, "A"), entry(0, "A")),
+            body(entry(0, "UNKNOWN")), body(entry(2, "A")), body(entry(-1, "A")),
+            body(entry(0, "A").put("index", "0")), body(entry(0, "A").put("index", 0.5)),
+            body(entry(0, "A").apply { remove("index") }))) {
+            assertTrue(IngestReconciler.batch(readings, 200, raw).none { it.confirmed })
+        }
     }
 
-    @Test
-    fun `5xx and network keep the row queued`() {
-        val server = IngestReconciler.decisionsForHttp(ids, 503, "unavailable")
-        assertTrue(server.all { it.outcome == IngestItemOutcome.TRANSIENT && it.keepQueued && !it.markSynced })
-        val net = IngestReconciler.decisionsForHttp(ids, 0, null, networkError = true)
-        assertTrue(net.all { it.outcome == IngestItemOutcome.TRANSIENT && it.keepQueued })
+    @Test fun wrong_patient_or_missing_persisted_result_never_confirms() {
+        val valid = body(entry(0, "A"), entry(1, "B"))
+        val wrongPatient = JSONObject(valid).put("patient_id", "OTHER").toString()
+        val wrongResult = entry(0, "A").put("result", JSONObject().put("patient_id", "OTHER"))
+        for (raw in listOf(wrongPatient, body(wrongResult), body(entry(0, "A").apply { remove("result") }))) {
+            assertTrue(IngestReconciler.batch(readings, 200, raw).none { it.confirmed })
+        }
     }
 
-    @Test
-    fun `legacy 200 without results still marks synced`() {
-        val decisions = IngestReconciler.decisionsForHttp(ids, 200, """{"processed_count":2,"status":"success"}""")
-        assertTrue(decisions.all { it.markSynced })
+    @Test fun accepted_duplicate_and_rejected_have_distinct_outcomes_without_error_echo() {
+        val rejected = entry(1, "B", "rejected").put("error", "synthetic-private-value")
+        val result = IngestReconciler.batch(readings, 200, body(entry(0, "A", "duplicate"), rejected))
+        assertEquals(IngestItemOutcome.DUPLICATE, result[0].outcome)
+        assertEquals(IngestItemOutcome.REJECTED, result[1].outcome)
+        assertFalse(result[1].message!!.contains("synthetic-private-value"))
     }
 
-    @Test
-    fun `single ingest_status duplicate is synced`() {
-        val decisions = IngestReconciler.decisionsForHttp(
-            listOf(ids[0]),
-            200,
-            """{"ingest_status":"duplicate","duplicate":true}""",
-        )
-        assertEquals(IngestItemOutcome.DUPLICATE, decisions.single().outcome)
-        assertTrue(decisions.single().markSynced)
+    @Test fun single_requires_status_identity_patient_and_receipt() {
+        val expected = reading("A")
+        val valid = IngestResponse(ingest_status = "accepted", client_reading_id = "A",
+            reading_id = "stored-A", patient_id = expected.patientId)
+        assertTrue(IngestReconciler.single(expected, 200, valid).confirmed)
+        assertTrue(IngestReconciler.single(expected, 200, valid.copy(ingest_status = "duplicate", duplicate = true)).confirmed)
+        for (response in listOf(null, IngestResponse(), valid.copy(client_reading_id = "B"),
+            valid.copy(patient_id = "OTHER"), valid.copy(reading_id = null),
+            valid.copy(ingest_status = "unknown"), valid.copy(duplicate = true), valid.copy(success = false))) {
+            assertFalse(IngestReconciler.single(expected, 200, response).confirmed)
+        }
+        for (code in listOf(201, 202, 204, 301, 401, 403, 404, 422, 429, 503)) {
+            assertFalse(IngestReconciler.single(expected, code, valid).confirmed)
+        }
     }
 
-    @Test
-    fun `ensureReadingPayload writes id timestamp and device only when missing`() {
-        val raw = """{"patient_id":"PAT-1","heart_rate":78}"""
-        val out = JSONObject(
-            IngestReconciler.ensureReadingPayload(
-                raw,
-                clientReadingId = ids[0],
-                fallbackDeviceId = "AA:BB:CC:DD:EE:FF",
-                nowMs = 1_725_000_000_000L,
-            )
-        )
-        assertEquals(ids[0], out.getString("client_reading_id"))
-        assertEquals("AA:BB:CC:DD:EE:FF", out.getString("device_id"))
-        assertTrue(out.getString("timestamp").endsWith("Z"))
-
-        val already = """
-            {
-              "patient_id":"PAT-1",
-              "device_id":"C4:E3:42:AA:30:A4",
-              "timestamp":"2026-09-24T12:00:00Z",
-              "client_reading_id":"${ids[1]}",
-              "heart_rate":80
-            }
-        """.trimIndent()
-        val kept = JSONObject(IngestReconciler.ensureReadingPayload(already, ids[0], nowMs = 1L))
-        assertEquals(ids[1], kept.getString("client_reading_id"))
-        assertEquals("2026-09-24T12:00:00Z", kept.getString("timestamp"))
-        assertEquals("C4:E3:42:AA:30:A4", kept.getString("device_id"))
+    @Test fun flush_key_preserves_order_patient_and_stays_stable_for_replay() {
+        assertEquals(IngestReconciler.flushIdempotencyKey(readings), IngestReconciler.flushIdempotencyKey(readings))
+        assertNotEquals(IngestReconciler.flushIdempotencyKey(readings), IngestReconciler.flushIdempotencyKey(readings.reversed()))
+        assertNotEquals(IngestReconciler.flushIdempotencyKey(readings),
+            IngestReconciler.flushIdempotencyKey(listOf(reading("A", "OTHER"), reading("B", "OTHER"))))
     }
 
-    @Test
-    fun `idempotency key is stable for the same chunk and does not change order`() {
-        val a = IngestReconciler.flushIdempotencyKey(ids)
-        val b = IngestReconciler.flushIdempotencyKey(ids.reversed())
-        assertEquals(a, b)
-        assertTrue(a.matches(Regex("^[A-Za-z0-9._:-]{1,128}$")))
+    @Test fun mixed_patient_batch_is_rejected_and_planning_separates_it() {
+        val mixed = listOf(reading("A"), reading("B", "OTHER"), reading("C"))
+        assertTrue(runCatching { IngestReconciler.batchBody(mixed) }.isFailure)
+        val chunks = IngestReconciler.chunks(mixed)
+        assertEquals(2, chunks.size)
+        assertTrue(chunks.all { it.map { row -> row.patientId }.distinct().size == 1 })
     }
 
-    @Test
-    fun `auth backoff stops retry storm until key fingerprint changes`() {
-        val fp = IngestReconciler.keyFingerprint("usable-key-value-not-logged")
-        val backoff = AuthBackoffState(lastAuthHttp = 401, lastAuthAtMs = 1_000L, keyFingerprint = fp)
-        assertTrue(
-            IngestReconciler.shouldSkipServerCall(
-                nowMs = 1_000L + 60_000L,
-                keyFingerprint = fp,
-                backoff = backoff,
-            )
-        )
-        assertFalse(
-            IngestReconciler.shouldSkipServerCall(
-                nowMs = 1_000L + IngestReconciler.AUTH_BACKOFF_MS + 1,
-                keyFingerprint = fp,
-                backoff = backoff,
-            )
-        )
-        assertFalse(
-            IngestReconciler.shouldSkipServerCall(
-                nowMs = 1_000L + 60_000L,
-                keyFingerprint = IngestReconciler.keyFingerprint("replacement-key"),
-                backoff = backoff,
-            )
-        )
+    @Test fun missing_time_patient_or_conflicting_identity_is_not_repaired_with_defaults() {
+        val row = reading("A").item
+        for (field in listOf("timestamp", "patient_id", "device_id")) {
+            val malformed = JSONObject(row.payloadJson).apply { remove(field) }.toString()
+            assertTrue(runCatching { IngestReconciler.prepare(row.copy(payloadJson = malformed)) }.isFailure)
+        }
+        val conflict = JSONObject(row.payloadJson).put("client_reading_id", "OTHER").toString()
+        assertTrue(runCatching { IngestReconciler.prepare(row.copy(payloadJson = conflict)) }.isFailure)
+        val first = IngestReconciler.prepare(row).json
+        assertEquals(first, IngestReconciler.prepare(row.copy(retries = 4, lastAttemptAt = 99)).json)
+        assertEquals("2026-09-24T12:00:00Z", JSONObject(first).getString("timestamp"))
     }
 
-    @Test
-    fun `placeholder key is a configuration error not a silent 401`() {
-        assertFalse(IngestApiKey.isUsable(""))
-        assertFalse(IngestApiKey.isUsable(IngestApiKey.PLACEHOLDER))
-        assertFalse(IngestApiKey.isUsable("YOUR_HEALTHTECH_API_KEY_HERE"))
-        assertTrue(IngestApiKey.isUsable("ht_live_not_a_real_key_but_shaped"))
-        val decisions = IngestReconciler.decisionsForConfigError(ids)
-        assertTrue(decisions.all { it.outcome == IngestItemOutcome.CONFIG_ERROR && it.keepQueued && !it.markSynced })
-        assertEquals(IngestReconciler.AUTH_INVALID_MESSAGE, decisions[0].errorMessage)
+    @Test fun invalid_or_ambiguous_calendar_time_stays_local_while_offset_and_precision_are_preserved() {
+        val row = reading("A").item
+        for (time in listOf("T", "2026-02-30T12:00:00Z", "2026-09-24T25:00:00Z",
+            "2026-09-24T12:00:00", "2026-09-24", "2026-09-24T12:00:00+25:00")) {
+            val raw = JSONObject(row.payloadJson).put("timestamp", time).toString()
+            assertTrue(time, runCatching { IngestReconciler.prepare(row.copy(payloadJson = raw)) }.isFailure)
+        }
+        for (time in listOf("2026-09-24T12:00:00.123456789Z", "2026-09-24T09:00:00-03:00", "2024-02-29T12:00:00Z")) {
+            val raw = JSONObject(row.payloadJson).put("timestamp", time).toString()
+            assertEquals(time, JSONObject(IngestReconciler.prepare(row.copy(payloadJson = raw)).json).getString("timestamp"))
+        }
+    }
+
+    @Test fun legacy_flat_device_alias_is_materialized_and_conflicting_aliases_stay_local() {
+        val row = reading("A").item
+        val legacy = JSONObject(row.payloadJson).apply { remove("device_id"); put("deviceId", "LEGACY-WATCH") }
+        val prepared = IngestReconciler.prepare(row.copy(payloadJson = legacy.toString()))
+        assertEquals("LEGACY-WATCH", JSONObject(prepared.json).getString("device_id"))
+        val conflicting = legacy.put("device_id", "OTHER-WATCH").toString()
+        assertTrue(runCatching { IngestReconciler.prepare(row.copy(payloadJson = conflicting)) }.isFailure)
     }
 }

@@ -1,6 +1,7 @@
 package com.example.ui.components
 
 import androidx.compose.ui.test.assertTextEquals
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
@@ -10,6 +11,7 @@ import com.github.takahirom.roborazzi.RobolectricDeviceQualifiers
 import com.github.takahirom.roborazzi.captureRoboImage
 import org.junit.Rule
 import org.junit.Test
+import org.junit.Assert.assertEquals
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
@@ -22,6 +24,41 @@ class DeviceControlCardBatteryTest {
 
     @get:Rule
     val composeTestRule = createComposeRule()
+
+    @Test
+    fun disconnected_watch_opens_connection_without_requesting_a_reading() {
+        var connections = 0
+        var readings = 0
+        composeTestRule.setContent {
+            MyApplicationTheme {
+                DeviceControlCard(
+                    device = null,
+                    autoIngestLive = false,
+                    onToggleAutoIngest = {},
+                    onSpotCheck = { readings++ },
+                    onSimulateBatch = {},
+                    onScanClick = { connections++ },
+                    onDisconnect = {},
+                )
+            }
+        }
+        composeTestRule.onNodeWithTag("connect_watch_button").performClick()
+        composeTestRule.onNodeWithTag("spot_check_button").assertDoesNotExist()
+        composeTestRule.runOnIdle {
+            assertEquals(1, connections)
+            assertEquals(0, readings)
+        }
+    }
+
+    @Test
+    fun simulation_requires_opening_watch_options_and_test_tools() {
+        setCard(HBandDevice(isConnected = false, batteryLevel = null))
+        composeTestRule.onNodeWithTag("simulate_batch_button").assertDoesNotExist()
+        composeTestRule.onNodeWithTag("watch_details_button").performClick()
+        composeTestRule.onNodeWithTag("simulate_batch_button").assertDoesNotExist()
+        composeTestRule.onNodeWithTag("watch_test_tools_button").performClick()
+        composeTestRule.onNodeWithTag("simulate_batch_button").assertExists()
+    }
 
     @Test
     fun disconnected_unknown_battery_shows_dash_not_placeholder_percent() {

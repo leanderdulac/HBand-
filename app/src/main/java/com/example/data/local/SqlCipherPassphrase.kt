@@ -5,7 +5,6 @@ import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
 import java.security.KeyStore
-import java.security.SecureRandom
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
@@ -17,27 +16,23 @@ import javax.crypto.spec.GCMParameterSpec
  */
 object SqlCipherPassphrase {
     private const val PREFS = "hband_sqlcipher"
-    private const val WRAPPED_KEY = "wrapped_db_key"
-    private const val WRAPPED_IV = "wrapped_db_key_iv"
     private const val ANDROID_KEYSTORE = "AndroidKeyStore"
     private const val KEY_ALIAS = "hband_sqlcipher_master"
     private const val TRANSFORMATION = "AES/GCM/NoPadding"
 
-    fun getPassphrase(context: Context): ByteArray {
-        val prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        val wrapped = prefs.getString(WRAPPED_KEY, null)
-        val iv = prefs.getString(WRAPPED_IV, null)
-        if (!wrapped.isNullOrBlank() && !iv.isNullOrBlank()) {
-            return unwrap(wrapped, iv)
+    private val storage = DatabaseKeyStorage(object : DatabaseKeyCipher {
+        override fun wrap(raw: ByteArray): Pair<String, String> {
+            val (ciphertext, iv) = SqlCipherPassphrase.wrap(raw)
+            return Base64.encodeToString(ciphertext, Base64.NO_WRAP) to Base64.encodeToString(iv, Base64.NO_WRAP)
         }
-        val raw = ByteArray(32).also { SecureRandom().nextBytes(it) }
-        val (cipherText, ivBytes) = wrap(raw)
-        prefs.edit()
-            .putString(WRAPPED_KEY, Base64.encodeToString(cipherText, Base64.NO_WRAP))
-            .putString(WRAPPED_IV, Base64.encodeToString(ivBytes, Base64.NO_WRAP))
-            .apply()
-        return raw
-    }
+        override fun unwrap(wrapped: String, iv: String): ByteArray = SqlCipherPassphrase.unwrap(wrapped, iv)
+    })
+
+    fun getPassphrase(context: Context): ByteArray = try {
+        val app = context.applicationContext
+        storage.getOrCreate(app.getSharedPreferences(PREFS, Context.MODE_PRIVATE),
+            app.getDatabasePath(AppDatabase.DATABASE_NAME))
+    } catch (_: Exception) { throw DatabaseKeyUnavailableException() }
 
     private fun wrap(raw: ByteArray): Pair<ByteArray, ByteArray> {
         val cipher = Cipher.getInstance(TRANSFORMATION)
@@ -48,7 +43,8 @@ object SqlCipherPassphrase {
     private fun unwrap(wrappedB64: String, ivB64: String): ByteArray {
         val cipher = Cipher.getInstance(TRANSFORMATION)
         val iv = Base64.decode(ivB64, Base64.NO_WRAP)
-        cipher.init(Cipher.DECRYPT_MODE, getOrCreateSecretKey(), GCMParameterSpec(128, iv))
+        // A missing master key is a recovery condition, never a reason to replace it.
+        cipher.init(Cipher.DECRYPT_MODE, requireExistingSecretKey(), GCMParameterSpec(128, iv))
         return cipher.doFinal(Base64.decode(wrappedB64, Base64.NO_WRAP))
     }
 
@@ -56,6 +52,7 @@ object SqlCipherPassphrase {
         val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
         val existing = keyStore.getEntry(KEY_ALIAS, null) as? KeyStore.SecretKeyEntry
         if (existing != null) return existing.secretKey
+        if (keyStore.containsAlias(KEY_ALIAS)) throw DatabaseKeyUnavailableException()
 
         val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, ANDROID_KEYSTORE)
         generator.init(
@@ -69,5 +66,11 @@ object SqlCipherPassphrase {
                 .build()
         )
         return generator.generateKey()
+    }
+
+    private fun requireExistingSecretKey(): SecretKey {
+        val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
+        return (keyStore.getEntry(KEY_ALIAS, null) as? KeyStore.SecretKeyEntry)?.secretKey
+            ?: throw DatabaseKeyUnavailableException()
     }
 }

@@ -16,6 +16,10 @@ import androidx.core.content.ContextCompat
 import com.example.ui.HomeScreen
 import com.example.ui.MainViewModel
 import com.example.ui.theme.MyApplicationTheme
+import androidx.compose.runtime.getValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.ui.components.StorageStartupScreen
+import com.example.ui.components.RequestPermissionsWhenStorageReady
 
 class MainActivity : ComponentActivity() {
 
@@ -25,7 +29,7 @@ class MainActivity : ComponentActivity() {
         ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
         val allGranted = permissions.entries.all { it.value }
-        if (allGranted) {
+        if (allGranted && (application as? HBandHealthSyncApp)?.storageStartup?.isReady == true) {
             mainViewModel.showNotification("Permissões Bluetooth concedidas com sucesso!")
         }
     }
@@ -34,13 +38,13 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        com.example.data.remote.RetrofitClient.initialize(this)
-        checkAndRequestBlePermissions()
-
         setContent {
+            val startup = (application as HBandHealthSyncApp).storageStartup
+            val state by startup.state.collectAsStateWithLifecycle()
+            RequestPermissionsWhenStorageReady(state) { checkAndRequestBlePermissions() }
             MyApplicationTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
-                    HomeScreen(viewModel = mainViewModel)
+                    StorageStartupScreen(state) { HomeScreen(viewModel = mainViewModel) }
                 }
             }
         }

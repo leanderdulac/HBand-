@@ -123,10 +123,11 @@ class IngestPayloadMapperTest {
         assertEquals(IngestHttpKind.AUTH, IngestPayloadMapper.classifyHttp(403))
         assertEquals(IngestHttpKind.CLIENT, IngestPayloadMapper.classifyHttp(422))
         assertEquals(IngestHttpKind.SERVER, IngestPayloadMapper.classifyHttp(503))
-        val message401 = IngestPayloadMapper.authErrorMessage(401, "invalid api key")
-        assertTrue(message401.contains("401"))
-        assertTrue(message401.contains(IngestReconciler.AUTH_INVALID_MESSAGE))
-        assertFalse(message401.contains("invalid api key"))
+        val message = IngestPayloadMapper.authErrorMessage(401, "invalid api key")
+        assertTrue(message.contains("401"))
+        assertTrue(message.contains("Ajustes"))
+        assertTrue(message.contains(IngestReconciler.AUTH_INVALID_MESSAGE))
+        assertFalse(message.contains("invalid api key"))
         val message403 = IngestPayloadMapper.authErrorMessage(403, null)
         assertTrue(message403.contains(IngestReconciler.AUTH_FORBIDDEN_MESSAGE))
     }
@@ -147,6 +148,60 @@ class IngestPayloadMapperTest {
 }
 
 class IngestDeduperTest {
+
+    @Test
+    fun `measurement date changes do not change the elapsed recording interval`() {
+        var elapsed = 1_000L
+        val deduper = IngestDeduper(elapsedMs = { elapsed })
+        val original = sample(72)
+        assertTrue(deduper.shouldEnqueue(original))
+        elapsed = 2_000L
+        assertFalse(deduper.shouldEnqueue(original.copy(timestamp = "2026-09-15T12:00:00Z")))
+        elapsed = 30_999L
+        assertFalse(deduper.shouldEnqueue(original.copy(timestamp = "2026-09-13T12:00:00Z")))
+        elapsed = 31_000L
+        val corrected = original.copy(timestamp = "2026-09-13T12:00:30Z")
+        assertTrue(deduper.shouldEnqueue(corrected))
+        assertEquals("2026-09-13T12:00:30Z", corrected.timestamp)
+    }
+
+    @Test
+    fun `changed measurements bypass the interval but invalid data do not reset it`() {
+        var elapsed = 100L
+        val deduper = IngestDeduper(elapsedMs = { elapsed })
+        assertTrue(deduper.shouldEnqueue(sample(72)))
+        elapsed = 200L
+        assertTrue(deduper.shouldEnqueue(sample(75)))
+        elapsed = 10_000L
+        assertFalse(deduper.shouldEnqueue(sample(0)))
+        assertFalse(deduper.shouldEnqueue(sample(80, real = false)))
+        elapsed = 30_199L
+        assertFalse(deduper.shouldEnqueue(sample(75)))
+        elapsed = 30_200L
+        assertTrue(deduper.shouldEnqueue(sample(75)))
+    }
+
+    @Test
+    fun `monotonic clock may have a negative origin and repeated callbacks do not postpone acceptance`() {
+        var elapsed = -90_000L
+        val deduper = IngestDeduper(elapsedMs = { elapsed })
+        assertTrue(deduper.shouldEnqueue(sample(72)))
+        for (at in listOf(-90_000L, -80_000L, -70_000L, -60_001L)) {
+            elapsed = at
+            assertFalse(deduper.shouldEnqueue(sample(72)))
+        }
+        elapsed = -60_000L
+        assertTrue(deduper.shouldEnqueue(sample(72)))
+    }
+
+    @Test
+    fun `backwards interval clock does not suppress repeated readings indefinitely`() {
+        val deduper = IngestDeduper()
+        assertTrue(deduper.shouldEnqueue(sample(72), nowMs = 1_000_000L))
+        assertTrue(deduper.shouldEnqueue(sample(72), nowMs = 10_000L))
+        assertFalse(deduper.shouldEnqueue(sample(72), nowMs = 39_999L))
+        assertTrue(deduper.shouldEnqueue(sample(72), nowMs = 40_000L))
+    }
 
     private fun sample(hr: Int, steps: Int = 100, real: Boolean = true) = HBandTelemetry(
         deviceId = "AA:BB:CC:DD:EE:FF",

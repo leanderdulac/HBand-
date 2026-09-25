@@ -9,6 +9,9 @@ plugins {
   alias(libs.plugins.google.services)
 }
 
+// Explicit test-only build. Never use this package as a pilot update.
+val storageLab = providers.gradleProperty("storageLab").orNull == "true"
+
 android {
   namespace = "com.example"
   compileSdk { version = release(36) { minorApiLevel = 1 } }
@@ -58,7 +61,13 @@ android {
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
       signingConfig = signingConfigs.getByName("release")
     }
-    debug { signingConfig = signingConfigs.getByName("debugConfig") }
+    debug {
+      signingConfig = signingConfigs.getByName("debugConfig")
+      if (storageLab) applicationIdSuffix = ".storagelab"
+    }
+  }
+  if (storageLab) {
+    sourceSets.getByName("debug").manifest.srcFile("src/storageLab/AndroidManifest.xml")
   }
   compileOptions {
     sourceCompatibility = JavaVersion.VERSION_11
@@ -125,6 +134,11 @@ googleServices { missingGoogleServicesStrategy = MissingGoogleServicesStrategy.W
 // Some unused dependencies are commented out below instead of being removed.
 // This makes it easy to add them back in the future if needed.
 dependencies {
+  constraints {
+    implementation(libs.androidx.fragment) {
+      because("Google Play services brings Fragment 1.1.0; ActivityResult requires 1.3.0 or newer")
+    }
+  }
   // SDK oficial Veepoo/HBand (VPOperateManager) para o VE30 — ver app/libs/THIRD_PARTY_NOTICE.md
   // gson-2.2.4.jar excluído: o projeto já traz Gson 2.10.1 (via Firebase/Retrofit), que
   // cobre a API que o vpprotocol usa e evita "duplicate class" no dexing.

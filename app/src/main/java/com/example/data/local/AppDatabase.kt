@@ -1,7 +1,6 @@
 package com.example.data.local
 
 import android.content.Context
-import android.util.Log
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
@@ -29,7 +28,6 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun advancedMeasurementDao(): AdvancedMeasurementDao
 
     companion object {
-        private const val TAG = "AppDatabase"
         const val DATABASE_NAME = "healthtech_wearable_db"
 
         @Volatile
@@ -51,36 +49,47 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /** Call off the main thread before activating any consumer; Room.build is lazy. */
+        fun openVerified(context: Context): AppDatabase = synchronized(this) {
+            val database = INSTANCE ?: buildDatabase(context.applicationContext)
+            try {
+                verifyOpen(database)
+                INSTANCE = database
+                database
+            } catch (error: Throwable) {
+                if (INSTANCE === database) INSTANCE = null
+                throw error
+            }
+        }
+
+        internal fun verifyOpen(database: AppDatabase) {
+            try {
+                database.openHelper.writableDatabase.query("SELECT 1").use { cursor ->
+                    check(cursor.moveToFirst() && cursor.getInt(0) == 1)
+                }
+            } catch (error: Throwable) {
+                try { database.close() } catch (_: Exception) { /* Keep the opening failure. */ }
+                throw error
+            }
+        }
+
         private fun buildDatabase(context: Context): AppDatabase {
             loadSqlCipherNativeLibrary()
-            replaceLegacyUnencryptedFile(context)
+            // Test runtimes may skip the native load; production factories must still
+            // refuse storage instead of silently selecting Room's plaintext helper.
+            check(SqlCipherNative.isLoaded) { "Armazenamento criptografado indisponível." }
+            SqliteFileInspector.requireEncryptedInput(context.getDatabasePath(DATABASE_NAME))
 
-            val builder = Room.databaseBuilder(
-                context,
-                AppDatabase::class.java,
-                DATABASE_NAME
-            )
-                // v6→v7 is additive and backfills queued rows. Versions before the
-                // field-test schema never held the 53-row outbox we must keep.
+            val passphrase = SqlCipherPassphrase.getPassphrase(context)
+            return schemaPreservingBuilder(context)
+                .openHelperFactory(SupportOpenHelperFactory(passphrase))
+                .build()
+        }
+
+        // Unknown versions must fail opening, never recreate a database holding readings.
+        // Tests use this same schema policy with synthetic SQLite files, without SQLCipher.
+        internal fun schemaPreservingBuilder(context: Context): RoomDatabase.Builder<AppDatabase> =
+            Room.databaseBuilder(context, AppDatabase::class.java, DATABASE_NAME)
                 .addMigrations(AppDatabaseMigrations.MIGRATION_6_7)
-                .fallbackToDestructiveMigrationFrom(true, 1, 2, 3, 4, 5)
-
-            if (SqlCipherNative.isLoaded) {
-                val passphrase = SqlCipherPassphrase.getPassphrase(context)
-                builder.openHelperFactory(SupportOpenHelperFactory(passphrase))
-            } else {
-                Log.w(TAG, "Opening Room without SQLCipher (native library not loaded)")
-            }
-
-            return builder.build()
-        }
-
-        private fun replaceLegacyUnencryptedFile(context: Context) {
-            val file = context.getDatabasePath(DATABASE_NAME)
-            if (SqliteFileInspector.looksLikeUnencryptedSqlite(file)) {
-                Log.w(TAG, "Removing leftover unencrypted SQLite file before SQLCipher open")
-                SqliteFileInspector.deleteSidecars(file)
-            }
-        }
     }
 }

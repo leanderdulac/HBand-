@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -46,18 +47,23 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ui.theme.MinimalBorder
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlinx.coroutines.delay
 
 enum class BreathingPhase(val label: String, val durationSeconds: Int, val color: Color) {
@@ -74,10 +80,13 @@ fun BreathingExerciseCard(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    // Keep only the counted draft across recreation. Running deliberately resets
+    // to false so no time is inferred or saved while the UI is being recreated.
     var isRunning by remember { mutableStateOf(false) }
-    var currentPhase by remember { mutableStateOf(BreathingPhase.INHALE) }
-    var phaseSecondsRemaining by remember { mutableIntStateOf(BreathingPhase.INHALE.durationSeconds) }
-    var sessionTotalSeconds by remember { mutableIntStateOf(0) }
+    var currentPhase by rememberSaveable { mutableStateOf(BreathingPhase.INHALE) }
+    var phaseSecondsRemaining by rememberSaveable { mutableIntStateOf(BreathingPhase.INHALE.durationSeconds) }
+    var sessionTotalSeconds by rememberSaveable { mutableIntStateOf(0) }
 
     val vibrator = remember(context) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -134,13 +143,24 @@ fun BreathingExerciseCard(
         }
     }
 
-    DisposableEffect(Unit) {
-        onDispose {
+    DisposableEffect(lifecycleOwner, vibrator) {
+        fun cancelVibration() {
             try {
                 vibrator?.cancel()
             } catch (e: Exception) {
                 // Ignore cleanup error
             }
+        }
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP) {
+                isRunning = false
+                cancelVibration()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            cancelVibration()
         }
     }
 
@@ -170,11 +190,9 @@ fun BreathingExerciseCard(
         colors = CardDefaults.cardColors(containerColor = Color.White)
     ) {
         Column(modifier = Modifier.padding(20.dp)) {
-            // Header Row
-            Row(
+            Column(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(
@@ -201,8 +219,8 @@ fun BreathingExerciseCard(
                             color = Color(0xFF191C1E)
                         )
                         Text(
-                            text = "Coaching por Vibração • Relaxamento Caixa",
-                            style = MaterialTheme.typography.labelSmall,
+                            text = "Orientação visual e vibração",
+                            style = MaterialTheme.typography.bodyMedium,
                             color = Color(0xFF44474E)
                         )
                     }
@@ -213,8 +231,8 @@ fun BreathingExerciseCard(
                     color = Color(0xFFECFDF5)
                 ) {
                     Text(
-                        text = "Total: ${totalBreathingSeconds / 60}m ${totalBreathingSeconds % 60}s",
-                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                        text = "Tempo salvo: ${totalBreathingSeconds / 60}\u00A0min ${totalBreathingSeconds % 60}\u00A0s",
+                        style = MaterialTheme.typography.bodyLarge,
                         color = Color(0xFF047857),
                         modifier = Modifier
                             .padding(horizontal = 10.dp, vertical = 6.dp)
@@ -224,6 +242,12 @@ fun BreathingExerciseCard(
             }
 
             Spacer(modifier = Modifier.height(20.dp))
+
+            Text(
+                "Para guardar o tempo, toque em Concluir e salvar antes de sair desta tela.",
+                style = MaterialTheme.typography.bodyLarge,
+            )
+            Spacer(modifier = Modifier.height(16.dp))
 
             // Interactive Breathing Visual Circle Box
             Box(
@@ -257,7 +281,7 @@ fun BreathingExerciseCard(
                             Text(
                                 text = "$phaseSecondsRemaining",
                                 style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold),
-                                color = Color.White,
+                                color = if (currentPhase.color.luminance() > 0.179f) Color.Black else Color.White,
                                 modifier = Modifier.testTag("breathing_phase_seconds_text")
                             )
                         } else {
@@ -281,23 +305,22 @@ fun BreathingExerciseCard(
                 color = currentPhase.color.copy(alpha = 0.1f),
                 border = BorderStroke(1.dp, currentPhase.color.copy(alpha = 0.3f))
             ) {
-                Row(
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp, vertical = 12.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     Text(
-                        text = if (isRunning) currentPhase.label else "Pronto para iniciar sessão de relaxamento",
-                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                        color = currentPhase.color,
+                        text = if (isRunning) currentPhase.label else if (sessionTotalSeconds > 0) "Exercício pausado" else "Toque em Iniciar quando estiver pronto.",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
                         modifier = Modifier.testTag("breathing_phase_label_text")
                     )
 
                     Text(
-                        text = "Sessão: ${sessionTotalSeconds / 60}m ${sessionTotalSeconds % 60}s",
-                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                        text = "Tempo neste exercício: ${sessionTotalSeconds / 60}\u00A0min ${sessionTotalSeconds % 60}\u00A0s",
+                        style = MaterialTheme.typography.bodyLarge,
                         color = Color(0xFF334155),
                         modifier = Modifier.testTag("session_timer_text")
                     )
@@ -307,18 +330,18 @@ fun BreathingExerciseCard(
             Spacer(modifier = Modifier.height(16.dp))
 
             // Action Buttons
-            Row(
+            Column(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Button(
                     onClick = { isRunning = !isRunning },
                     shape = RoundedCornerShape(18.dp),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = if (isRunning) Color(0xFFDC2626) else Color(0xFF059669)
+                        containerColor = MaterialTheme.colorScheme.primary
                     ),
                     modifier = Modifier
-                        .weight(1f)
+                        .fillMaxWidth().heightIn(min = 56.dp)
                         .testTag("toggle_breathing_exercise_button")
                 ) {
                     Icon(
@@ -328,8 +351,8 @@ fun BreathingExerciseCard(
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = if (isRunning) "Pausar" else "Iniciar Ciclo",
-                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold)
+                        text = if (isRunning) "Pausar" else if (sessionTotalSeconds > 0) "Continuar exercício" else "Iniciar",
+                        style = MaterialTheme.typography.labelLarge
                     )
                 }
 
@@ -343,9 +366,9 @@ fun BreathingExerciseCard(
                             currentPhase = BreathingPhase.INHALE
                         },
                         shape = RoundedCornerShape(18.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0288D1)),
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                         modifier = Modifier
-                            .weight(1f)
+                            .fillMaxWidth().heightIn(min = 56.dp)
                             .testTag("save_breathing_session_button")
                     ) {
                         Icon(
@@ -355,8 +378,8 @@ fun BreathingExerciseCard(
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = "Concluir e Salvar",
-                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold)
+                            text = "Concluir e salvar",
+                            style = MaterialTheme.typography.labelLarge
                         )
                     }
                 }

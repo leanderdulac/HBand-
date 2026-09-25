@@ -14,8 +14,6 @@ object HBandWorkScheduler {
 
     private const val PERIODIC_INGEST_WORK_NAME = "hband_periodic_ingest_work"
     private const val ONE_TIME_INGEST_WORK_NAME = "hband_one_time_ingest_work"
-    private const val PERIODIC_FIRESTORE_WORK_NAME = "hband_periodic_firestore_backup"
-    private const val ONE_TIME_FIRESTORE_WORK_NAME = "hband_one_time_firestore_backup"
 
     fun schedulePeriodicIngest(context: Context) {
         val constraints = Constraints.Builder()
@@ -36,44 +34,7 @@ object HBandWorkScheduler {
             periodicWorkRequest
         )
 
-        schedulePeriodicFirestoreBackup(context)
-    }
-
-    fun schedulePeriodicFirestoreBackup(context: Context) {
-        val constraints = Constraints.Builder()
-            .setRequiredNetworkType(NetworkType.CONNECTED)
-            .build()
-
-        val periodicWorkRequest = PeriodicWorkRequestBuilder<FirestoreSyncWorker>(
-            repeatInterval = 15,
-            repeatIntervalTimeUnit = TimeUnit.MINUTES
-        )
-            .addTag("firestore_backup_worker")
-            .setConstraints(constraints)
-            .build()
-
-        WorkManager.getInstance(context).enqueueUniquePeriodicWork(
-            PERIODIC_FIRESTORE_WORK_NAME,
-            ExistingPeriodicWorkPolicy.KEEP,
-            periodicWorkRequest
-        )
-    }
-
-    fun triggerImmediateFirestoreBackup(context: Context) {
-        val constraints = Constraints.Builder()
-            .setRequiredNetworkType(NetworkType.CONNECTED)
-            .build()
-
-        val oneTimeWorkRequest = OneTimeWorkRequestBuilder<FirestoreSyncWorker>()
-            .addTag("firestore_backup_worker")
-            .setConstraints(constraints)
-            .build()
-
-        WorkManager.getInstance(context).enqueueUniqueWork(
-            ONE_TIME_FIRESTORE_WORK_NAME,
-            ExistingWorkPolicy.REPLACE,
-            oneTimeWorkRequest
-        )
+        // Cloud backup has no confirmed recovery/authorization contract. Do not schedule it.
     }
 
     fun triggerImmediateIngest(context: Context) {

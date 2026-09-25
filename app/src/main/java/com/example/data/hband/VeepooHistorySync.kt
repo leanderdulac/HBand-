@@ -27,7 +27,6 @@ import com.veepoo.protocol.model.datas.OriginData3
 import com.veepoo.protocol.model.datas.OriginHalfHourData
 import com.veepoo.protocol.model.datas.SleepData
 import com.veepoo.protocol.model.datas.Spo2hOriginData
-import com.veepoo.protocol.model.datas.SportData
 import com.veepoo.protocol.model.enums.EAllSetType
 import com.veepoo.protocol.model.enums.EAutoMeasureType
 import com.veepoo.protocol.model.enums.ECheckWear
@@ -36,6 +35,7 @@ import com.veepoo.protocol.model.settings.CheckWearSetting
 import com.veepoo.protocol.model.settings.ReadOriginSetting
 import com.veepoo.protocol.model.settings.ReadSleepSetting
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
 
@@ -55,9 +55,7 @@ class VeepooHistorySync(
 
     data class HandshakeExtras(
         val batteryPercent: Int? = null,
-        val steps: Int? = null,
-        val calories: Float? = null,
-        val distanceMeters: Float? = null,
+        val sport: VeepooSportReading? = null,
         val autoMeasure: List<AutoMeasureData> = emptyList(),
         val spo2Auto: AllSetData? = null,
         val wear: CheckWearData? = null,
@@ -93,9 +91,7 @@ class VeepooHistorySync(
         }
         return HandshakeExtras(
             batteryPercent = battery,
-            steps = sport?.step?.takeIf { it > 0 },
-            calories = sport?.kcal?.toFloat()?.takeIf { it > 0f },
-            distanceMeters = sport?.dis?.toFloat()?.takeIf { it > 0f },
+            sport = sport,
             autoMeasure = auto,
             spo2Auto = spo2Auto,
             wear = wear,
@@ -109,13 +105,17 @@ class VeepooHistorySync(
         onProgress: (HistorySyncUiState) -> Unit,
     ): HistoryPull {
         val collected = mutableListOf<VeepooHistoryMapper.MappedSample>()
+        if (cancelled || !caps.probed) {
+            val state = HistorySyncUiState(phase = if (cancelled) "cancelado" else "unavailable")
+            onProgress(state)
+            return HistoryPull(emptyList(), state)
+        }
         var state = HistorySyncUiState(isRunning = true, phase = "origin")
         onProgress(state)
-        if (cancelled) return HistoryPull(emptyList(), state.copy(isRunning = false, lastError = "cancelado"))
 
         val watchDay = caps.historyDays.coerceIn(1, 7)
 
-        if (caps.canReadMultiDayOrigin) {
+        if (!cancelled && caps.canReadMultiDayOrigin) {
             val origin = retrying(times = 3, timeoutMs = ORIGIN_TIMEOUT_MS) {
                 readOrigin(caps, watchDay, deviceId, deviceModel) { progress ->
                     onProgress(state.copy(progress = progress, phase = "origin"))
@@ -183,9 +183,9 @@ class VeepooHistorySync(
 
         val finished = state.copy(
             isRunning = false,
-            phase = "done",
-            progress = 1f,
-            lastCompletedAtMs = System.currentTimeMillis(),
+            phase = when { cancelled -> "cancelado"; state.lastError != null -> "incomplete"; else -> "done" },
+            progress = if (cancelled) state.progress else 1f,
+            lastCompletedAtMs = if (!cancelled && state.lastError == null) System.currentTimeMillis() else null,
         )
         onProgress(finished)
         return HistoryPull(collected, finished)
@@ -273,11 +273,13 @@ class VeepooHistorySync(
         )
     }
 
-    private suspend fun readSport(): SportData? = awaitResult(SETTINGS_TIMEOUT_MS) { done, fail ->
+    private suspend fun readSport(): VeepooSportReading? = awaitResult(SETTINGS_TIMEOUT_MS) { done, fail ->
         vpManager.readSportStep(
             ackLogger(),
             ISportDataListener { data ->
-                if (data == null) fail("empty sport") else done(data)
+                // Copy SDK values immediately; later settings/history work may cross midnight.
+                val reading = VeepooSportReading.fromSdk(data, System.currentTimeMillis())
+                if (reading == null) fail("empty or invalid sport") else done(reading)
             },
         )
     }
@@ -605,6 +607,8 @@ class VeepooHistorySync(
             if (cancelled) return null
             val result = try {
                 block()
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Log.w(TAG, "SDK call failed (attempt ${attempt + 1}): ${e.message}")
                 null

@@ -3,7 +3,8 @@ package com.example.data.local
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
-import java.util.UUID
+import androidx.room.ColumnInfo
+import com.example.data.ingest.IngestReadingIdentity
 
 enum class QueueStatus {
     PENDING,
@@ -27,5 +28,6 @@ data class IngestQueueEntity(
      * Stable UUID generated once at insert. Never regenerated on retry —
      * this is the HealthTech `client_reading_id`.
      */
-    val clientReadingId: String = UUID.randomUUID().toString(),
+    @ColumnInfo(defaultValue = "''")
+    val clientReadingId: String = IngestReadingIdentity.forPayload(payloadJson),
 )

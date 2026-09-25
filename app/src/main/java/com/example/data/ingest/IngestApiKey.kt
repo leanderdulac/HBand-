@@ -1,23 +1,12 @@
 package com.example.data.ingest
 
-/**
- * Detects missing / placeholder HealthTech ingest keys.
- *
- * Never log the key value — only yes/no and a user-facing configuration error.
- */
+/** Local format/placeholder check only; a configured key is not proof of server authorization. */
 object IngestApiKey {
-    const val PLACEHOLDER = "YOUR_HEALTHTECH_API_KEY_HERE"
-
-    fun isPlaceholder(key: String?): Boolean {
-        val trimmed = key?.trim().orEmpty()
-        if (trimmed.isEmpty()) return true
-        if (trimmed.equals(PLACEHOLDER, ignoreCase = true)) return true
-        // Patient id was historically stuffed into the key field by mistake.
-        if (trimmed.equals(IngestPayloadMapper.DEFAULT_PATIENT_ID, ignoreCase = true)) return true
-        return false
+    const val CONFIGURATION_ERROR = "O acesso ao serviço não está configurado para envio. Os registros continuam neste aparelho. Peça ajuda à equipe responsável."
+    fun isUsable(key: String?): Boolean {
+        val value = key?.trim().orEmpty()
+        return value.isNotEmpty() && value.none { it <= ' ' || it >= '\u007f' } &&
+            !value.equals("YOUR_HEALTHTECH_API_KEY_HERE", ignoreCase = true) &&
+            !value.equals(IngestPayloadMapper.DEFAULT_PATIENT_ID, ignoreCase = true)
     }
-
-    fun isUsable(key: String?): Boolean = !isPlaceholder(key)
-
-    fun configurationError(): String = IngestReconciler.AUTH_INVALID_MESSAGE
 }

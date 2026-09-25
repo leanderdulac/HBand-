@@ -68,4 +68,5 @@ data class IngestResponse(
     val duplicate: Boolean? = null,
     val client_reading_id: String? = null,
     val reading_id: String? = null,
+    val patient_id: String? = null,
 )

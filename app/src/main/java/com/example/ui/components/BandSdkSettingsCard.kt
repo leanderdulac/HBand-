@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -33,6 +34,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.data.hband.AlarmUiState
@@ -42,6 +45,7 @@ import com.example.data.hband.FindDeviceUiState
 import com.example.data.hband.HealthRemindUiState
 import com.example.data.hband.HeartWarningUiState
 import com.example.data.hband.HistorySyncUiState
+import com.example.data.hband.historyReadStatusText
 import com.example.data.hband.LongSeatUiState
 import com.example.data.hband.NightTurnUiState
 import com.example.data.hband.WearDetectUiState
@@ -103,28 +107,28 @@ fun BandSdkSettingsCard(
                 Spacer(modifier = Modifier.width(12.dp))
                 Column {
                     Text(
-                        text = "Pulseira Veepoo (P0+P1)",
+                        text = "Opções do meu relógio",
                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                         color = Color(0xFF191C1E)
                     )
                     Text(
                         text = if (capabilities.probed) {
-                            "Capacidades lidas após handshake • ${capabilities.historyDays} dia(s) de histórico"
+                            "Opções identificadas na última conexão."
                         } else {
-                            "Aguardando handshake para ler suporte do firmware"
+                            "Conecte o relógio para verificar as opções disponíveis."
                         },
-                        style = MaterialTheme.typography.labelSmall,
+                        style = MaterialTheme.typography.bodyLarge,
                         color = Color(0xFF00639B)
                     )
                 }
             }
 
-            Text(
+            if (com.example.BuildConfig.DEBUG) PatientSection("Informações para suporte") { Text(
                 text = capabilityLine(capabilities),
                 style = MaterialTheme.typography.bodySmall,
                 color = Color(0xFF44474E),
                 modifier = Modifier.testTag("band_capability_summary")
-            )
+            ) }
 
             if (capabilities.probed && !hardwareConnected) {
                 Box(
@@ -136,53 +140,53 @@ fun BandSdkSettingsCard(
                         .testTag("band_sdk_reconnect_hint")
                 ) {
                     Text(
-                        text = VeepooSessionGate.hintWhenDisconnected(actionsEnabled),
-                        style = MaterialTheme.typography.bodySmall,
+                        text = patientWatchConnectionHint(actionsEnabled),
+                        style = MaterialTheme.typography.bodyLarge,
                         color = Color(0xFF9A3412)
                     )
                 }
             }
 
             SettingToggleRow(
-                title = "Medição automática (Origin contínuo)",
+                title = "Batimentos automáticos",
                 subtitle = if (autoMeasure.supported) {
-                    "read/setAutoMeasureSettingData"
+                    "Permite ao relógio fazer leituras automaticamente."
                 } else {
-                    "Não suportado neste firmware"
+                    settingAvailability(capabilities.probed)
                 },
                 checked = autoMeasure.heartRateEnabled,
-                enabled = autoMeasure.supported,
+                enabled = actionsEnabled && autoMeasure.supported,
                 testTag = "auto_measure_switch",
                 onCheckedChange = onAutoMeasureChange,
             )
 
             SettingToggleRow(
-                title = "SpO2 automático noturno",
+                title = "Oxigênio durante a noite",
                 subtitle = if (autoMeasure.spo2AutoSupported) {
-                    "readSpo2hAutoDetect / settingSpo2hAutoDetect"
+                    "Leituras automáticas de oxigênio no sangue durante a noite."
                 } else {
-                    "Não suportado neste firmware"
+                    settingAvailability(capabilities.probed)
                 },
                 checked = autoMeasure.spo2NightAutoEnabled,
-                enabled = autoMeasure.spo2AutoSupported,
+                enabled = actionsEnabled && autoMeasure.spo2AutoSupported,
                 testTag = "spo2_auto_switch",
                 onCheckedChange = onSpo2AutoChange,
             )
 
             val wearHint = when (wearDetect.lastWorn) {
                 true -> "Último estado: em uso"
-                false -> "Último estado: fora do pulso (reconexão mais lenta)"
+                false -> "Último estado: fora do pulso"
                 null -> "Estado de uso ainda não lido"
             }
             SettingToggleRow(
-                title = "Detecção de uso (wear)",
+                title = "Identificar uso no pulso",
                 subtitle = if (wearDetect.supported) {
-                    "checkCheckWear / setttingCheckWear • $wearHint"
+                    wearHint
                 } else {
-                    "Não suportado neste firmware"
+                    settingAvailability(capabilities.probed)
                 },
                 checked = wearDetect.enabled,
-                enabled = wearDetect.supported,
+                enabled = actionsEnabled && wearDetect.supported,
                 testTag = "wear_detect_switch",
                 onCheckedChange = onWearDetectChange,
             )
@@ -190,7 +194,7 @@ fun BandSdkSettingsCard(
             if (historySync.isRunning) {
                 Column {
                     Text(
-                        text = "Sincronizando ${historySync.phase}…",
+                        text = "Recebendo o histórico do relógio…",
                         style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
                         color = Color(0xFF00639B),
                         modifier = Modifier.testTag("history_sync_phase")
@@ -207,8 +211,8 @@ fun BandSdkSettingsCard(
                 }
             } else {
                 Text(
-                    text = historyStatusText(historySync),
-                    style = MaterialTheme.typography.bodySmall,
+                    text = historyReadStatusText(historySync),
+                    style = MaterialTheme.typography.bodyLarge,
                     color = Color(0xFF334155),
                     modifier = Modifier.testTag("history_sync_status")
                 )
@@ -221,18 +225,19 @@ fun BandSdkSettingsCard(
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00639B)),
                 modifier = Modifier
                     .fillMaxWidth()
+                    .heightIn(min = 56.dp)
                     .testTag("sync_history_button")
             ) {
                 Text(
-                    text = if (historySync.isRunning) "Lendo histórico…" else "Sincronizar histórico multi-dia",
+                    text = if (historySync.isRunning) "Recebendo histórico…" else "Receber histórico do relógio",
                     style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
                 )
             }
 
             if (alarm.supported) {
                 SettingToggleRow(
-                    title = "Alarme da pulseira",
-                    subtitle = alarm.summary.ifBlank { "readAlarm2 / addAlarm2" },
+                    title = "Alarme do relógio",
+                    subtitle = alarm.summary.ifBlank { "Horário ainda não informado." },
                     checked = alarm.enabled,
                     enabled = actionsEnabled,
                     testTag = "alarm_switch",
@@ -241,8 +246,8 @@ fun BandSdkSettingsCard(
             }
             if (heartWarning.supported) {
                 SettingToggleRow(
-                    title = "Alerta de FC na pulseira",
-                    subtitle = heartWarning.summary.ifBlank { "settingHeartWarning / readHeartWarning" },
+                    title = "Aviso de batimentos no relógio",
+                    subtitle = heartWarning.summary.ifBlank { "Limites ainda não informados." },
                     checked = heartWarning.enabled,
                     enabled = actionsEnabled,
                     testTag = "heart_warning_switch",
@@ -252,7 +257,7 @@ fun BandSdkSettingsCard(
             if (healthRemind.supported) {
                 SettingToggleRow(
                     title = "Lembrete de saúde",
-                    subtitle = healthRemind.summary.ifBlank { "settingHealthRemind" },
+                    subtitle = healthRemind.summary.ifBlank { "Configuração ainda não informada." },
                     checked = healthRemind.enabled,
                     enabled = actionsEnabled,
                     testTag = "health_remind_switch",
@@ -261,8 +266,8 @@ fun BandSdkSettingsCard(
             }
             if (longSeat.supported) {
                 SettingToggleRow(
-                    title = "Lembrete de sedentarismo",
-                    subtitle = longSeat.summary.ifBlank { "settingLongSeat / readLongSeat" },
+                    title = "Lembrete para se movimentar",
+                    subtitle = longSeat.summary.ifBlank { "Horário ainda não informado." },
                     checked = longSeat.enabled,
                     enabled = actionsEnabled,
                     testTag = "long_seat_switch",
@@ -272,7 +277,7 @@ fun BandSdkSettingsCard(
             if (nightTurn.supported) {
                 SettingToggleRow(
                     title = "Virar pulso à noite",
-                    subtitle = nightTurn.summary.ifBlank { "settingNightTurnWriste / readNightTurnWriste" },
+                    subtitle = nightTurn.summary.ifBlank { "Configuração ainda não informada." },
                     checked = nightTurn.enabled,
                     enabled = actionsEnabled,
                     testTag = "night_turn_switch",
@@ -281,8 +286,8 @@ fun BandSdkSettingsCard(
             }
             if (findDevice.supported) {
                 SettingToggleRow(
-                    title = "Encontrar pulseira",
-                    subtitle = findDevice.summary.ifBlank { "settingFindDevice / readFindDevice" },
+                    title = "Ajuda para encontrar o relógio",
+                    subtitle = findDevice.summary.ifBlank { "Configuração ainda não informada." },
                     checked = findDevice.enabled,
                     enabled = actionsEnabled,
                     testTag = "find_device_switch",
@@ -290,8 +295,8 @@ fun BandSdkSettingsCard(
                 )
             }
             if (findDevice.findByPhoneSupported) {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Button(
@@ -300,17 +305,17 @@ fun BandSdkSettingsCard(
                         shape = RoundedCornerShape(16.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00639B)),
                         modifier = Modifier
-                            .weight(1f)
+                            .fillMaxWidth().heightIn(min = 56.dp)
                             .testTag("find_by_phone_start")
                     ) {
-                        Text("Localizar", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold))
+                        Text("Localizar meu relógio", style = MaterialTheme.typography.labelLarge)
                     }
                     OutlinedButton(
                         onClick = onStopFindByPhone,
                         enabled = actionsEnabled && findDevice.finding,
                         shape = RoundedCornerShape(16.dp),
                         modifier = Modifier
-                            .weight(1f)
+                            .fillMaxWidth().heightIn(min = 56.dp)
                             .testTag("find_by_phone_stop")
                     ) {
                         Text("Parar busca", style = MaterialTheme.typography.labelMedium)
@@ -338,13 +343,13 @@ private fun SettingToggleRow(
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = title,
-                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold),
                 color = Color(0xFF191C1E)
             )
             Text(
                 text = subtitle,
-                style = MaterialTheme.typography.labelSmall,
-                color = Color(0xFF64748B)
+                style = MaterialTheme.typography.bodyMedium,
+                color = Color(0xFF44474E)
             )
         }
         Switch(
@@ -355,7 +360,7 @@ private fun SettingToggleRow(
                 checkedThumbColor = Color.White,
                 checkedTrackColor = Color(0xFF00639B)
             ),
-            modifier = Modifier.testTag(testTag)
+            modifier = Modifier.testTag(testTag).semantics { contentDescription = title }
         )
     }
 }
@@ -386,16 +391,5 @@ private fun capabilityLine(caps: DeviceCapabilities): String {
     return flags.joinToString(" • ")
 }
 
-private fun historyStatusText(state: HistorySyncUiState): String {
-    if (state.lastCompletedAtMs == null && state.lastError == null) {
-        return "O histórico multi-dia (Origin / sono / HRV / SpO2-origin) roda após o handshake."
-    }
-    val counts = buildList {
-        if (state.originSamples > 0) add("${state.originSamples} Origin")
-        if (state.sleepDays > 0) add("${state.sleepDays} sono")
-        if (state.hrvSamples > 0) add("${state.hrvSamples} HRV")
-        if (state.spo2Samples > 0) add("${state.spo2Samples} SpO2")
-    }.joinToString(", ").ifBlank { "nenhum sample real" }
-    val error = state.lastError?.let { " • $it" }.orEmpty()
-    return "Última leitura: $counts$error"
-}
+private fun settingAvailability(probed: Boolean): String =
+    if (probed) "Não disponível neste relógio." else "Ainda não foi verificado."

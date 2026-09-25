@@ -38,12 +38,13 @@ object GeminiHealthAnalyzer {
         .build()
 
     suspend fun generateSevenDayInsight(metrics: List<HBandSensorMetricEntity>): String = withContext(Dispatchers.IO) {
-        if (metrics.isEmpty()) {
-            return@withContext "Nenhuma telemetria registrada no banco de dados local nos últimos 7 dias. Conecte seu dispositivo para gerar análises de saúde com IA."
+        val clinicalMetrics = clinicalInsightRecords(metrics)
+        if (clinicalMetrics.isEmpty()) {
+            return@withContext "Os registros disponíveis não contêm medições clínicas para esta análise. Contadores de atividade permanecem no histórico local."
         }
 
         val sevenDaysAgoMs = System.currentTimeMillis() - (7 * 24 * 60 * 60 * 1000L)
-        val recentMetrics = metrics.filter { it.timestampMillis >= sevenDaysAgoMs }.ifEmpty { metrics }
+        val recentMetrics = clinicalMetrics.filter { it.timestampMillis >= sevenDaysAgoMs }.ifEmpty { clinicalMetrics }
 
         val recordCount = recentMetrics.size
         val avgHr = recentMetrics.map { it.heartRate }.average().toInt()
