@@ -574,7 +574,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun triggerSpotCheck() {
         val telemetry = bleManager.triggerSpotCheck()
-        if (!IngestPayloadMapper.isIngestible(telemetry)) {
+        if (telemetry == null || !IngestPayloadMapper.isIngestible(telemetry)) {
             showNotification(
                 "Ainda não há leitura de batimentos disponível para envio. Confira o relógio no pulso e aguarde a leitura.",
                 isError = true

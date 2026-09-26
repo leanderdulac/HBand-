@@ -226,7 +226,7 @@ class HBandBleManager(
     private var lastHardwareReadTime: Long = 0
     // true assim que QUALQUER característica GATT real (HR, RSC, BP, SpO2, temperatura,
     // HBand/Veepoo) devolve um pacote reconhecido. Distingue dado real de fallback sintético
-    // (triggerSpotCheck / simulador) para a UI não rotular demo como "leitura ao vivo".
+    // (simulador) para a UI não rotular demo como "leitura ao vivo".
     private var hasReceivedRealSensorData = false
 
     // SDK oficial Veepoo/HBand (VPOperateManager) — usado para VE30/HBand reais, que exigem
@@ -1958,12 +1958,11 @@ class HBandBleManager(
     }
 
     @SuppressLint("MissingPermission")
-    fun triggerSpotCheck(): HBandTelemetry {
+    fun triggerSpotCheck(): HBandTelemetry? {
         requestManualSensorRead()
-        val dev = _connectedDevice.value ?: HBandDevice()
-        val telemetry = createTelemetrySnapshot(dev)
-        _latestTelemetry.value = telemetry
-        return telemetry
+        // The request is asynchronous. Only a received sample supplies measurement time;
+        // preserve the last published sample (or its absence) until a callback replaces it.
+        return _latestTelemetry.value
     }
 
     fun generateCurrentTelemetry(device: HBandDevice = _connectedDevice.value ?: HBandDevice()): HBandTelemetry {
