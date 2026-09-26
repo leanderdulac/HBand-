@@ -37,8 +37,22 @@ object IngestPayloadMapper {
     const val INVALID_SOURCE_ERROR =
         "Origem da leitura incompatível com a API. Registro preservado para revisão, sem envio ou alteração da origem."
 
+    const val INVALID_FILTER_ERROR =
+        "Filtro da leitura incompatível com a API. Registro preservado para revisão, sem envio ou alteração do filtro."
+
     // Core schemas.py at 75e5e02c839f381069212bb7c7d3a2befa491b83; not a full ingest validator.
     private val ingestSources = setOf("companion_manual", "ble_sim", "ble_hband", "http")
+    private val filterTypes = setOf("BMO", "Wavelet", "Butterworth", "Raw", "Adaptive")
+
+    fun isCompatibleFilterTypeJson(json: String): Boolean = try {
+        val payload = JSONObject(json)
+        val filter = payload.opt("filter_type")
+        // Unlike ingest_source, Core retains null/empty. Absence alone defaults to BMO there.
+        !payload.has("filter_type") || filter == JSONObject.NULL ||
+            (filter is String && (filter.isEmpty() || filter in filterTypes))
+    } catch (_: Exception) {
+        false
+    }
 
     fun isCompatibleIngestSourceJson(json: String): Boolean = try {
         val payload = JSONObject(json)
@@ -184,6 +198,7 @@ object IngestPayloadMapper {
         if (isReal != null) normalized.put("is_real_sensor_data", isReal)
         // Preserve declared provenance exactly; absence is not evidence of any source.
         if (jsonObj.has("ingest_source")) normalized.put("ingest_source", jsonObj.get("ingest_source"))
+        if (jsonObj.has("filter_type")) normalized.put("filter_type", jsonObj.get("filter_type"))
         normalized.put("service", SERVICE_NAME)
         return normalized.toString(2)
     }

@@ -479,6 +479,7 @@ class WearableRepository(
                     reading == null -> IngestReconciler.INVALID_LOCAL
                     !IngestPayloadMapper.isIngestibleJson(reading.json) -> IngestPayloadMapper.MISSING_HR_ERROR
                     !IngestPayloadMapper.isCompatibleIngestSourceJson(reading.json) -> IngestPayloadMapper.INVALID_SOURCE_ERROR
+                    !IngestPayloadMapper.isCompatibleFilterTypeJson(reading.json) -> IngestPayloadMapper.INVALID_FILTER_ERROR
                     else -> null
                 }
                 if (localError != null) {
