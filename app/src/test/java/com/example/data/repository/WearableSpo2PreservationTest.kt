@@ -45,7 +45,13 @@ class WearableSpo2PreservationTest {
         if (!row.has("spo2") || row.isNull("spo2")) return true
         val number = when (val value = row.get("spo2")) {
             is Number -> value.toDouble()
-            is String -> value.trim().toDoubleOrNull()
+            // Fixed synthetic oracle, independently checked against the Core model snapshot.
+            is String -> when (value) {
+                "97.5" -> 97.5
+                "9_8", "9.8e_1", "98_._0", "98._0", "+_98", "9.8e1", " 98 ", "\u008598\u0085" -> 98.0
+                "9_8.7_5" -> 98.75
+                else -> null
+            }
             else -> null
         }
         return number != null && number.isFinite() && number in 50.0..100.0
@@ -102,6 +108,24 @@ class WearableSpo2PreservationTest {
         assertFalse(JSONObject(IngestPayloadMapper.normalizeQueuePayload(payload(null, false))).has("spo2"))
     }
 
+    @Test fun explicitSyntaxPreserved() {
+        val allowed = listOf("9_8", "9_8.7_5", "9.8e_1", "98_._0", "98._0", "+_98", "9.8e1", " 98 ", "\u008598\u0085")
+        val rejected = listOf("98f", "98d", "0x1.8p6", " 9_8 ", "_98", "98_", "9__8", "\u001c98\u001c",
+            "", "NaN", true, JSONObject(), JSONArray())
+        for (legacy in listOf(false, true)) {
+            for (value in allowed + rejected) {
+                val normalized = IngestPayloadMapper.normalizeQueuePayload(payload(value, legacy))
+                assertEquals("Preserve explicit SpO2 $value (legacy=$legacy)", value.toString(), JSONObject(normalized).get("spo2").toString())
+                assertEquals("Core compatibility $value (legacy=$legacy)", value in allowed,
+                    IngestPayloadMapper.isCompatibleSpo2Json(normalized))
+            }
+        }
+        val fallback = JSONObject(payload(JSONObject.NULL, true)).put("spo2", 98.75)
+        assertEquals(98.75, JSONObject(IngestPayloadMapper.normalizeQueuePayload(fallback.toString())).getDouble("spo2"), 0.0)
+        val explicit = JSONObject(payload("98f", true)).put("spo2", 98.75)
+        assertEquals("98f", JSONObject(IngestPayloadMapper.normalizeQueuePayload(explicit.toString())).get("spo2"))
+    }
+
     @Test fun invalidNeighborsRecovery() = runBlocking {
         val cases = listOf(
             Triple(255, false, false), Triple(98.75, false, true), Triple(100.5, true, false),
@@ -110,6 +134,9 @@ class WearableSpo2PreservationTest {
             Triple(100, true, true), Triple("97.5", false, true), Triple("NaN", false, false),
             Triple("", false, false), Triple(JSONObject(), false, false), Triple(null, true, true),
             Triple(0, true, true), Triple(JSONObject.NULL, true, true), Triple(-1, false, false),
+            Triple("98f", false, false), Triple("98f", true, false), Triple("0x1.8p6", true, false),
+            Triple("9_8", false, true), Triple("9_8.7_5", true, true), Triple("", true, false),
+            Triple("NaN", true, false), Triple(true, true, false), Triple(JSONObject(), true, false),
         )
         cases.forEachIndexed { index, (value, legacy, _) -> insert(index + 1, value, legacy) }
         val before = db.ingestQueueDao().getAllItemsSync().associateBy { it.id }

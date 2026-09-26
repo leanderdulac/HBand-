@@ -13,11 +13,20 @@ Synthetic regression on the baseline: legacy 98.75 became 98; a mixed queue
 synchronized 0 instead of 10 compatible readings after a fake whole-batch 422.
 An explicit retry could also replace a persisted authorization pause with 422.
 
-The increment preserves positive legacy fractions and applies a narrow SpO2
+The increment preserves explicit legacy SpO2 values, including fractions, and applies a narrow SpO2
 transport check before batching. Incompatible normalized readings remain FAILED
 locally with the original payload, source, ID and creation time. Existing auth
 pause handling remains in force. No schema migration, captured reading deletion,
-new identity or source, or full ingest validator is introduced.
+new identity or source, or full ingest validator is introduced. Explicit malformed
+legacy SpO2 stays explicit for review instead of disappearing or being coerced to
+a valid number. Precedence remains metrics.spO2 then root.spo2, falling back only
+for absence/null. Numeric legacy zero/negative sentinels still omit the field.
+
+A review regression caught Java numeric strings such as 98f/hexadecimal escaping
+the initial range check, plus supported Core underscore strings being rejected.
+The narrow decimal parser now distinguishes them without changing the wire value.
+The string matrix is checked against a copied Core model with local Pydantic2.13.5;
+Core requirements are not pinned, so this does not prove all deployed runtimes.
 
 Tests use synthetic file-backed Room under Robolectric and fake transport. They
 cover bounds, fractions, absent/null, flat empty/object/nonfinite representations,

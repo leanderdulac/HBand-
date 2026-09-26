@@ -46,13 +46,26 @@ object IngestPayloadMapper {
     // Core schemas.py at 75e5e02c839f381069212bb7c7d3a2befa491b83; not a full ingest validator.
     private val ingestSources = setOf("companion_manual", "ble_sim", "ble_hband", "http")
     private val filterTypes = setOf("BMO", "Wavelet", "Butterworth", "Raw", "Adaptive")
+    private val spo2Decimal = Regex("[+-]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?")
+
+    private fun spo2Number(value: Any?): Double? {
+        if (value is Number) return value.toDouble()
+        if (value !is String) return null
+        // Core's float parser accepts decimal strings, not Java suffixes or hexadecimal floats.
+        // Its underscore fallback does not trim whitespace and rejects edge/repeated underscores.
+        val decimal = if ('_' in value) {
+            if (value.startsWith('_') || value.endsWith('_') || "__" in value) return null
+            value.replace("_", "")
+        } else value.trim { it !in '\u001c'..'\u001f' && (it.isWhitespace() || it == '\u0085') }
+        return decimal.takeIf { spo2Decimal.matches(it) }?.toDoubleOrNull()
+    }
 
     fun isCompatibleSpo2Json(json: String): Boolean = try {
         val payload = JSONObject(json)
         // Optional in Core: retain absence/null; inspect the transport value without rewriting it.
         if (!payload.has("spo2") || payload.isNull("spo2")) true else {
-            val value = payload.optDouble("spo2", Double.NaN)
-            value.isFinite() && value in 50.0..100.0
+            val value = spo2Number(payload.opt("spo2"))
+            value != null && value.isFinite() && value in 50.0..100.0
         }
     } catch (_: Exception) {
         false
@@ -174,8 +187,8 @@ object IngestPayloadMapper {
         val dia = metrics?.optJSONObject("bloodPressure")?.takeIf { it.has("diastolic") }?.optInt("diastolic")
             ?: jsonObj.optJSONObject("blood_pressure")?.takeIf { it.has("diastolic") }?.optInt("diastolic")
 
-        val spo2 = firstPresentDouble(metrics, "spO2")
-            ?: firstPresentDouble(jsonObj, "spo2")
+        val spo2 = metrics?.opt("spO2")?.takeUnless { it == JSONObject.NULL }
+            ?: jsonObj.opt("spo2").takeUnless { it == JSONObject.NULL }
         val temp = firstPresentDouble(metrics, "temperatureCelsius")
             ?: firstPresentDouble(jsonObj, "temperature")
         val steps = firstPresentInt(metrics, "steps")
@@ -204,7 +217,8 @@ object IngestPayloadMapper {
                 }
             )
         }
-        if (spo2 != null && spo2 > 0) normalized.put("spo2", spo2)
+        // Preserve explicit malformed values for local review; retain the legacy <=0 sentinel rule.
+        if (spo2 != null && spo2Number(spo2)?.let { it <= 0 } != true) normalized.put("spo2", spo2)
         if (temp != null && temp > 0.0) normalized.put("temperature", temp)
         if (steps != null) normalized.put("steps", steps)
         if (calories != null) normalized.put("calories", calories)
