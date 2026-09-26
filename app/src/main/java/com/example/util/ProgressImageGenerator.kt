@@ -33,8 +33,8 @@ internal data class WeeklyShareSummary(val period: String, val lines: List<Pair<
 
 internal fun weeklyShareSummary(
     metrics: List<HBandSensorMetricEntity>,
-    hydrationMl: Int,
-    breathingSeconds: Int,
+    hydrationMl: Int?,
+    breathingSeconds: Int?,
     nowMillis: Long,
     timeZone: TimeZone = TimeZone.getDefault(),
 ): WeeklyShareSummary {
@@ -59,8 +59,8 @@ internal fun weeklyShareSummary(
             "Média dos batimentos registrados" to (rates.takeIf { it.isNotEmpty() }?.average()?.toInt()?.let { "$it bpm" } ?: "Sem medição disponível"),
             "Passos — maior valor salvo no período" to (steps?.toString() ?: "Sem medição disponível"),
             "Calorias — maior valor salvo no período" to (calories?.let { String.format(locale, "%.0f kcal", it) } ?: "Sem medição disponível"),
-            "Água registrada hoje" to (hydrationMl.takeIf { it >= 0 }?.let { "$it mL" } ?: "Indisponível"),
-            "Respiração — total salvo no aplicativo" to (breathingSeconds.takeIf { it >= 0 }?.let { "${it / 60} min ${it % 60} s" } ?: "Indisponível"),
+            "Água registrada hoje" to (hydrationMl?.takeIf { it >= 0 }?.let { "$it mL" } ?: "Indisponível"),
+            "Respiração — total salvo no aplicativo" to (breathingSeconds?.takeIf { it >= 0 }?.let { "${it / 60} min ${it % 60} s" } ?: "Indisponível"),
         ),
     )
 }
@@ -69,8 +69,8 @@ object ProgressImageGenerator {
     fun generateWeeklyProgressImage(
         context: Context,
         metrics: List<HBandSensorMetricEntity>,
-        hydrationMl: Int = 0,
-        breathingSeconds: Int = 0,
+        hydrationMl: Int? = null,
+        breathingSeconds: Int? = null,
     ): ShareProgressData {
         val summary = weeklyShareSummary(metrics, hydrationMl, breathingSeconds, System.currentTimeMillis())
         val bitmap = renderWeeklyProgressBitmap(context, summary)

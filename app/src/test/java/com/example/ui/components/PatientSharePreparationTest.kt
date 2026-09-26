@@ -69,4 +69,17 @@ class PatientSharePreparationTest {
         Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888), File("share-fixture.png"),
         Uri.parse("content://test/fixture"), "Dados artificiais de teste",
     )
+
+    @Test fun unavailable_inputs_do_not_invoke_preparation() {
+        val enabled = mutableStateOf(false)
+        var calls = 0
+        var delivered = 0
+        compose.setContent { MyApplicationTheme {
+            SharePreparationButton(prepare = { calls++; fixture() }, onPrepared = { delivered++ }, enabled = enabled.value)
+        } }
+        compose.onNodeWithTag("share_progress_button").assertIsNotEnabled().performClick()
+        compose.runOnIdle { assertEquals(0, calls); assertEquals(0, delivered); enabled.value = true }
+        compose.onNodeWithTag("share_progress_button").performClick()
+        compose.runOnIdle { assertEquals(1, calls); assertEquals(1, delivered) }
+    }
 }

@@ -22,15 +22,19 @@ internal class LocalWellnessRecords(
     private fun localDate(timestamp: Long): String =
         SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date(timestamp))
 
-    val todayHydrationMl: Flow<Int> = dayChanges
+    val todayHydrationMl: Flow<Int?> = dayChanges
         .onStart { emit(Unit) }
         .map { localDate(nowMillis()) }
         .distinctUntilChanged()
         .flatMapLatest { day ->
-            hydration.getTodayTotalMlFlow(day).map { it ?: 0 }
-                // Do not carry yesterday's total while Room switches its query.
-                .onStart { emit(0) }
+            hydration.getTodayTotalMlFlow(day).map<Int?, Int?> { it ?: 0 }
+                // Unknown until Room answers; an empty completed SUM is a real zero.
+                .onStart { emit(null) }
         }
+
+    val totalBreathingSeconds: Flow<Int?> = breathing.getTotalBreathingSecondsFlow()
+        .map<Int?, Int?> { it ?: 0 }
+        .onStart { emit(null) }
 
     suspend fun addWaterIntake(amountMl: Int) {
         val timestamp = nowMillis()

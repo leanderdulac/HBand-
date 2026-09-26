@@ -82,7 +82,7 @@ class LocalWellnessRecordsTest {
 
     @Test fun visible_total_switches_day_without_insert_or_viewmodel_recreation() = runBlocking {
         records.addWaterIntake(250)
-        val totals = Channel<Int>(Channel.UNLIMITED)
+        val totals = Channel<Int?>(Channel.UNLIMITED)
         val collection = launch { records.todayHydrationMl.collect { totals.send(it) } }
         suspend fun awaitTotal(expected: Int) = withTimeout(3000) { while (totals.receive() != expected) Unit }
         try {
@@ -99,7 +99,7 @@ class LocalWellnessRecordsTest {
         records.addWaterIntake(250)
         assertEquals(250, records.todayHydrationMl.first { it == 250 })
         now += 2000
-        assertEquals(0, records.todayHydrationMl.first())
+        assertEquals(0, records.todayHydrationMl.first { it != null })
     }
 
     @Test fun timezone_change_reselects_local_day_and_never_relabels_history() = runBlocking {

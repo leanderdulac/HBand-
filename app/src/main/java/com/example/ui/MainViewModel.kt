@@ -258,19 +258,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _autoReconnectBle = MutableStateFlow(prefs.getBoolean("auto_reconnect_ble", true))
     val autoReconnectBle: StateFlow<Boolean> = _autoReconnectBle.asStateFlow()
 
-    val todayHydrationMl: StateFlow<Int> = localWellness.todayHydrationMl
+    val todayHydrationMl: StateFlow<Int?> = localWellness.todayHydrationMl
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(stopTimeoutMillis = 0, replayExpirationMillis = 0),
-            initialValue = 0
+            initialValue = null
         )
 
-    val totalBreathingSeconds: StateFlow<Int> = breathingDao.getTotalBreathingSecondsFlow()
-        .combine(MutableStateFlow(0)) { total, _ -> total ?: 0 }
+    val totalBreathingSeconds: StateFlow<Int?> = localWellness.totalBreathingSeconds
         .stateIn(
             scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
-            initialValue = 0
+            started = SharingStarted.WhileSubscribed(stopTimeoutMillis = 0, replayExpirationMillis = 0),
+            initialValue = null
         )
 
     val hydrationTargetGoalMl: Int = 2500

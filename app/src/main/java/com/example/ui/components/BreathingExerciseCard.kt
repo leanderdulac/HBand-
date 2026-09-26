@@ -75,7 +75,7 @@ enum class BreathingPhase(val label: String, val durationSeconds: Int, val color
 
 @Composable
 fun BreathingExerciseCard(
-    totalBreathingSeconds: Int,
+    totalBreathingSeconds: Int?,
     onSaveSession: (Int) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -231,7 +231,8 @@ fun BreathingExerciseCard(
                     color = Color(0xFFECFDF5)
                 ) {
                     Text(
-                        text = "Tempo salvo: ${totalBreathingSeconds / 60}\u00A0min ${totalBreathingSeconds % 60}\u00A0s",
+                        text = totalBreathingSeconds?.let { "Tempo salvo: ${it / 60}\u00A0min ${it % 60}\u00A0s" }
+                            ?: "Carregando tempo salvo…",
                         style = MaterialTheme.typography.bodyLarge,
                         color = Color(0xFF047857),
                         modifier = Modifier

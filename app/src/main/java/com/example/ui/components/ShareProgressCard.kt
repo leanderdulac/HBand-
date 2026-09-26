@@ -55,8 +55,8 @@ import kotlinx.coroutines.withContext
 @Composable
 fun ShareProgressCard(
     sensorMetrics: List<HBandSensorMetricEntity>,
-    hydrationMl: Int,
-    breathingSeconds: Int,
+    hydrationMl: Int?,
+    breathingSeconds: Int?,
     onGenerateShareData: (ShareProgressData) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -138,6 +138,7 @@ fun ShareProgressCard(
                             }
                         },
                         onPrepared = onGenerateShareData,
+                        enabled = hydrationMl != null && breathingSeconds != null,
                     )
                 }
             }
@@ -146,13 +147,13 @@ fun ShareProgressCard(
 }
 
 @Composable
-internal fun SharePreparationButton(prepare: suspend () -> ShareProgressData, onPrepared: (ShareProgressData) -> Unit) {
+internal fun SharePreparationButton(prepare: suspend () -> ShareProgressData, onPrepared: (ShareProgressData) -> Unit, enabled: Boolean = true) {
     val scope = rememberCoroutineScope()
     var preparing by remember { mutableStateOf(false) }
     var failed by remember { mutableStateOf(false) }
     Button(
         onClick = {
-            if (!preparing) {
+            if (enabled && !preparing) {
                 preparing = true
                 failed = false
                 scope.launch {
@@ -168,9 +169,9 @@ internal fun SharePreparationButton(prepare: suspend () -> ShareProgressData, on
                 }
             }
         },
-        enabled = !preparing,
+        enabled = enabled && !preparing,
         modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag("share_progress_button"),
-    ) { Text(if (preparing) "Preparando cartão…" else "Preparar cartão", style = MaterialTheme.typography.labelLarge) }
+    ) { Text(if (preparing) "Preparando cartão…" else if (!enabled) "Carregando registros…" else "Preparar cartão", style = MaterialTheme.typography.labelLarge) }
     if (preparing) LinearProgressIndicator(modifier = Modifier.fillMaxWidth().testTag("share_preparation_progress"))
     if (failed) Text(
         "Não foi possível preparar o cartão. Tente novamente.",

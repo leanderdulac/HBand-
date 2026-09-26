@@ -54,8 +54,8 @@ class LocalCalendarLifecycleTest {
                 db.hydrationDao().insertLog(HydrationLogEntity(amountMl = amount, dateString = day))
             }
             // Same lifecycle sharing policy used by MainViewModel / collectAsStateWithLifecycle.
-            val state = records.todayHydrationMl.stateIn(scope, SharingStarted.WhileSubscribed(0, 0), 0)
-            val totals = Channel<Int>(Channel.UNLIMITED)
+            val state = records.todayHydrationMl.stateIn(scope, SharingStarted.WhileSubscribed(0, 0), null)
+            val totals = Channel<Int?>(Channel.UNLIMITED)
             val collector = launch { state.collect { totals.send(it) } }
             suspend fun expect(amount: Int) = withTimeout(3000) { while (totals.receive() != amount) Unit }
             try {
@@ -69,10 +69,10 @@ class LocalCalendarLifecycleTest {
                 shadowOf(Looper.getMainLooper()).idle()
                 expect(100)
             } finally { collector.cancelAndJoin() }
-            withTimeout(3000) { while (state.value != 0) yield() }
+            withTimeout(3000) { while (state.value != null) yield() }
             now += 2 * 24 * 60 * 60 * 1000L
             // No broadcast while unobserved: a fresh subscription still reaches today's stored total.
-            assertEquals(500, withTimeout(3000) { state.first { it != 0 } })
+            assertEquals(500, withTimeout(3000) { state.first { it != null } })
             assertEquals(3, listOf("2026-09-25", "2026-09-26", "2026-09-27").sumOf {
                 db.hydrationDao().getHydrationLogsForDate(it).first().size
             })
