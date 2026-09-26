@@ -50,7 +50,7 @@ class StorageAndroidLabTest {
     private fun file(name: String) = context.getDatabasePath(name)
     private fun current(name: String, passphrase: ByteArray = key()): AppDatabase =
         Room.databaseBuilder(context, AppDatabase::class.java, name)
-            .addMigrations(AppDatabaseMigrations.MIGRATION_6_7)
+            .addMigrations(AppDatabaseMigrations.MIGRATION_6_7, AppDatabaseMigrations.MIGRATION_7_8)
             .openHelperFactory(SupportOpenHelperFactory(passphrase))
             .build().also { opened += it }
 
@@ -141,7 +141,7 @@ class StorageAndroidLabTest {
         val db = current(name)
         AppDatabase.verifyOpen(db)
         val sql = db.openHelper.writableDatabase
-        assertEquals(7, sql.version)
+        assertEquals(8, sql.version)
         assertEquals(before, snapshot(sql, "ingest_queue", oldColumns))
         otherTables.forEach { assertEquals(others[it], snapshot(sql, it)) }
         val rows = db.ingestQueueDao().getAllItemsSync()

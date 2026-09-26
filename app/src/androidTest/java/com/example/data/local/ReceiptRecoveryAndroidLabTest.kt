@@ -54,7 +54,7 @@ class ReceiptRecoveryAndroidLabTest {
     @After fun closeOnly() { opened.forEach { it.close() } } // Never delete databases or keys.
 
     private fun open(): AppDatabase = Room.databaseBuilder(context, AppDatabase::class.java, name)
-        .addMigrations(AppDatabaseMigrations.MIGRATION_6_7)
+        .addMigrations(AppDatabaseMigrations.MIGRATION_6_7, AppDatabaseMigrations.MIGRATION_7_8)
         .openHelperFactory(SupportOpenHelperFactory(SqlCipherPassphrase.getPassphrase(context)))
         .build().also { opened += it }
 

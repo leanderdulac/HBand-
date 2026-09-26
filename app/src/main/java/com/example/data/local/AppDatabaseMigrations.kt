@@ -12,6 +12,20 @@ import com.example.data.ingest.IngestReadingIdentity
 object AppDatabaseMigrations {
     const val VERSION_BEFORE_CLIENT_READING_ID = 6
     const val VERSION_WITH_CLIENT_READING_ID = 7
+    const val VERSION_WITH_CANONICAL_QUEUE_DEFAULT = 8
+
+    /**
+     * Published v7 created clientReadingId without a SQL default, whereas the
+     * local v7 and the additive 6→7 migration declare DEFAULT ''. Room hashes
+     * those schemas differently. A versioned migration reconciles just those
+     * known forms; it never replaces Room's identity or schema validation.
+     */
+    val MIGRATION_7_8: Migration = object : Migration(
+        VERSION_WITH_CLIENT_READING_ID,
+        VERSION_WITH_CANONICAL_QUEUE_DEFAULT,
+    ) {
+        override fun migrate(db: SupportSQLiteDatabase) = QueueSchemaSevenMigration.migrate(db)
+    }
 
     val MIGRATION_6_7: Migration = object : Migration(
         VERSION_BEFORE_CLIENT_READING_ID,

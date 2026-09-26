@@ -14,4 +14,11 @@ class AppDatabaseMigrationsTest {
         assertEquals(7, AppDatabaseMigrations.VERSION_WITH_CLIENT_READING_ID)
         assertTrue(migration.endVersion > migration.startVersion)
     }
+
+    @Test
+    fun `queue compatibility migration is 7 to 8`() {
+        assertEquals(7, AppDatabaseMigrations.MIGRATION_7_8.startVersion)
+        assertEquals(8, AppDatabaseMigrations.MIGRATION_7_8.endVersion)
+        assertEquals(8, AppDatabaseMigrations.VERSION_WITH_CANONICAL_QUEUE_DEFAULT)
+    }
 }

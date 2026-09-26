@@ -71,7 +71,7 @@ class UpgradePreservationAndroidLabTest {
     }.toString()
 
     private suspend fun assertState(db: AppDatabase) {
-        assertEquals(7, db.openHelper.writableDatabase.version)
+        assertEquals(8, db.openHelper.writableDatabase.version)
         assertEquals(queueRows().reversed(), db.ingestQueueDao().getAllItemsSync())
         assertTrue(db.ingestQueueDao().hasAuthorizationBlock(QueueAuthorization.UNAUTHORIZED_PREFIX, QueueAuthorization.FORBIDDEN_PREFIX))
         assertTrue(QueueAuthorization.isBlocked(queueRows()[1]))

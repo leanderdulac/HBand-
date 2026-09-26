@@ -26,7 +26,7 @@ class StartupDatabaseTest {
         try {
             gate.initialize({ AppDatabase.verifyOpen(db) }, {
                 assertTrue(db.isOpen)
-                assertEquals(7, db.openHelper.writableDatabase.version)
+                assertEquals(8, db.openHelper.writableDatabase.version)
             })
             assertTrue(gate.isReady)
         } finally { db.close() }

@@ -15,7 +15,7 @@ import net.zetetic.database.sqlcipher.SupportOpenHelperFactory
         UserProfileEntity::class,
         AdvancedMeasurementEntity::class,
     ],
-    version = AppDatabaseMigrations.VERSION_WITH_CLIENT_READING_ID,
+    version = AppDatabaseMigrations.VERSION_WITH_CANONICAL_QUEUE_DEFAULT,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -90,6 +90,6 @@ abstract class AppDatabase : RoomDatabase() {
         // Tests use this same schema policy with synthetic SQLite files, without SQLCipher.
         internal fun schemaPreservingBuilder(context: Context): RoomDatabase.Builder<AppDatabase> =
             Room.databaseBuilder(context, AppDatabase::class.java, DATABASE_NAME)
-                .addMigrations(AppDatabaseMigrations.MIGRATION_6_7)
+                .addMigrations(AppDatabaseMigrations.MIGRATION_6_7, AppDatabaseMigrations.MIGRATION_7_8)
     }
 }

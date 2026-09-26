@@ -113,7 +113,7 @@ class DatabasePreservationTest {
     }
 
     @Test fun unsupported_upgrade_preserves_original_database() = assertUnknownSchemaPreserved(5)
-    @Test fun unsupported_downgrade_preserves_original_database() = assertUnknownSchemaPreserved(8)
+    @Test fun unsupported_downgrade_preserves_original_database() = assertUnknownSchemaPreserved(9)
 
     @Test fun legacy_plaintext_is_blocked_without_removing_database_or_sidecars() {
         val file = context.getDatabasePath(AppDatabase.DATABASE_NAME)

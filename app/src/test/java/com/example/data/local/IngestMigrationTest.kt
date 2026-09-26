@@ -91,7 +91,7 @@ class IngestMigrationTest {
         val beforeOther = otherTables.associateWith { snapshot(old, it) }
         val db = migrate()
         val migrated = db.openHelper.writableDatabase // triggers real Room migration AND schema validation
-        assertEquals(7, migrated.version)
+        assertEquals(8, migrated.version)
         assertEquals(beforeQueue, snapshot(migrated, "ingest_queue", oldColumns))
         for (table in otherTables) assertEquals(beforeOther[table], snapshot(migrated, table))
         val rows = db.ingestQueueDao().getAllItemsSync()
