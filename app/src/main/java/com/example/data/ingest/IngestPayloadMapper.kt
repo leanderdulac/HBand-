@@ -46,9 +46,9 @@ object IngestPayloadMapper {
     // Core schemas.py at 75e5e02c839f381069212bb7c7d3a2befa491b83; not a full ingest validator.
     private val ingestSources = setOf("companion_manual", "ble_sim", "ble_hband", "http")
     private val filterTypes = setOf("BMO", "Wavelet", "Butterworth", "Raw", "Adaptive")
-    private val spo2Decimal = Regex("[+-]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?")
+    private val coreFloatDecimal = Regex("[+-]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?")
 
-    private fun spo2Number(value: Any?): Double? {
+    private fun coreFloatNumber(value: Any?): Double? {
         if (value is Number) return value.toDouble()
         if (value !is String) return null
         // Core's float parser accepts decimal strings, not Java suffixes or hexadecimal floats.
@@ -57,14 +57,14 @@ object IngestPayloadMapper {
             if (value.startsWith('_') || value.endsWith('_') || "__" in value) return null
             value.replace("_", "")
         } else value.trim { it !in '\u001c'..'\u001f' && (it.isWhitespace() || it == '\u0085') }
-        return decimal.takeIf { spo2Decimal.matches(it) }?.toDoubleOrNull()
+        return decimal.takeIf { coreFloatDecimal.matches(it) }?.toDoubleOrNull()
     }
 
     fun isCompatibleSpo2Json(json: String): Boolean = try {
         val payload = JSONObject(json)
         // Optional in Core: retain absence/null; inspect the transport value without rewriting it.
         if (!payload.has("spo2") || payload.isNull("spo2")) true else {
-            val value = spo2Number(payload.opt("spo2"))
+            val value = coreFloatNumber(payload.opt("spo2"))
             value != null && value.isFinite() && value in 50.0..100.0
         }
     } catch (_: Exception) {
@@ -118,8 +118,8 @@ object IngestPayloadMapper {
     fun isIngestibleJson(json: String): Boolean {
         return try {
             // Validate the transport value without truncating fractions or rewriting the durable payload.
-            val heartRate = JSONObject(json).optDouble("heart_rate", Double.NaN)
-            heartRate.isFinite() && heartRate in MIN_HEART_RATE.toDouble()..MAX_HEART_RATE.toDouble()
+            val heartRate = coreFloatNumber(JSONObject(json).opt("heart_rate"))
+            heartRate != null && heartRate.isFinite() && heartRate in MIN_HEART_RATE.toDouble()..MAX_HEART_RATE.toDouble()
         } catch (_: Exception) {
             false
         }
@@ -178,9 +178,9 @@ object IngestPayloadMapper {
         val timestamp = jsonObj.optString("timestamp", "")
         val metrics = jsonObj.optJSONObject("metrics")
 
-        val hr = firstPresentDouble(metrics, "heartRate")
-            ?: firstPresentDouble(jsonObj, "heart_rate")
-            ?: firstPresentDouble(jsonObj, "heartRate")
+        val hr = firstPresentHeartRate(metrics, "heartRate")
+            ?: firstPresentHeartRate(jsonObj, "heart_rate")
+            ?: firstPresentHeartRate(jsonObj, "heartRate")
 
         val sys = metrics?.optJSONObject("bloodPressure")?.takeIf { it.has("systolic") }?.optInt("systolic")
             ?: jsonObj.optJSONObject("blood_pressure")?.takeIf { it.has("systolic") }?.optInt("systolic")
@@ -218,7 +218,7 @@ object IngestPayloadMapper {
             )
         }
         // Preserve explicit malformed values for local review; retain the legacy <=0 sentinel rule.
-        if (spo2 != null && spo2Number(spo2)?.let { it <= 0 } != true) normalized.put("spo2", spo2)
+        if (spo2 != null && coreFloatNumber(spo2)?.let { it <= 0 } != true) normalized.put("spo2", spo2)
         if (temp != null && temp > 0.0) normalized.put("temperature", temp)
         if (steps != null) normalized.put("steps", steps)
         if (calories != null) normalized.put("calories", calories)
@@ -243,6 +243,14 @@ object IngestPayloadMapper {
     fun authErrorMessage(httpCode: Int, @Suppress("UNUSED_PARAMETER") errorBody: String?): String {
         // Keep the persisted pause prefix; never store a server body that may echo a credential.
         return "Falha de autenticação na API HealthTech (HTTP $httpCode). Verifique a chave em Ajustes."
+    }
+
+    private fun firstPresentHeartRate(obj: JSONObject?, key: String): Any? {
+        if (obj == null || !obj.has(key) || obj.isNull(key)) return null
+        val value = obj.get(key)
+        // Keep existing numeric normalization for compatible legacy values. Preserve an
+        // explicit incompatible value so the guard refuses it rather than inventing a number.
+        return coreFloatNumber(value) ?: value
     }
 
     private fun firstPresentInt(obj: JSONObject?, key: String): Int? {

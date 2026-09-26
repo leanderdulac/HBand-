@@ -85,10 +85,10 @@ fun DeviceControlCard(
                 modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)
                     .testTag(if (connected) "spot_check_button" else "connect_watch_button")
             ) {
-                Text(if (connected) "Ler dados do relógio" else "Conectar meu relógio")
+                Text(if (connected) "Salvar e enviar leitura" else "Conectar meu relógio")
             }
             Text(
-                if (connected) "O relógio está conectado a este aparelho. Ler os dados e enviá-los são etapas diferentes."
+                if (connected) "Salva a leitura disponível e tenta enviar os registros pendentes. Se o acesso estiver pausado, os dados ficam salvos."
                 else "Deixe seu relógio perto deste aparelho. Toque em Conectar meu relógio para procurar e conectar.",
                 style = MaterialTheme.typography.bodyLarge
             )
