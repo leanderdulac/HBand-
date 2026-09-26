@@ -175,6 +175,14 @@ class SchemaSevenCompatibilityTest {
         val schema = before.query("SELECT type,name,sql FROM sqlite_master ORDER BY type,name").use { rows ->
             buildList { while (rows.moveToNext()) add((0..2).map { rows.getString(it) }) }
         }
+        val extraTables = listOf("external_reference", "ingest_queue_v8").filter { name ->
+            schema.any { it[0] == "table" && it[1] == name }
+        }
+        val extraData = extraTables.associateWith { name ->
+            before.query("SELECT * FROM $name").use { rows ->
+                buildList { while (rows.moveToNext()) add(rows.getString(0)) }
+            }
+        }
         assertTrue(runCatching { current() }.isFailure)
         database?.close()
         SQLiteDatabase.openDatabase(context.getDatabasePath(AppDatabase.DATABASE_NAME).path,
@@ -191,6 +199,10 @@ class SchemaSevenCompatibilityTest {
             raw.rawQuery("SELECT type,name,sql FROM sqlite_master ORDER BY type,name", null).use { rows ->
                 val actual = buildList { while (rows.moveToNext()) add((0..2).map { rows.getString(it) }) }
                 assertEquals(schema, actual)
+            }
+            for (name in extraTables) raw.rawQuery("SELECT * FROM $name", null).use { rows ->
+                val actual = buildList { while (rows.moveToNext()) add(rows.getString(0)) }
+                assertEquals(extraData[name], actual)
             }
             raw.rawQuery("SELECT seq FROM sqlite_sequence WHERE name='ingest_queue'", null).use {
                 assertTrue(it.moveToFirst()); assertEquals(900L, it.getLong(0))
@@ -233,6 +245,16 @@ class SchemaSevenCompatibilityTest {
 
     @Test fun referenced_queue_is_refused_before_copying_or_cascading() = rejectedMutationPreservesOriginal {
         it.execSQL("CREATE TABLE external_reference (queue_id INTEGER REFERENCES ingest_queue(id) ON DELETE CASCADE)")
+        it.execSQL("INSERT INTO external_reference VALUES (1)")
+    }
+
+    @Test fun uppercase_queue_reference_is_refused_before_copying_or_cascading() = rejectedMutationPreservesOriginal {
+        it.execSQL("CREATE TABLE external_reference (queue_id INTEGER REFERENCES INGEST_QUEUE(id) ON DELETE CASCADE)")
+        it.execSQL("INSERT INTO external_reference VALUES (1)")
+    }
+
+    @Test fun mixed_case_queue_reference_is_refused_before_copying_or_cascading() = rejectedMutationPreservesOriginal {
+        it.execSQL("CREATE TABLE external_reference (queue_id INTEGER REFERENCES Ingest_Queue(id) ON DELETE CASCADE)")
         it.execSQL("INSERT INTO external_reference VALUES (1)")
     }
 }

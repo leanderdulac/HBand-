@@ -31,7 +31,8 @@ marca de AUTOINCREMENT, inclusive numa fila vazia após exclusões anteriores.
 Não normaliza payloads, regenera IDs, altera estados/tentativas/horários nem
 modifica outras tabelas, chaves ou passphrase. Objetos/colunas/constraints
 inesperados da fila são recusados. A reconstrução recusa referência estrangeira
-à fila e colisão de nome temporário. Room continua responsável por validar o
+à fila (incluindo nomes com maiúsculas, que o SQLite considera equivalentes) e
+colisão de nome temporário. Room continua responsável por validar o
 schema final e atualizar sua identidade; nenhuma escrita direta em
 `room_master_table`, fallback destrutivo ou recuperação por limpeza foi adicionada.
 

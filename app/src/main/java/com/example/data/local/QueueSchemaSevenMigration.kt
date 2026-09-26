@@ -52,7 +52,7 @@ internal object QueueSchemaSevenMigration {
         for (name in tableNames) {
             val quoted = name.replace("\"", "\"\"")
             db.query("PRAGMA foreign_key_list(\"$quoted\")").use { keys ->
-                while (keys.moveToNext()) check(keys.getString(2) != "ingest_queue") {
+                while (keys.moveToNext()) check(!keys.getString(2).equals("ingest_queue", ignoreCase = true)) {
                     "Unexpected queue reference; original database retained."
                 }
             }
