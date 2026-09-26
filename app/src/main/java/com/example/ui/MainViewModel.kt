@@ -244,7 +244,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val hydrationDao = db.hydrationDao()
     private val breathingDao = db.breathingDao()
     private val userProfileDao = db.userProfileDao()
-    private val todayDateString = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date())
+    private val localWellness = com.example.data.local.LocalWellnessRecords(
+        hydrationDao, breathingDao, com.example.util.localCalendarChanges(application)
+    )
 
     val userProfile: StateFlow<com.example.data.local.UserProfileEntity?> = userProfileDao.getUserProfileFlow()
         .stateIn(
@@ -256,11 +258,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _autoReconnectBle = MutableStateFlow(prefs.getBoolean("auto_reconnect_ble", true))
     val autoReconnectBle: StateFlow<Boolean> = _autoReconnectBle.asStateFlow()
 
-    val todayHydrationMl: StateFlow<Int> = hydrationDao.getTodayTotalMlFlow(todayDateString)
-        .combine(MutableStateFlow(0)) { total, _ -> total ?: 0 }
+    val todayHydrationMl: StateFlow<Int> = localWellness.todayHydrationMl
         .stateIn(
             scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
+            started = SharingStarted.WhileSubscribed(stopTimeoutMillis = 0, replayExpirationMillis = 0),
             initialValue = 0
         )
 
@@ -276,19 +277,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun addWaterIntake(amountMl: Int) {
         viewModelScope.launch {
-            hydrationDao.insertLog(
-                com.example.data.local.HydrationLogEntity(
-                    amountMl = amountMl,
-                    dateString = todayDateString
-                )
-            )
+            localWellness.addWaterIntake(amountMl)
             showNotification("Mais $amountMl mL de água registrados neste celular.")
         }
     }
 
     fun resetTodayHydration() {
         viewModelScope.launch {
-            hydrationDao.resetTodayLogs(todayDateString)
+            localWellness.resetTodayHydration()
             showNotification("Registros de água de hoje apagados neste celular.")
         }
     }
@@ -296,12 +292,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun saveBreathingSession(durationSeconds: Int) {
         if (durationSeconds <= 0) return
         viewModelScope.launch {
-            breathingDao.insertSession(
-                com.example.data.local.BreathingSessionEntity(
-                    durationSeconds = durationSeconds,
-                    dateString = todayDateString
-                )
-            )
+            localWellness.saveBreathingSession(durationSeconds)
             showNotification("Tempo de respiração salvo neste celular: ${durationSeconds / 60} min ${durationSeconds % 60} s.")
         }
     }
