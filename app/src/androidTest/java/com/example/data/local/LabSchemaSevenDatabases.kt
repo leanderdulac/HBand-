@@ -39,5 +39,3 @@ abstract class LabPublishedV7Database : RoomDatabase() { abstract fun queue(): L
     HydrationLogEntity::class, BreathingSessionEntity::class, UserProfileEntity::class,
     AdvancedMeasurementEntity::class], version = 7, exportSchema = false)
 abstract class LabLocalV7Database : RoomDatabase() { abstract fun queue(): LabV7QueueCountDao }
-
-
