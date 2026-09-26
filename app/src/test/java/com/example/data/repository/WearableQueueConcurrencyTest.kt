@@ -23,6 +23,51 @@ class WearableQueueConcurrencyTest {
     // These fixtures have no database. Transaction rollback is tested with real Room separately.
     private fun repository(queue: IngestQueueDao, metrics: HBandSensorMetricDao, api: HealthTechApiService) =
         WearableRepository(queue, metrics, api, LocalWriteTransaction { block -> block() }, maxBatchItems = 1)
+
+    @Test fun contradictory_duplicate_receipt_stays_pending_and_replays_same_payload_and_key() = runBlocking {
+        for (status in listOf("accepted", "duplicate")) {
+            val original = item().copy(clientReadingId = "synthetic-contradictory-$status")
+            val queue = Queue(original)
+            val bodies = mutableListOf<String>()
+            val keys = mutableListOf<String?>()
+            var consistent = false
+            val api = object : HealthTechApiService by Api() {
+                override suspend fun batchIngestWearableData(body: RequestBody, idempotencyKey: String?): Response<okhttp3.ResponseBody> {
+                    val raw = okio.Buffer().also { body.writeTo(it) }.readUtf8()
+                    bodies += raw; keys += idempotencyKey
+                    val request = org.json.JSONObject(raw)
+                    val row = request.getJSONArray("readings").getJSONObject(0)
+                    val result = org.json.JSONObject().put("patient_id", request.getString("patient_id"))
+                        .put("reading_id", "synthetic-stored-reading").put("ingest_status", status)
+                        .put("duplicate", if (consistent) status == "duplicate" else status != "duplicate")
+                    val receipt = org.json.JSONObject().put("index", 0)
+                        .put("client_reading_id", row.getString("client_reading_id"))
+                        .put("status", status).put("result", result)
+                    return Response.success(org.json.JSONObject().put("patient_id", request.getString("patient_id"))
+                        .put("results", org.json.JSONArray().put(receipt)).toString().toResponseBody())
+                }
+            }
+            val repo = repository(queue, metrics, api)
+            val first = repo.processQueueDetailed()
+            assertEquals("$status contradiction cannot confirm synchronization", 0, first.syncedCount)
+            assertTrue(first.hadTransientFailure)
+            val pending = queue.rows[original.id]!!
+            assertEquals("PENDING", pending.status)
+            assertEquals(1, pending.retries)
+            assertEquals(original.payloadJson, pending.payloadJson)
+            assertEquals(original.clientReadingId, pending.clientReadingId)
+            assertEquals(original.id, pending.id)
+            consistent = true
+            // Recreate only the repository; the fake durable rows survive for this local fixture.
+            assertEquals(1, repository(queue, metrics, api).processQueueDetailed().syncedCount)
+            assertEquals(2, bodies.size)
+            assertEquals(bodies[0], bodies[1])
+            assertNotNull(keys[0])
+            assertEquals(keys[0], keys[1])
+            assertEquals("SYNCED", queue.rows[original.id]!!.status)
+            assertNull(queue.rows[original.id]!!.errorMessage)
+        }
+    }
     @Test fun manual_retry_transport_failure_preserves_auth_pause_for_new_readings() = runBlocking {
         assertTransientRetryKeepsAuthPause { throw IOException("Test connection interrupted") }
     }

@@ -22,6 +22,33 @@ class IngestReconcilerTest {
 
     private val readings get() = listOf(reading("A"), reading("B"))
 
+    @Test fun batch_present_duplicate_flag_must_be_boolean_and_match_receipt_status() {
+        for (status in listOf("accepted", "duplicate")) {
+            for (flag in listOf<Any>(status != "duplicate", JSONObject.NULL, "false", 0)) {
+                val contradictory = entry(1, "B", status).apply { getJSONObject("result").put("duplicate", flag) }
+                // Preserve the existing conservative policy for an inconsistent batch envelope.
+                assertTrue("$status / $flag", IngestReconciler.batch(readings, 200,
+                    body(entry(0, "A"), contradictory)).none { it.confirmed })
+            }
+        }
+    }
+
+    @Test fun batch_optional_duplicate_flag_accepts_absence_or_consistent_boolean() {
+        for (status in listOf("accepted", "duplicate")) {
+            for (present in listOf(false, true)) {
+                val receipt = entry(0, "A", status).apply {
+                    if (present) getJSONObject("result").put("duplicate", status == "duplicate")
+                    // Natural-key replay may legitimately retain an older frame client ID.
+                    if (status == "duplicate") getJSONObject("result").put("client_reading_id", "older-persisted-id")
+                }
+                val decision = IngestReconciler.batch(readings, 200, body(receipt))[0]
+                assertTrue(decision.confirmed)
+                assertEquals(if (status == "duplicate") IngestItemOutcome.DUPLICATE
+                    else IngestItemOutcome.ACCEPTED, decision.outcome)
+            }
+        }
+    }
+
     @Test fun empty_malformed_legacy_counters_and_unknown_status_never_confirm() {
         for (raw in listOf(null, "", "not-json", "{}", "[]", """{"processed_count":2}""",
             body(), body(entry(0, "A", "unknown"), entry(1, "B", "unknown")))) {

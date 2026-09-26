@@ -124,6 +124,10 @@ object IngestReconciler {
                     if (string(result, "patient_id") != expected.patientId ||
                         result.opt("ingest_status") != entry.opt("status") ||
                         string(result, "reading_id") == null) return unknown
+                    // Optional for compatibility; when present, Core defines this as a
+                    // boolean equivalent to ingest_status == duplicate, never a second truth.
+                    if (result.has("duplicate") &&
+                        result.opt("duplicate") != (entry.opt("status") == "duplicate")) return unknown
                     IngestItemDecision(if (entry.getString("status") == "duplicate")
                         IngestItemOutcome.DUPLICATE else IngestItemOutcome.ACCEPTED)
                 }
