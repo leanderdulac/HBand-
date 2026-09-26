@@ -143,4 +143,27 @@ class UpgradePreservationAndroidLabTest {
             report(state)
         } finally { db.close() }
     }
+
+    /** Only for an actual package replacement from the frozen schema-7 lab APK. */
+    @Test fun verifyExistingV7StateAfterMigration(): Unit = runBlocking {
+        check(baseline.isFile) { "Original v7 baseline required; never seed or repair" }
+        check(context.getDatabasePath(AppDatabase.DATABASE_NAME).isFile)
+        val before = baseline.readBytes()
+        val expected = JSONObject(before.toString(Charsets.UTF_8))
+        val expectedState = JSONObject(expected.getString("snapshot"))
+        assertEquals(7, expectedState.getInt("schema"))
+        assertNotEquals(expected.getInt("seed_pid"), Process.myPid())
+        assertEquals(expected.getString("key_digest"), keyMetadataDigest())
+        // The only permitted snapshot difference is the deliberately migrated version.
+        expectedState.put("schema", 8)
+        val db = AppDatabase.openVerified(context)
+        try {
+            assertState(db)
+            val state = snapshot(db.openHelper.writableDatabase)
+            assertEquals(expectedState.toString(), state)
+            assertEquals(expected.getString("key_digest"), keyMetadataDigest())
+            assertArrayEquals(before, baseline.readBytes())
+            report(state)
+        } finally { db.close() }
+    }
 }
