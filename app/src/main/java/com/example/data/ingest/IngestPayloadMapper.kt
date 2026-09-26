@@ -238,13 +238,22 @@ class IngestDeduper(
     fun shouldEnqueue(telemetry: HBandTelemetry, nowMs: Long = elapsedMs()): Boolean {
         if (!telemetry.isRealSensorData) return false
         if (!IngestPayloadMapper.isIngestible(telemetry)) return false
+        // Compare every measurement persisted by the live recorder, not just the core vitals.
+        // Timestamp/model metadata alone still do not bypass the existing elapsed interval.
         val signature = listOf(
             telemetry.deviceId,
             telemetry.heartRate,
             telemetry.spO2,
             telemetry.bloodPressure.systolic,
             telemetry.bloodPressure.diastolic,
-            telemetry.steps
+            telemetry.steps,
+            telemetry.temperatureCelsius,
+            telemetry.hrvScore,
+            telemetry.calories,
+            telemetry.distanceMeters,
+            telemetry.sleepSummary.deepSleepMinutes,
+            telemetry.sleepSummary.lightSleepMinutes,
+            telemetry.sleepSummary.awakeMinutes
         ).joinToString("|")
         val elapsed = nowMs - lastAt
         // A reset of an injected clock must not leave the recorder stuck behind lastAt.

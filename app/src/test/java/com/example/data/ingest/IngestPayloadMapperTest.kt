@@ -210,6 +210,41 @@ class IngestPayloadMapperTest {
 
 class IngestDeduperTest {
 
+    @Test fun optional_measurement_changes_are_not_duplicates_within_the_interval() {
+        val original = sample(72)
+        val changes = listOf(
+            original.copy(temperatureCelsius = 36.5f), original.copy(hrvScore = 42),
+            original.copy(calories = 3.5f), original.copy(distanceMeters = 12.5f),
+            original.copy(sleepSummary = SleepSummary(20, 0, 0)),
+            original.copy(sleepSummary = SleepSummary(0, 30, 0)),
+            original.copy(sleepSummary = SleepSummary(0, 0, 5)),
+        )
+        for (changed in changes) {
+            val deduper = IngestDeduper()
+            assertTrue(deduper.shouldEnqueue(original, nowMs = 1_000L))
+            assertTrue("Changed measurement was dropped: $changed", deduper.shouldEnqueue(changed, nowMs = 1_001L))
+            assertFalse(deduper.shouldEnqueue(changed.copy(timestamp = "2026-09-14T12:00:01Z"), nowMs = 1_002L))
+            assertFalse(deduper.shouldEnqueue(changed.copy(deviceModel = "Renamed watch"), nowMs = 1_003L))
+            assertTrue(deduper.shouldEnqueue(changed, nowMs = 31_001L))
+        }
+    }
+
+    @Test fun failed_optional_measurement_save_does_not_suppress_its_retry() = kotlinx.coroutines.runBlocking {
+        val original = sample(72)
+        val changed = original.copy(temperatureCelsius = 36.5f)
+        val deduper = IngestDeduper(elapsedMs = { 1_000L })
+        val saved = mutableListOf<HBandTelemetry>()
+        deduper.saveIfNeeded(original) { saved += it }
+        val failure = IllegalStateException("Synthetic write failure")
+        var observed: Exception? = null
+        try { deduper.saveIfNeeded(changed) { throw failure } } catch (error: Exception) { observed = error }
+        assertTrue(observed === failure)
+        deduper.saveIfNeeded(original) { saved += it }
+        deduper.saveIfNeeded(changed) { saved += it }
+        deduper.saveIfNeeded(changed) { saved += it }
+        assertEquals(listOf(original, changed), saved)
+    }
+
     @Test
     fun `measurement date changes do not change the elapsed recording interval`() {
         var elapsed = 1_000L
