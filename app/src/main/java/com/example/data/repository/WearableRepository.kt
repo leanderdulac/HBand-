@@ -478,6 +478,7 @@ class WearableRepository(
                 val localError = when {
                     reading == null -> IngestReconciler.INVALID_LOCAL
                     !IngestPayloadMapper.isIngestibleJson(reading.json) -> IngestPayloadMapper.MISSING_HR_ERROR
+                    !IngestPayloadMapper.isCompatibleSpo2Json(reading.json) -> IngestPayloadMapper.INVALID_SPO2_ERROR
                     !IngestPayloadMapper.isCompatibleIngestSourceJson(reading.json) -> IngestPayloadMapper.INVALID_SOURCE_ERROR
                     !IngestPayloadMapper.isCompatibleFilterTypeJson(reading.json) -> IngestPayloadMapper.INVALID_FILTER_ERROR
                     else -> null

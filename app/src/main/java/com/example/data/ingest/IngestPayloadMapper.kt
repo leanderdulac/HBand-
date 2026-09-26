@@ -40,9 +40,23 @@ object IngestPayloadMapper {
     const val INVALID_FILTER_ERROR =
         "Filtro da leitura incompatível com a API. Registro preservado para revisão, sem envio ou alteração do filtro."
 
+    const val INVALID_SPO2_ERROR =
+        "SpO₂ fora do intervalo aceito pela API (50 a 100) ou inválida. Registro preservado para revisão, sem envio ou alteração do valor."
+
     // Core schemas.py at 75e5e02c839f381069212bb7c7d3a2befa491b83; not a full ingest validator.
     private val ingestSources = setOf("companion_manual", "ble_sim", "ble_hband", "http")
     private val filterTypes = setOf("BMO", "Wavelet", "Butterworth", "Raw", "Adaptive")
+
+    fun isCompatibleSpo2Json(json: String): Boolean = try {
+        val payload = JSONObject(json)
+        // Optional in Core: retain absence/null; inspect the transport value without rewriting it.
+        if (!payload.has("spo2") || payload.isNull("spo2")) true else {
+            val value = payload.optDouble("spo2", Double.NaN)
+            value.isFinite() && value in 50.0..100.0
+        }
+    } catch (_: Exception) {
+        false
+    }
 
     fun isCompatibleFilterTypeJson(json: String): Boolean = try {
         val payload = JSONObject(json)
@@ -160,8 +174,8 @@ object IngestPayloadMapper {
         val dia = metrics?.optJSONObject("bloodPressure")?.takeIf { it.has("diastolic") }?.optInt("diastolic")
             ?: jsonObj.optJSONObject("blood_pressure")?.takeIf { it.has("diastolic") }?.optInt("diastolic")
 
-        val spo2 = firstPresentInt(metrics, "spO2")
-            ?: firstPresentInt(jsonObj, "spo2")
+        val spo2 = firstPresentDouble(metrics, "spO2")
+            ?: firstPresentDouble(jsonObj, "spo2")
         val temp = firstPresentDouble(metrics, "temperatureCelsius")
             ?: firstPresentDouble(jsonObj, "temperature")
         val steps = firstPresentInt(metrics, "steps")
