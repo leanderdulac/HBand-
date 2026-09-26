@@ -1316,7 +1316,7 @@ class HBandBleManager(
                 _connectedDevice.value = devInfo
                 persistLastDevice(devInfo)
                 HBandBleService.start(context)
-                startKeepAliveLoop(devInfo)
+                startKeepAliveLoop()
 
                 mainHandler.postDelayed({
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
@@ -1880,14 +1880,13 @@ class HBandBleManager(
         }
     }
 
-    // Keep-alive loop that checks connection without generating fake data
-    private fun startKeepAliveLoop(device: HBandDevice) {
+    // A battery poll is not a sensor measurement; never republish cached vitals with a new time.
+    private fun startKeepAliveLoop() {
         keepAliveJob?.cancel()
         keepAliveJob = scope.launch(Dispatchers.IO) {
             while (true) {
                 delay(5000)
                 if (_connectedDevice.value?.isConnected == true && currentGatt != null) {
-                    val dev = _connectedDevice.value ?: device
                     // Keep GATT connection active
                     currentGatt?.let { gatt ->
                         val hrService = gatt.getService(HEART_RATE_SERVICE_UUID)
@@ -1898,9 +1897,6 @@ class HBandBleManager(
                         if (battChar != null) {
                             enqueueGattOp(GattOp.ReadChar(gatt, battChar))
                         }
-                    }
-                    if (currentHeartRate > 0 || currentSteps > 0) {
-                        _latestTelemetry.value = createTelemetrySnapshot(dev)
                     }
                 }
             }
