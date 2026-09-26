@@ -34,6 +34,22 @@ object IngestPayloadMapper {
     const val MISSING_HR_ERROR =
         "FC ausente ou fora do intervalo aceito pela API ($MIN_HEART_RATE a $MAX_HEART_RATE). Registro preservado para revisão, sem envio ou alteração do valor."
 
+    const val INVALID_SOURCE_ERROR =
+        "Origem da leitura incompatível com a API. Registro preservado para revisão, sem envio ou alteração da origem."
+
+    // Core schemas.py at 75e5e02c839f381069212bb7c7d3a2befa491b83; not a full ingest validator.
+    private val ingestSources = setOf("companion_manual", "ble_sim", "ble_hband", "http")
+
+    fun isCompatibleIngestSourceJson(json: String): Boolean = try {
+        val payload = JSONObject(json)
+        val source = payload.opt("ingest_source")
+        // Core accepts absent/null/empty; leave each representation untouched on the wire.
+        !payload.has("ingest_source") || source == JSONObject.NULL ||
+            (source is String && (source.isEmpty() || source in ingestSources))
+    } catch (_: Exception) {
+        false
+    }
+
     fun resolvePatientId(raw: String?): String {
         val trimmed = raw?.trim().orEmpty()
         return trimmed.ifEmpty { DEFAULT_PATIENT_ID }

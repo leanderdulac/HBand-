@@ -475,15 +475,20 @@ class WearableRepository(
             val prepared = mutableListOf<PreparedReading>()
             for (item in pendingList) {
                 val reading = runCatching { IngestReconciler.prepare(item) }.getOrNull()
-                val validHeartRate = reading != null && IngestPayloadMapper.isIngestibleJson(reading.json)
-                if (!validHeartRate) {
+                val localError = when {
+                    reading == null -> IngestReconciler.INVALID_LOCAL
+                    !IngestPayloadMapper.isIngestibleJson(reading.json) -> IngestPayloadMapper.MISSING_HR_ERROR
+                    !IngestPayloadMapper.isCompatibleIngestSourceJson(reading.json) -> IngestPayloadMapper.INVALID_SOURCE_ERROR
+                    else -> null
+                }
+                if (localError != null) {
                     skippedCount++
                     failedCount++
                     persistQueueResult(item.copy(
                         status = QueueStatus.FAILED.name,
                         lastAttemptAt = System.currentTimeMillis(),
                         errorMessage = item.errorMessage.takeIf { QueueAuthorization.isBlocked(item) }
-                            ?: if (reading == null) IngestReconciler.INVALID_LOCAL else IngestPayloadMapper.MISSING_HR_ERROR,
+                            ?: localError,
                     ))
                 } else {
                     prepared += reading!!

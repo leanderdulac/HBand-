@@ -82,6 +82,129 @@ class WearableBatchIngestTest {
     }
     private fun success(request: JSONObject) = Response.success(receipt(request).toString().toResponseBody())
 
+    private fun sourcePayload(source: Any?, legacy: Boolean): String = JSONObject()
+        .put("patient_id", "PATIENT-A").put(if (legacy) "deviceId" else "device_id", "WATCH-A")
+        .put("timestamp", "2026-09-24T12:00:00Z")
+        .apply {
+            if (legacy) put("metrics", JSONObject().put("heartRate", 72)) else put("heart_rate", 72)
+            if (source != null) put("ingest_source", source) // Kotlin null means absent; JSONObject.NULL is explicit.
+        }.toString()
+
+    private fun sourceContractResponse(request: JSONObject): Response<ResponseBody> {
+        // Synthetic transport mirrors only Core 75e5e02 schemas.py source validation, not its full schema.
+        val readings = request.getJSONArray("readings")
+        val compatible = (0 until readings.length()).all { index ->
+            val row = readings.getJSONObject(index)
+            val value = row.opt("ingest_source")
+            !row.has("ingest_source") || value == JSONObject.NULL ||
+                (value is String && value in listOf("", "companion_manual", "ble_sim", "ble_hband", "http"))
+        }
+        return if (compatible) success(request)
+            else Response.error(422, "synthetic-whole-batch-source-validation".toResponseBody())
+    }
+
+    @Test fun incompatible_sources_stay_local_while_flat_and_legacy_neighbors_sync() = runBlocking {
+        val allowed = listOf(null, JSONObject.NULL, "", "companion_manual", "ble_sim", "ble_hband", "http")
+        val incompatible = listOf("wifi_watch", " ble_hband", "BLE_HBAND", " ", 32, true,
+            JSONObject().put("source", "http"), JSONArray().put("http"))
+        val validIds = mutableSetOf<Long>()
+        var id = 0
+        for (legacy in listOf(false, true)) {
+            for (source in allowed) {
+                insert(++id, raw = sourcePayload(source, legacy))
+                validIds += id.toLong()
+            }
+            for (source in incompatible) insert(++id, raw = sourcePayload(source, legacy))
+        }
+        val before = db.ingestQueueDao().getAllItemsSync().associateBy { it.id }
+        batchHandler = ::sourceContractResponse
+        val result = repo().processQueueDetailed()
+        assertEquals(validIds.size, result.syncedCount)
+        assertEquals(incompatible.size * 2, result.failedCount)
+        assertEquals(incompatible.size * 2, result.skippedCount)
+        val sent = JSONObject(requests.single().second).getJSONArray("readings")
+        assertEquals(validIds.size, sent.length())
+        for (i in 0 until sent.length()) {
+            val row = sent.getJSONObject(i)
+            val original = JSONObject(before.values.single { it.clientReadingId == row.getString("client_reading_id") }.payloadJson)
+            assertEquals(original.has("ingest_source"), row.has("ingest_source"))
+            if (original.has("ingest_source")) assertEquals(original.get("ingest_source"), row.get("ingest_source"))
+        }
+        repo().retryAllFailed()
+        assertEquals(1, batchCalls)
+        assertEquals(0, singles)
+        val after = db.ingestQueueDao().getAllItemsSync().associateBy { it.id }
+        assertEquals(before.keys, after.keys)
+        for ((rowId, original) in before) {
+            val row = after.getValue(rowId)
+            assertEquals(original.payloadJson, row.payloadJson)
+            assertEquals(original.clientReadingId, row.clientReadingId)
+            assertEquals(original.createdAt, row.createdAt)
+            assertEquals(if (rowId in validIds) "SYNCED" else "FAILED", row.status)
+            if (rowId !in validIds) {
+                assertEquals(0, row.retries)
+                assertTrue(row.errorMessage!!.contains("Origem"))
+            }
+        }
+    }
+
+    @Test fun source_guard_keeps_valid_replay_body_and_key_after_lost_receipt() = runBlocking {
+        insert(1, raw = sourcePayload("ble_hband", false))
+        insert(2, raw = sourcePayload("wifi_watch", true))
+        insert(3, raw = sourcePayload(JSONObject.NULL, true))
+        val before = db.ingestQueueDao().getAllItemsSync()
+        batchHandler = { request ->
+            val response = sourceContractResponse(request)
+            if (response.isSuccessful) throw IOException("Synthetic lost source receipt")
+            response
+        }
+        assertEquals(0, repo().processQueueDetailed().syncedCount)
+        assertEquals(setOf("synthetic-1", "synthetic-3"), stored)
+        val held = db.ingestQueueDao().getAllItemsSync().single { it.id == 2L }
+        batchHandler = ::sourceContractResponse
+        assertEquals(2, repo().processQueueDetailed().syncedCount)
+        assertEquals(requests[0], requests[1])
+        assertEquals(held, db.ingestQueueDao().getAllItemsSync().single { it.id == 2L })
+        for (original in before) {
+            val row = db.ingestQueueDao().getAllItemsSync().single { it.id == original.id }
+            assertEquals(original.payloadJson, row.payloadJson)
+            assertEquals(original.clientReadingId, row.clientReadingId)
+            assertEquals(original.createdAt, row.createdAt)
+        }
+        repo().retryFailedItem(2L)
+        assertEquals(2, batchCalls)
+    }
+
+    @Test fun manual_retry_recovers_valid_neighbor_from_previous_whole_batch_422() = runBlocking {
+        insert(1, raw = sourcePayload("http", true))
+        insert(2, raw = sourcePayload("wifi_watch", false))
+        for (row in db.ingestQueueDao().getAllItemsSync()) {
+            db.ingestQueueDao().updateItem(row.copy(status = "FAILED", retries = 1,
+                errorMessage = "HTTP 422. Registro preservado para revisão."))
+        }
+        batchHandler = ::sourceContractResponse
+        assertEquals(1, repo().retryAllFailed().syncedCount)
+        assertEquals(setOf("synthetic-1"), stored)
+        assertEquals("FAILED", db.ingestQueueDao().getAllItemsSync().single { it.id == 2L }.status)
+    }
+
+    @Test fun incompatible_source_does_not_erase_existing_authorization_pause() = runBlocking {
+        insert(1, raw = sourcePayload("wifi_watch", true))
+        val row = db.ingestQueueDao().getAllItemsSync().single()
+        val pause = "Falha de autenticação na API HealthTech (HTTP 403). Verifique a chave em Ajustes."
+        db.ingestQueueDao().updateItem(row.copy(status = "FAILED", errorMessage = pause))
+        batchHandler = ::sourceContractResponse
+        repo().retryAllFailed()
+        assertEquals(0, batchCalls)
+        val held = db.ingestQueueDao().getAllItemsSync().single()
+        assertEquals(pause, held.errorMessage)
+        assertEquals(row.payloadJson, held.payloadJson)
+        assertTrue(QueueAuthorization.isBlocked(held))
+        insert(2)
+        assertNotNull(repo().processQueueDetailed().authError)
+        assertEquals(0, batchCalls)
+    }
+
     @Test fun explicit_sources_survive_lost_receipt_and_retry_without_rewriting_durable_rows() = runBlocking {
         val sources = listOf("companion_manual", "ble_sim", "ble_hband", "http")
         for ((index, source) in sources.withIndex()) {
