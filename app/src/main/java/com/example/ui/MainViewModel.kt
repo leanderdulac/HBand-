@@ -49,12 +49,6 @@ import com.example.worker.HBandWorkScheduler
 import android.content.Context
 import android.content.SharedPreferences
 
-data class UiNotification(
-    val id: Long = System.currentTimeMillis(),
-    val message: String,
-    val isError: Boolean = false
-)
-
 class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val db = AppDatabase.getDatabase(application)
@@ -194,8 +188,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (count == 0 && failed > 0) failed else count
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
 
-    private val _notification = MutableStateFlow<UiNotification?>(null)
-    val notification: StateFlow<UiNotification?> = _notification.asStateFlow()
+    private val notificationState = PatientNotificationState()
+    val notification: StateFlow<UiNotification?> = notificationState.notification
 
     private val _selectedQueueItemForPreview = MutableStateFlow<IngestQueueEntity?>(null)
     val selectedQueueItemForPreview: StateFlow<IngestQueueEntity?> = _selectedQueueItemForPreview.asStateFlow()
@@ -669,11 +663,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         showNotification("Simulação de teste: 98% — não é leitura da pulseira")
     }
 
-    fun dismissNotification() {
-        _notification.value = null
+    fun dismissNotification(displayed: UiNotification) {
+        notificationState.dismiss(displayed)
     }
 
     fun showNotification(msg: String, isError: Boolean = false) {
-        _notification.value = UiNotification(message = msg, isError = isError)
+        notificationState.post(msg, isError)
     }
 }
