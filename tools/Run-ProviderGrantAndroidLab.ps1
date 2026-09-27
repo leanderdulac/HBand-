@@ -106,4 +106,3 @@ try {
     $_.Exception.Message | Set-Content (Join-Path $OutputDirectory 'FAILED.txt')
     throw
 }
-
