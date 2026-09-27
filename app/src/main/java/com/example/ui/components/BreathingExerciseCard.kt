@@ -31,8 +31,6 @@ import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SelfImprovement
 import androidx.compose.material3.Button
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -122,21 +120,23 @@ fun BreathingExerciseCard(
     }
 
     if (confirmRetry && unconfirmed) {
-        AlertDialog(
-            onDismissRequest = { confirmRetry = false },
-            title = { Text("Conferir antes de tentar novamente") },
-            text = { Text("O tempo pode já ter sido salvo. Confira o total salvo. Uma nova tentativa pode duplicar esse tempo.") },
-            confirmButton = { TextButton(onClick = { confirmRetry = false; submit() }, enabled = !anySaving) { Text("Conferi; salvar novamente") } },
-            dismissButton = { TextButton(onClick = { confirmRetry = false }) { Text("Voltar") } },
+        BreathingConfirmationDialog(
+            title = "Conferir antes de tentar novamente",
+            explanation = "O tempo pode já ter sido salvo. Confira o total salvo. Uma nova tentativa pode duplicar esse tempo.",
+            confirmLabel = "Conferi; salvar novamente",
+            confirmEnabled = !anySaving,
+            onConfirm = { confirmRetry = false; submit() },
+            onDismiss = { confirmRetry = false },
         )
     }
     if (confirmDiscard && unconfirmed) {
-        AlertDialog(
-            onDismissRequest = { confirmDiscard = false },
-            title = { Text("Encerrar sem salvar novamente?") },
-            text = { Text("Isso descarta somente o tempo deste exercício na tela. Um registro que já tenha sido salvo continuará no celular.") },
-            confirmButton = { TextButton(onClick = { confirmDiscard = false; clearDraft() }, enabled = !anySaving) { Text("Descartar rascunho") } },
-            dismissButton = { TextButton(onClick = { confirmDiscard = false }) { Text("Voltar") } },
+        BreathingConfirmationDialog(
+            title = "Encerrar sem salvar novamente?",
+            explanation = "Isso descarta somente o tempo deste exercício na tela. Um registro que já tenha sido salvo continuará no celular.",
+            confirmLabel = "Descartar rascunho",
+            confirmEnabled = !anySaving,
+            onConfirm = { confirmDiscard = false; clearDraft() },
+            onDismiss = { confirmDiscard = false },
         )
     }
 
