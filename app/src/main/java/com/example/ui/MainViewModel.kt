@@ -208,7 +208,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _hrAlertsEnabled = MutableStateFlow(prefs.getBoolean("hr_alerts_enabled", true))
     val hrAlertsEnabled: StateFlow<Boolean> = _hrAlertsEnabled.asStateFlow()
 
-    private var lastAlertTimeMs = 0L
+    private var lastAlertTimeMs: Long? = null
 
     private val _geminiInsightText = MutableStateFlow("")
     val geminiInsightText: StateFlow<String> = _geminiInsightText.asStateFlow()
@@ -342,9 +342,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun evaluateHeartRateThresholds(hr: Int) {
         if (!_hrAlertsEnabled.value) return
 
-        val now = System.currentTimeMillis()
-        // 8 second cooldown between repeated automatic notifications
-        if (now - lastAlertTimeMs < 8000) return
+        val now = android.os.SystemClock.elapsedRealtime()
+        // Local elapsed duration, independent of civil-time corrections; includes device sleep.
+        lastAlertTimeMs?.let { if (now - it < 8000) return }
 
         val upper = _upperHrThreshold.value
         val lower = _lowerHrThreshold.value

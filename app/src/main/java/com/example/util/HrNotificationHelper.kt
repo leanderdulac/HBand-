@@ -5,6 +5,7 @@ import android.app.NotificationManager
 import android.content.Context
 import android.os.Build
 import androidx.core.app.NotificationCompat
+import kotlinx.coroutines.CancellationException
 
 object HrNotificationHelper {
 
@@ -27,30 +28,41 @@ object HrNotificationHelper {
     }
 
     fun sendHighHrNotification(context: Context, currentHr: Int, threshold: Int, isTest: Boolean = false) {
-        createNotificationChannel(context)
+        postSafely {
+            createNotificationChannel(context)
 
-        val builder = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.stat_sys_warning)
-            .setContentTitle(if (isTest) "Teste de aviso: batimentos acima do limite" else "Batimentos acima do limite cadastrado")
-            .setContentText(if (isTest) "Exemplo: $currentHr bpm. Limite: $threshold bpm. Não é uma leitura do relógio." else "Batimentos: $currentHr bpm. Limite cadastrado: $threshold bpm.")
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setAutoCancel(true)
+            val builder = NotificationCompat.Builder(context, CHANNEL_ID)
+                .setSmallIcon(android.R.drawable.stat_sys_warning)
+                .setContentTitle(if (isTest) "Teste de aviso: batimentos acima do limite" else "Batimentos acima do limite cadastrado")
+                .setContentText(if (isTest) "Exemplo: $currentHr bpm. Limite: $threshold bpm. Não é uma leitura do relógio." else "Batimentos: $currentHr bpm. Limite cadastrado: $threshold bpm.")
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setAutoCancel(true)
 
-        val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        notificationManager.notify(NOTIFICATION_ID_HIGH, builder.build())
+            val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            notificationManager.notify(NOTIFICATION_ID_HIGH, builder.build())
+        }
     }
 
     fun sendLowHrNotification(context: Context, currentHr: Int, threshold: Int, isTest: Boolean = false) {
-        createNotificationChannel(context)
+        postSafely {
+            createNotificationChannel(context)
 
-        val builder = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.stat_sys_warning)
-            .setContentTitle(if (isTest) "Teste de aviso: batimentos abaixo do limite" else "Batimentos abaixo do limite cadastrado")
-            .setContentText(if (isTest) "Exemplo: $currentHr bpm. Limite: $threshold bpm. Não é uma leitura do relógio." else "Batimentos: $currentHr bpm. Limite cadastrado: $threshold bpm.")
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setAutoCancel(true)
+            val builder = NotificationCompat.Builder(context, CHANNEL_ID)
+                .setSmallIcon(android.R.drawable.stat_sys_warning)
+                .setContentTitle(if (isTest) "Teste de aviso: batimentos abaixo do limite" else "Batimentos abaixo do limite cadastrado")
+                .setContentText(if (isTest) "Exemplo: $currentHr bpm. Limite: $threshold bpm. Não é uma leitura do relógio." else "Batimentos: $currentHr bpm. Limite cadastrado: $threshold bpm.")
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setAutoCancel(true)
 
-        val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        notificationManager.notify(NOTIFICATION_ID_LOW, builder.build())
+            val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            notificationManager.notify(NOTIFICATION_ID_LOW, builder.build())
+        }
+    }
+
+    /** A completed Android call is not evidence of display or delivery. Keep local notices usable. */
+    private inline fun postSafely(action: () -> Unit) {
+        try { action() }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { /* Android notification failure must not terminate the telemetry collector. */ }
     }
 }
