@@ -18,10 +18,12 @@ import com.example.ui.BreathingSaveStatus
 import com.example.ui.theme.MyApplicationTheme
 import com.github.takahirom.roborazzi.captureRoboImage
 import org.junit.Assert.*
+import org.junit.After
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
@@ -34,8 +36,11 @@ class PatientBreathingSaveUiTest {
     private val receipt = mutableStateOf<BreathingSaveState?>(null)
     private val requests = mutableListOf<BreathingSaveState>()
     private val tab = mutableIntStateOf(0)
+    @After fun resetFontScale() { RuntimeEnvironment.setFontScale(1f) }
 
     private fun content(fontScale: Float = 1f): StateRestorationTester {
+        // Dialogs use their own window density, outside the card's LocalDensity override.
+        RuntimeEnvironment.setFontScale(fontScale)
         val restoration = StateRestorationTester(compose)
         restoration.setContent {
             CompositionLocalProvider(LocalDensity provides Density(1f, fontScale)) {
