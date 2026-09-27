@@ -16,6 +16,11 @@ O formulário mantém campos e fecha automaticamente somente pelo recibo exato.
 Campos, salvar, cancelar e fechamento externo ficam bloqueados durante a tentativa.
 Resultado incerto preserva edição e permite decisão explícita; fechar não promete
 desfazer perfil que já tenha sido gravado. Restauração sem recibo não envia de novo.
+Revisão distinta identificou risco na restauração para outra identidade, reproduzido
+por um teste focal no primeiro candidato. A árvore do editor passa a usar key(id,
+patientId), pois inputs de rememberSaveable não validam identidade já restaurada.
+Assim outro paciente não herda os campos/token anteriores; identidade igual mantém
+restauração. Não introduz fluxo operacional de troca de paciente.
 
 IDs somente leitura e cópia dos campos originais preservados. Sem alteração de
 DAO/REPLACE, schema, filas, chaves, SDK/BLE ou transporte. Callback setPatientId

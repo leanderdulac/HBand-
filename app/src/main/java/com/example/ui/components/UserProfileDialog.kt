@@ -41,6 +41,20 @@ fun UserProfileDialog(
         )
         return
     }
+    // Saveable inputs alone are not validated against a restored registry.
+    // Put the editor under its identity so a different patient cannot inherit its draft.
+    key(currentProfile.id, currentProfile.patientId) {
+        ProfileEditor(currentProfile, onDismissRequest, onSaveProfile, saveState)
+    }
+}
+
+@Composable
+private fun ProfileEditor(
+    currentProfile: UserProfileEntity,
+    onDismissRequest: () -> Unit,
+    onSaveProfile: (String, UserProfileEntity) -> Unit,
+    saveState: ProfileSaveState?,
+) {
     val initial = currentProfile
     var name by rememberSaveable(initial.id, initial.patientId) { mutableStateOf(initial.fullName) }
     var age by rememberSaveable(initial.id, initial.patientId) { mutableStateOf(initial.age.toString()) }

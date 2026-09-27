@@ -1,6 +1,9 @@
 package com.example.ui.components
 
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -18,6 +21,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
+import org.robolectric.shadows.ShadowDialog
 
 /** Production dialog and Android saved-state harness with simulated receipts only. */
 @RunWith(RobolectricTestRunner::class)
@@ -127,6 +131,21 @@ class PatientProfileSaveUiTest {
         result(ProfileSaveStatus.SAVED)
         compose.runOnIdle { assertTrue(open.value); assertEquals(1, requests.size) }
     }
+    @Test fun restoring_into_another_patient_never_transfers_previous_draft() {
+        var restoreToOther = false
+        val other = original.copy(patientId = "another-patient", fullName = "Outro perfil")
+        val restore = StateRestorationTester(compose)
+        restore.setContent { MyApplicationTheme {
+            val source = remember { if (restoreToOther) other else original }
+            UserProfileDialog(source, {}, { token, row -> requests += token to row })
+        } }
+        compose.onNodeWithTag("input_profile_name").performTextReplacement("Rascunho paciente A")
+        compose.runOnIdle { restoreToOther = true }
+        restore.emulateSavedInstanceStateRestore()
+        compose.onNodeWithTag("input_profile_name").assertTextContains("Outro perfil")
+        compose.onNodeWithTag("btn_save_profile").performClick()
+        compose.runOnIdle { assertEquals(other, requests.single().second) }
+    }
     @Test fun large_type_keeps_pending_and_uncertain_feedback_accessible() {
         content(2f); submit()
         compose.onNodeWithTag("profile_save_feedback").performScrollTo().assertIsDisplayed()
@@ -135,6 +154,12 @@ class PatientProfileSaveUiTest {
         compose.onNodeWithTag("profile_save_feedback").performScrollTo().assertIsDisplayed()
         compose.onRoot().captureRoboImage(filePath = "build/profile-save-uncertain-large.png")
         compose.onNodeWithText("Cancelar").performClick()
-        compose.onRoot().captureRoboImage(filePath = "build/profile-save-exit-large.png")
+        compose.onNodeWithTag("profile_discard_dialog").assertIsDisplayed()
+        // Explicitly capture the top Android window; multiple dialogs confuse root capture order.
+        ShadowDialog.getLatestDialog().window!!.decorView.captureRoboImage(filePath = "build/profile-save-exit-large.png")
+        val layouts = mutableListOf<TextLayoutResult>()
+        compose.onNodeWithText("A gravação anterior não foi confirmada.", substring = true)
+            .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+        assertFalse("Exit warning must not truncate the saved-profile explanation", layouts.single().hasVisualOverflow)
     }
 }
