@@ -21,12 +21,16 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.example.data.local.UserProfileEntity
+import com.example.ui.ProfileSaveState
+import com.example.ui.ProfileSaveStatus
+import java.util.UUID
 
 @Composable
 fun UserProfileDialog(
     currentProfile: UserProfileEntity?,
     onDismissRequest: () -> Unit,
-    onSaveProfile: (UserProfileEntity) -> Unit,
+    onSaveProfile: (String, UserProfileEntity) -> Unit,
+    saveState: ProfileSaveState? = null,
 ) {
     if (currentProfile == null) {
         AlertDialog(
@@ -38,19 +42,39 @@ fun UserProfileDialog(
         return
     }
     val initial = currentProfile
-    var name by rememberSaveable(initial.id) { mutableStateOf(initial.fullName) }
-    var age by rememberSaveable(initial.id) { mutableStateOf(initial.age.toString()) }
-    var gender by rememberSaveable(initial.id) { mutableStateOf(initial.gender) }
-    var height by rememberSaveable(initial.id) { mutableStateOf(initial.heightCm.toString().replace('.', ',')) }
-    var weight by rememberSaveable(initial.id) { mutableStateOf(initial.weightKg.toString().replace('.', ',')) }
-    var steps by rememberSaveable(initial.id) { mutableStateOf(initial.dailyStepGoal.toString()) }
-    var water by rememberSaveable(initial.id) { mutableStateOf(initial.targetWaterMl.toString()) }
-    var contact by rememberSaveable(initial.id) { mutableStateOf(initial.emergencyContact) }
-    var notes by rememberSaveable(initial.id) { mutableStateOf(initial.medicalNotes) }
-    var confirmDiscard by rememberSaveable(initial.id) { mutableStateOf(false) }
-    var goalsExpanded by rememberSaveable(initial.id) { mutableStateOf(false) }
-    var identityExpanded by rememberSaveable(initial.id) { mutableStateOf(false) }
-    val editorScroll = rememberSaveable(initial.id, saver = ScrollState.Saver) { ScrollState(0) }
+    var name by rememberSaveable(initial.id, initial.patientId) { mutableStateOf(initial.fullName) }
+    var age by rememberSaveable(initial.id, initial.patientId) { mutableStateOf(initial.age.toString()) }
+    var gender by rememberSaveable(initial.id, initial.patientId) { mutableStateOf(initial.gender) }
+    var height by rememberSaveable(initial.id, initial.patientId) { mutableStateOf(initial.heightCm.toString().replace('.', ',')) }
+    var weight by rememberSaveable(initial.id, initial.patientId) { mutableStateOf(initial.weightKg.toString().replace('.', ',')) }
+    var steps by rememberSaveable(initial.id, initial.patientId) { mutableStateOf(initial.dailyStepGoal.toString()) }
+    var water by rememberSaveable(initial.id, initial.patientId) { mutableStateOf(initial.targetWaterMl.toString()) }
+    var contact by rememberSaveable(initial.id, initial.patientId) { mutableStateOf(initial.emergencyContact) }
+    var notes by rememberSaveable(initial.id, initial.patientId) { mutableStateOf(initial.medicalNotes) }
+    var confirmDiscard by rememberSaveable(initial.id, initial.patientId) { mutableStateOf(false) }
+    var goalsExpanded by rememberSaveable(initial.id, initial.patientId) { mutableStateOf(false) }
+    var identityExpanded by rememberSaveable(initial.id, initial.patientId) { mutableStateOf(false) }
+    val editorScroll = rememberSaveable(initial.id, initial.patientId, saver = ScrollState.Saver) { ScrollState(0) }
+    var requestToken by rememberSaveable(initial.id, initial.patientId) { mutableStateOf<String?>(null) }
+    // A live callback can be pending before collection observes the controller receipt.
+    // After restoration, a missing receipt is uncertain, never replayed automatically.
+    var submissionPending by remember(initial.id, initial.patientId) { mutableStateOf(false) }
+    val receipt = saveState?.takeIf {
+        it.token == requestToken && it.profileId == initial.id && it.patientId == initial.patientId
+    }
+    val anySaving = saveState?.status == ProfileSaveStatus.SAVING
+    val pending = submissionPending || anySaving
+    val editingEnabled = !pending && receipt?.status != ProfileSaveStatus.SAVED
+    val uncertain = requestToken != null && !pending && receipt?.status != ProfileSaveStatus.SAVED
+    LaunchedEffect(receipt) {
+        if (receipt != null && receipt.status != ProfileSaveStatus.SAVING) {
+            submissionPending = false
+            if (receipt.status == ProfileSaveStatus.SAVED) onDismissRequest()
+        }
+    }
+    LaunchedEffect(requestToken, receipt?.status) {
+        if (requestToken != null) editorScroll.scrollTo(0)
+    }
     val hasChanges = name != initial.fullName || age != initial.age.toString() ||
         gender != initial.gender || height != initial.heightCm.toString().replace('.', ',') ||
         weight != initial.weightKg.toString().replace('.', ',') ||
@@ -58,7 +82,9 @@ fun UserProfileDialog(
         contact != initial.emergencyContact || notes != initial.medicalNotes
     val focusManager = LocalFocusManager.current
     val requestClose: () -> Unit = {
-        if (hasChanges) {
+        if (pending || receipt?.status == ProfileSaveStatus.SAVED) {
+            // Back/outside taps cannot discard a write whose result is still pending.
+        } else if (hasChanges || requestToken != null) {
             focusManager.clearFocus()
             confirmDiscard = true
         } else {
@@ -82,20 +108,26 @@ fun UserProfileDialog(
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
                 Text("Este é o perfil salvo neste aparelho. Confira seus dados antes de salvar.", style = MaterialTheme.typography.bodyLarge)
+                if (requestToken != null) Text(
+                    text = if (pending) "Salvando perfil neste celular…" else
+                        "Gravação não confirmada. Suas alterações foram mantidas nesta tela. Confira os dados antes de salvar novamente; a tentativa anterior pode já ter sido gravada.",
+                    modifier = Modifier.testTag("profile_save_feedback"),
+                    style = MaterialTheme.typography.bodyLarge,
+                )
                 PatientSummaryLayout(first = {
-                    ProfileField(name, { name = it }, "Nome completo", "input_profile_name", error = name.isBlank())
-                    ProfileField(age, { age = it }, "Idade em anos", "input_age", KeyboardType.Number, parsedAge == null)
-                    ProfileField(gender, { gender = it }, "Gênero", "input_gender")
-                    ProfileField(height, { height = it }, "Altura em centímetros", "input_height", KeyboardType.Decimal, parsedHeight == null)
-                    ProfileField(weight, { weight = it }, "Peso em quilos", "input_weight", KeyboardType.Decimal, parsedWeight == null, ImeAction.Done)
+                    ProfileField(name, { name = it }, "Nome completo", "input_profile_name", error = name.isBlank(), enabled = editingEnabled)
+                    ProfileField(age, { age = it }, "Idade em anos", "input_age", KeyboardType.Number, parsedAge == null, enabled = editingEnabled)
+                    ProfileField(gender, { gender = it }, "Gênero", "input_gender", enabled = editingEnabled)
+                    ProfileField(height, { height = it }, "Altura em centímetros", "input_height", KeyboardType.Decimal, parsedHeight == null, enabled = editingEnabled)
+                    ProfileField(weight, { weight = it }, "Peso em quilos", "input_weight", KeyboardType.Decimal, parsedWeight == null, ImeAction.Done, enabled = editingEnabled)
                 }, second = {
                     PatientSection("Metas e contato", goalsExpanded, { goalsExpanded = it }) {
                         Text("Metas cadastradas", style = MaterialTheme.typography.titleMedium)
-                        ProfileField(steps, { steps = it }, "Meta de passos por dia", "input_step_goal", KeyboardType.Number, parsedSteps == null)
-                        ProfileField(water, { water = it }, "Meta de água em mL por dia", "input_water_goal", KeyboardType.Number, parsedWater == null)
-                        ProfileField(contact, { contact = it }, "Contato de emergência", "input_emergency_contact", KeyboardType.Phone)
+                        ProfileField(steps, { steps = it }, "Meta de passos por dia", "input_step_goal", KeyboardType.Number, parsedSteps == null, enabled = editingEnabled)
+                        ProfileField(water, { water = it }, "Meta de água em mL por dia", "input_water_goal", KeyboardType.Number, parsedWater == null, enabled = editingEnabled)
+                        ProfileField(contact, { contact = it }, "Contato de emergência", "input_emergency_contact", KeyboardType.Phone, enabled = editingEnabled)
                         OutlinedTextField(
-                            value = notes, onValueChange = { notes = it }, label = { Text("Observações") },
+                            value = notes, onValueChange = { notes = it }, enabled = editingEnabled, label = { Text("Observações") },
                             modifier = Modifier.fillMaxWidth().testTag("input_medical_notes"), minLines = 2,
                         )
                     }
@@ -114,29 +146,33 @@ fun UserProfileDialog(
         confirmButton = {
             Button(
                 onClick = {
-                    if (valid) {
-                        onSaveProfile(initial.copy(
+                    if (valid && !submissionPending && !anySaving && receipt?.status != ProfileSaveStatus.SAVED) {
+                        focusManager.clearFocus()
+                        val token = UUID.randomUUID().toString()
+                        requestToken = token
+                        submissionPending = true
+                        onSaveProfile(token, initial.copy(
                             fullName = name.trim(), age = parsedAge!!, gender = gender,
                             heightCm = parsedHeight!!, weightKg = parsedWeight!!,
                             dailyStepGoal = parsedSteps!!, targetWaterMl = parsedWater!!,
                             emergencyContact = contact, medicalNotes = notes,
                         ))
-                        onDismissRequest()
                     }
                 },
-                enabled = valid,
+                enabled = valid && editingEnabled,
                 modifier = Modifier.heightIn(min = 56.dp).testTag("btn_save_profile"),
-            ) { Text("Salvar perfil") }
+            ) { Text(if (pending) "Salvando…" else "Salvar perfil") }
         },
         dismissButton = {
-            TextButton(onClick = requestClose, modifier = Modifier.heightIn(min = 56.dp)) { Text("Cancelar") }
+            TextButton(onClick = requestClose, enabled = editingEnabled, modifier = Modifier.heightIn(min = 56.dp)) { Text("Cancelar") }
         },
     )
 
-    if (confirmDiscard) {
+    if (confirmDiscard && editingEnabled) {
         ProfileDiscardConfirmation(
             onContinueEditing = { confirmDiscard = false },
             onDiscard = onDismissRequest,
+            uncertainSave = uncertain,
         )
     }
 }
@@ -175,12 +211,14 @@ private fun ProfileEditorDialog(
 }
 
 @Composable
-internal fun ProfileDiscardConfirmation(onContinueEditing: () -> Unit, onDiscard: () -> Unit) {
+internal fun ProfileDiscardConfirmation(onContinueEditing: () -> Unit, onDiscard: () -> Unit, uncertainSave: Boolean = false) {
     AlertDialog(
         onDismissRequest = onContinueEditing,
         modifier = Modifier.testTag("profile_discard_dialog"),
-        title = { Text("Sair sem salvar?") },
-        text = { Text("Você alterou seu perfil. Se sair agora, essas alterações serão perdidas.") },
+        title = { Text(if (uncertainSave) "Fechar sem salvar novamente?" else "Sair sem salvar?") },
+        text = { Text(if (uncertainSave)
+            "A gravação anterior não foi confirmada. Fechar descarta somente as alterações desta tela; um perfil já salvo no celular será mantido."
+            else "Você alterou seu perfil. Se sair agora, essas alterações serão perdidas.") },
         confirmButton = {
             Button(
                 onClick = onContinueEditing,
@@ -191,7 +229,7 @@ internal fun ProfileDiscardConfirmation(onContinueEditing: () -> Unit, onDiscard
             TextButton(
                 onClick = onDiscard,
                 modifier = Modifier.heightIn(min = 56.dp).testTag("profile_discard_changes"),
-            ) { Text("Sair sem salvar") }
+            ) { Text(if (uncertainSave) "Fechar edição" else "Sair sem salvar") }
         },
     )
 }
@@ -208,10 +246,11 @@ private fun ProfileField(
     keyboardType: KeyboardType = KeyboardType.Text,
     error: Boolean = false,
     imeAction: ImeAction = ImeAction.Next,
+    enabled: Boolean = true,
 ) {
     val focusManager = LocalFocusManager.current
     OutlinedTextField(
-        value = value, onValueChange = onValueChange,
+        value = value, onValueChange = onValueChange, enabled = enabled,
         label = { Text(label) },
         isError = error,
         supportingText = if (error) ({ Text(when (keyboardType) {

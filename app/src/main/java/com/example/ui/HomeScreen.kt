@@ -107,6 +107,7 @@ fun HomeScreen(
     val notification by viewModel.notification.collectAsStateWithLifecycle()
 
     val userProfile by viewModel.userProfile.collectAsStateWithLifecycle()
+    val profileSaveState by viewModel.profileSaveState.collectAsStateWithLifecycle()
     val autoReconnectBle by viewModel.autoReconnectBle.collectAsStateWithLifecycle()
     val deviceCapabilities by viewModel.deviceCapabilities.collectAsStateWithLifecycle()
     val autoMeasureState by viewModel.autoMeasureState.collectAsStateWithLifecycle()
@@ -339,7 +340,8 @@ fun HomeScreen(
         com.example.ui.components.UserProfileDialog(
             currentProfile = userProfile,
             onDismissRequest = { showProfileDialog = false },
-            onSaveProfile = { viewModel.saveUserProfile(it) }
+            onSaveProfile = viewModel::saveUserProfile,
+            saveState = profileSaveState,
         )
     }
 

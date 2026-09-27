@@ -31,7 +31,7 @@ class PatientProfileLayoutTest {
     @Test fun tablet_shows_two_groups_and_saves_only_the_edited_fields() {
         RuntimeEnvironment.setFontScale(1f)
         var saved: UserProfileEntity? = null
-        compose.setContent { MyApplicationTheme { UserProfileDialog(original, {}, { saved = it }) } }
+        compose.setContent { MyApplicationTheme { UserProfileDialog(original, {}, { _, profile -> saved = profile }) } }
         val personal = compose.onNodeWithTag("patient_summary_first").fetchSemanticsNode()
         val additional = compose.onNodeWithTag("patient_summary_second").fetchSemanticsNode()
         assertEquals(personal.positionInRoot.y, additional.positionInRoot.y, 1f)
@@ -54,7 +54,7 @@ class PatientProfileLayoutTest {
         var saves = 0
         compose.setContent {
             CompositionLocalProvider(LocalDensity provides Density(LocalDensity.current.density, 2f)) {
-                MyApplicationTheme { UserProfileDialog(original, {}, { saves++ }) }
+                MyApplicationTheme { UserProfileDialog(original, {}, { _, _ -> saves++ }) }
             }
         }
         compose.onNodeWithText("Cancelar").assertIsDisplayed()
@@ -74,7 +74,7 @@ class PatientProfileLayoutTest {
         val restoration = StateRestorationTester(compose)
         restoration.setContent {
             CompositionLocalProvider(LocalDensity provides Density(LocalDensity.current.density, 1.6f)) {
-                MyApplicationTheme { UserProfileDialog(original, {}, { saved = it }) }
+                MyApplicationTheme { UserProfileDialog(original, {}, { _, profile -> saved = profile }) }
             }
         }
         compose.onNodeWithTag("input_profile_name").performTextReplacement("Nome preservado")
@@ -105,7 +105,7 @@ class PatientProfileLayoutTest {
     @Test fun opening_sections_does_not_edit_the_profile_or_require_discard() {
         var dismissals = 0
         compose.setContent {
-            MyApplicationTheme { UserProfileDialog(original, { dismissals++ }, { error("Unexpected save") }) }
+            MyApplicationTheme { UserProfileDialog(original, { dismissals++ }, { _, _ -> error("Unexpected save") }) }
         }
         compose.onNodeWithText("Metas e contato").performScrollTo().performClick()
         compose.onNodeWithText("Identificação do cadastro").performScrollTo().performClick()

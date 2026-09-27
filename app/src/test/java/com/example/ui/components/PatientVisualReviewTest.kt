@@ -70,12 +70,12 @@ class PatientVisualReviewTest {
     }
 
     @Test fun profile_large_text() = capture("profile_large_text", 1.6f) {
-        UserProfileDialog(UserProfileEntity(fullName = "Pessoa de teste", patientId = "patient-fixture"), {}, {})
+        UserProfileDialog(UserProfileEntity(fullName = "Pessoa de teste", patientId = "patient-fixture"), {}, { _, _ -> })
     }
 
     @Test fun unsaved_profile_keeps_both_choices_readable_with_large_text() {
         capture("profile_before_discard_large_text", 1.6f) {
-            UserProfileDialog(UserProfileEntity(fullName = "Pessoa de teste", patientId = "patient-fixture"), {}, {})
+            UserProfileDialog(UserProfileEntity(fullName = "Pessoa de teste", patientId = "patient-fixture"), {}, { _, _ -> })
         }
         compose.onNodeWithTag("input_profile_name").performTextReplacement("Nome corrigido")
         compose.onNodeWithText("Cancelar").performClick()
@@ -95,7 +95,7 @@ class PatientVisualReviewTest {
     }
 
     @Test fun missing_profile_guidance_large_text() = capture("profile_missing_large_text", 1.6f) {
-        UserProfileDialog(null, {}, {})
+        UserProfileDialog(null, {}, { _, _ -> })
     }
 
     @Test fun queue_empty() = capture("queue_empty") {

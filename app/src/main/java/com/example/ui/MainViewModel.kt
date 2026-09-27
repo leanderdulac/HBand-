@@ -225,6 +225,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val wellnessActions = PatientWellnessActions(localWellness, ::showNotification)
     private val breathingSave = PatientBreathingSave(viewModelScope, wellnessActions::saveBreathingSession)
     val breathingSaveState = breathingSave.state
+    private val profileSave = PatientProfileSave(viewModelScope, userProfileDao::saveUserProfile) { profile ->
+        bleManager.setPatientId(profile.patientId)
+        showNotification("Perfil salvo neste celular.")
+    }
+    val profileSaveState = profileSave.state
 
     val userProfile: StateFlow<com.example.data.local.UserProfileEntity?> = userProfileDao.getUserProfileFlow()
         .stateIn(
@@ -433,13 +438,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun stopFindDeviceByPhone() = bleManager.stopFindDeviceByPhone()
     fun setBandHealthRemind(enabled: Boolean) = bleManager.setHealthRemindEnabled(enabled)
 
-    fun saveUserProfile(profile: com.example.data.local.UserProfileEntity) {
-        viewModelScope.launch {
-            userProfileDao.saveUserProfile(profile)
-            bleManager.setPatientId(profile.patientId)
-            showNotification("Perfil salvo neste celular.")
-        }
-    }
+    fun saveUserProfile(token: String, profile: com.example.data.local.UserProfileEntity) = profileSave.save(token, profile)
 
     fun setAutoIngestLiveReadings(enabled: Boolean) {
         _autoIngestLiveReadings.value = enabled

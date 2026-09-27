@@ -20,7 +20,7 @@ class PatientProfileTest {
     @Test fun editing_name_preserves_canonical_ids_and_decimal_measurements() {
         val original = UserProfileEntity(id = "profile-fixture", patientId = "patient-fixture", fullName = "Pessoa de teste", heightCm = 162.5f, weightKg = 63.7f)
         var saved: UserProfileEntity? = null
-        compose.setContent { MyApplicationTheme { UserProfileDialog(original, {}, { saved = it }) } }
+        compose.setContent { MyApplicationTheme { UserProfileDialog(original, {}, { _, profile -> saved = profile }) } }
         compose.onNodeWithTag("input_profile_name").performTextReplacement("Nome corrigido")
         compose.onNodeWithTag("btn_save_profile").performClick()
         compose.runOnIdle { assertEquals(original.copy(fullName = "Nome corrigido"), saved) }
@@ -28,14 +28,14 @@ class PatientProfileTest {
 
     @Test fun invalid_input_does_not_silently_save_example_values() {
         var saves = 0
-        compose.setContent { MyApplicationTheme { UserProfileDialog(UserProfileEntity(), {}, { saves++ }) } }
+        compose.setContent { MyApplicationTheme { UserProfileDialog(UserProfileEntity(), {}, { _, _ -> saves++ }) } }
         compose.onNodeWithTag("input_age").performScrollTo().performTextReplacement("abc")
         compose.onNodeWithTag("btn_save_profile").assertIsNotEnabled()
         compose.runOnIdle { assertEquals(0, saves) }
     }
 
     @Test fun missing_profile_cannot_save_a_fabricated_identity() {
-        compose.setContent { MyApplicationTheme { UserProfileDialog(null, {}, { error("Unexpected profile creation") }) } }
+        compose.setContent { MyApplicationTheme { UserProfileDialog(null, {}, { _, _ -> error("Unexpected profile creation") }) } }
         compose.onNodeWithTag("btn_save_profile").assertDoesNotExist()
         compose.onNodeWithText("Alex Rivera").assertDoesNotExist()
         compose.onNodeWithText("Fechar").assertIsDisplayed()
@@ -51,7 +51,7 @@ class PatientProfileTest {
 
     @Test fun keyboard_moves_to_the_next_field_and_done_does_not_save_automatically() {
         var saves = 0
-        compose.setContent { MyApplicationTheme { UserProfileDialog(UserProfileEntity(), {}, { saves++ }) } }
+        compose.setContent { MyApplicationTheme { UserProfileDialog(UserProfileEntity(), {}, { _, _ -> saves++ }) } }
         compose.onNodeWithTag("input_height").performScrollTo().performClick().performImeAction()
         compose.onNodeWithTag("input_weight").assertIsFocused().performImeAction()
         compose.onNodeWithTag("input_weight").assertIsNotFocused()
@@ -62,7 +62,7 @@ class PatientProfileTest {
     @Test fun unchanged_profile_closes_without_an_extra_step() {
         var dismissals = 0
         compose.setContent {
-            MyApplicationTheme { UserProfileDialog(UserProfileEntity(), { dismissals++ }, { error("Unexpected save") }) }
+            MyApplicationTheme { UserProfileDialog(UserProfileEntity(), { dismissals++ }, { _, _ -> error("Unexpected save") }) }
         }
         compose.onNodeWithText("Cancelar").performClick()
         compose.runOnIdle { assertEquals(1, dismissals) }
@@ -73,7 +73,7 @@ class PatientProfileTest {
         var dismissals = 0
         var saves = 0
         compose.setContent {
-            MyApplicationTheme { UserProfileDialog(UserProfileEntity(), { dismissals++ }, { saves++ }) }
+            MyApplicationTheme { UserProfileDialog(UserProfileEntity(), { dismissals++ }, { _, _ -> saves++ }) }
         }
         compose.onNodeWithTag("input_age").performScrollTo().performTextReplacement("abc")
         compose.onNodeWithText("Cancelar").performClick()
@@ -89,7 +89,7 @@ class PatientProfileTest {
         var dismissals = 0
         val restoration = StateRestorationTester(compose)
         restoration.setContent {
-            MyApplicationTheme { UserProfileDialog(original, { dismissals++ }, { saved = it }) }
+            MyApplicationTheme { UserProfileDialog(original, { dismissals++ }, { _, profile -> saved = profile }) }
         }
         compose.onNodeWithTag("input_profile_name").performTextReplacement("Nome corrigido")
         compose.onNodeWithText("Cancelar").performClick()
@@ -99,6 +99,6 @@ class PatientProfileTest {
         compose.onNodeWithTag("input_profile_name").assertTextContains("Nome corrigido")
         compose.runOnIdle { assertNull(saved); assertEquals(0, dismissals) }
         compose.onNodeWithTag("btn_save_profile").performClick()
-        compose.runOnIdle { assertEquals(original.copy(fullName = "Nome corrigido"), saved); assertEquals(1, dismissals) }
+        compose.runOnIdle { assertEquals(original.copy(fullName = "Nome corrigido"), saved); assertEquals(0, dismissals) }
     }
 }
