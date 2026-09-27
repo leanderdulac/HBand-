@@ -19,7 +19,9 @@ Runner Ubuntu24.04 descartável, Java21, SDK36.1, build-tools36.0.0, wrapper
 Gradle versionado e dependências declaradas pelo projeto. Actions oficiais
 fixadas por SHA, token somente leitura e credencial Git não persistida.
 Os jobs podem baixar ferramentas/dependências. Não usam configuração operacional:
-.env local com chaves vazias e URL loopback, sem google-services.json.
+.env local com placeholders reconhecidos e URL loopback, sem google-services.json.
+Valores vazios não são usados: o gerador Secrets cria Java inválido nesse caso.
+Os placeholders de ingest e Gemini são recusados pelas guardas existentes.
 Os hosts diretos conhecidos Core/Gemini são redirecionados para loopback no runner;
 isso não é sandbox universal de rede nem proteção para todo código futuro.
 

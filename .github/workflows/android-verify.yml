@@ -52,7 +52,7 @@ jobs:
           test ! -e .env
           test ! -e debug.keystore
           test ! -e app/google-services.json
-          printf 'HEALTHTECH_INGEST_API_KEY=\nHEALTHTECH_BASE_URL=http://127.0.0.1:9\nGEMINI_API_KEY=\n' > .env
+          printf 'HEALTHTECH_INGEST_API_KEY=YOUR_HEALTHTECH_API_KEY_HERE\nHEALTHTECH_BASE_URL=http://127.0.0.1:9\nGEMINI_API_KEY=YOUR_GEMINI_API_KEY\n' > .env
           # Guard the two known direct external services without changing app code.
           printf '\n127.0.0.1 healthtech-secure-api-5794833455.us-central1.run.app generativelanguage.googleapis.com\n' | sudo tee -a /etc/hosts >/dev/null
           keytool -genkeypair -keystore debug.keystore -storepass android -keypass android -alias androiddebugkey -dname 'CN=Ephemeral Android CI' -keyalg RSA -keysize 2048 -validity 2
