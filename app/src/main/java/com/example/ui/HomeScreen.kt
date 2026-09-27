@@ -94,13 +94,14 @@ fun HomeScreen(
     val latestTelemetry by viewModel.latestTelemetry.collectAsStateWithLifecycle()
     val allSensorMetrics by viewModel.allSensorMetrics.collectAsStateWithLifecycle()
     val shareSensorMetrics by viewModel.shareSensorMetrics.collectAsStateWithLifecycle()
-    val allQueueItems by viewModel.allQueueItems.collectAsStateWithLifecycle()
-    val pendingCount by viewModel.pendingCount.collectAsStateWithLifecycle()
-    val syncedCount by viewModel.syncedCount.collectAsStateWithLifecycle()
-    val failedCount by viewModel.failedCount.collectAsStateWithLifecycle()
+    val queuePresentation by viewModel.queuePresentation.collectAsStateWithLifecycle()
+    val allQueueItems = queuePresentation?.items
+    val pendingCount = queuePresentation?.pendingCount ?: 0
+    val syncedCount = queuePresentation?.syncedCount ?: 0
+    val failedCount = queuePresentation?.failedCount ?: 0
     val consecutiveFailures by viewModel.consecutiveFailures.collectAsStateWithLifecycle()
     val isSyncing by viewModel.isSyncing.collectAsStateWithLifecycle()
-    val syncDisplayStatus by viewModel.syncDisplayStatus.collectAsStateWithLifecycle()
+    val syncDisplayStatus = queuePresentation.displayStatus(isSyncing, apiHealth)
     val syncLogs by viewModel.syncLogs.collectAsStateWithLifecycle()
     val autoIngestLive by viewModel.autoIngestLiveReadings.collectAsStateWithLifecycle()
     val selectedModalItem by viewModel.selectedQueueItemForPreview.collectAsStateWithLifecycle()
@@ -176,7 +177,7 @@ fun HomeScreen(
     com.example.ui.components.PatientAdaptiveScaffold(
         modifier = modifier,
         selectedTab = selectedTab,
-        pendingCount = pendingCount,
+        pendingCount = queuePresentation?.pendingCount,
         onSelect = { selectedTab = it },
         snackbarHost = { SnackbarHost(snackbarHostState) },
         header = {

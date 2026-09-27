@@ -24,6 +24,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 
 enum class SyncDisplayStatus {
+    LOADING,
     SYNCING,
     OFFLINE,
     FULLY_SYNCED,
@@ -46,6 +47,7 @@ fun SyncStatusIndicator(
 ) {
     val syncing = syncStatus == SyncDisplayStatus.SYNCING
     val title = when (syncStatus) {
+        SyncDisplayStatus.LOADING -> "Carregando fila…"
         SyncDisplayStatus.SYNCING -> "Enviando registros"
         SyncDisplayStatus.OFFLINE -> "Não foi possível acessar o serviço de envio"
         SyncDisplayStatus.FULLY_SYNCED -> "Envio de dados"
@@ -54,6 +56,7 @@ fun SyncStatusIndicator(
         SyncDisplayStatus.AUTH_REQUIRED -> "Envios pausados: acesso não autorizado"
     }
     val description = when (syncStatus) {
+        SyncDisplayStatus.LOADING -> "Aguarde a consulta dos registros salvos no aplicativo."
         SyncDisplayStatus.SYNCING -> "Aguarde enquanto o aplicativo tenta enviar os registros."
         SyncDisplayStatus.OFFLINE -> "Confira a conexão do celular com a internet e tente novamente. O serviço também pode estar indisponível."
         SyncDisplayStatus.FULLY_SYNCED -> "A fila exibida não tem envios pendentes. Isso não confirma o recebimento pela equipe de saúde."
@@ -77,10 +80,10 @@ fun SyncStatusIndicator(
                 Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                 Text(description, style = MaterialTheme.typography.bodyLarge)
             }
-            if (syncing) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-            if (pendingCount > 0) Text("Aguardando envio: $pendingCount", style = MaterialTheme.typography.bodyLarge)
-            if (failedCount > 0) Text("Registros com falha no envio: $failedCount", style = MaterialTheme.typography.bodyLarge)
-            if (syncStatus != SyncDisplayStatus.FULLY_SYNCED || pendingCount > 0 || failedCount > 0) {
+            if (syncing || syncStatus == SyncDisplayStatus.LOADING) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            if (syncStatus != SyncDisplayStatus.LOADING && pendingCount > 0) Text("Aguardando envio: $pendingCount", style = MaterialTheme.typography.bodyLarge)
+            if (syncStatus != SyncDisplayStatus.LOADING && failedCount > 0) Text("Registros com falha no envio: $failedCount", style = MaterialTheme.typography.bodyLarge)
+            if (syncStatus != SyncDisplayStatus.LOADING && (syncStatus != SyncDisplayStatus.FULLY_SYNCED || pendingCount > 0 || failedCount > 0)) {
                 Button(
                     onClick = if ((failedCount > 0 || syncStatus == SyncDisplayStatus.AUTH_REQUIRED) && onRetryAll != null) onRetryAll else onTriggerSync,
                     enabled = !syncing,

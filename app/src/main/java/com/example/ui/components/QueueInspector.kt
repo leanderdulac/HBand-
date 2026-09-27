@@ -26,7 +26,7 @@ fun QueueInspector(
     pendingCount: Int,
     syncedCount: Int,
     failedCount: Int,
-    queueItems: List<IngestQueueEntity>,
+    queueItems: List<IngestQueueEntity>?,
     syncLogs: List<SyncLogEntry>,
     isSyncing: Boolean,
     onSyncNow: () -> Unit,
@@ -40,6 +40,21 @@ fun QueueInspector(
     p1LocationHint: String? = null,
     modifier: Modifier = Modifier,
 ) {
+    // Leave the loaded composition entirely, including any remembered removal dialog.
+    // No queue operation is offered until a fresh query response is available.
+    if (queueItems == null) {
+        Column(
+            modifier.fillMaxSize().verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Text("Envios", style = MaterialTheme.typography.headlineMedium)
+            SyncStatusIndicator(SyncDisplayStatus.LOADING, 0, 0, 0, onSyncNow)
+            PatientSection("Ver registros da fila") {
+                Text("Aguarde a consulta dos registros salvos no aplicativo.", style = MaterialTheme.typography.bodyLarge)
+            }
+        }
+        return
+    }
     var removal by remember { mutableStateOf<QueueRemoval?>(null) }
     val ordered = remember(queueItems) {
         queueItems.sortedWith(compareBy<IngestQueueEntity> {

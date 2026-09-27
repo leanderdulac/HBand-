@@ -43,7 +43,6 @@ import kotlinx.coroutines.launch
 import androidx.lifecycle.asFlow
 import androidx.work.WorkManager
 
-import com.example.ui.components.SyncDisplayStatus
 import com.example.ui.components.SyncLogEntry
 import com.example.util.HrNotificationHelper
 import com.example.worker.HBandWorkScheduler
@@ -121,33 +120,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             initialValue = emptyList()
         )
 
-    val pendingCount: StateFlow<Int> = allQueueItems.combine(MutableStateFlow(0)) { items, _ ->
-        items.count { it.status == QueueStatus.PENDING.name }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
-
-    val syncedCount: StateFlow<Int> = allQueueItems.combine(MutableStateFlow(0)) { items, _ ->
-        items.count { it.status == QueueStatus.SYNCED.name }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
+    // Dedicated screen observation: legacy diagnostic flows must not retain UI readiness.
+    val queuePresentation = repository.allQueueItems.queuePresentationState(viewModelScope)
 
     val failedCount: StateFlow<Int> = allQueueItems.combine(MutableStateFlow(0)) { items, _ ->
         items.count { it.status == QueueStatus.FAILED.name }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
-
-    val syncDisplayStatus: StateFlow<SyncDisplayStatus> = combine(
-        isSyncing,
-        apiHealth,
-        pendingCount,
-        allQueueItems
-    ) { syncing, health, pending, items ->
-        when {
-            syncing -> SyncDisplayStatus.SYNCING
-            items.any(com.example.data.ingest.QueueAuthorization::isBlocked) -> SyncDisplayStatus.AUTH_REQUIRED
-            !health.isOnline -> SyncDisplayStatus.OFFLINE
-            items.any { it.status == QueueStatus.FAILED.name } -> SyncDisplayStatus.FAILED
-            pending > 0 -> SyncDisplayStatus.PENDING_QUEUE
-            else -> SyncDisplayStatus.FULLY_SYNCED
-        }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), SyncDisplayStatus.FULLY_SYNCED)
 
     val syncLogs: StateFlow<List<SyncLogEntry>> = combine(
         WorkManager.getInstance(application).getWorkInfosByTagLiveData("hband_sync_worker").asFlow(),

@@ -14,7 +14,7 @@ import androidx.compose.ui.unit.dp
 @Composable
 internal fun PatientAdaptiveScaffold(
     selectedTab: Int,
-    pendingCount: Int,
+    pendingCount: Int?,
     onSelect: (Int) -> Unit,
     modifier: Modifier = Modifier,
     snackbarHost: @Composable () -> Unit = {},

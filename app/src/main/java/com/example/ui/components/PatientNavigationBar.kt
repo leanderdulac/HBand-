@@ -36,7 +36,7 @@ private val destinations = listOf(
 )
 
 @Composable
-internal fun PatientNavigationRail(selectedTab: Int, pendingCount: Int, onSelect: (Int) -> Unit) {
+internal fun PatientNavigationRail(selectedTab: Int, pendingCount: Int?, onSelect: (Int) -> Unit) {
     val style = MaterialTheme.typography.labelLarge
     val measurer = rememberTextMeasurer()
     val density = LocalDensity.current
@@ -68,7 +68,7 @@ internal fun PatientNavigationRail(selectedTab: Int, pendingCount: Int, onSelect
 }
 
 @Composable
-internal fun PatientNavigationBar(selectedTab: Int, pendingCount: Int, onSelect: (Int) -> Unit) {
+internal fun PatientNavigationBar(selectedTab: Int, pendingCount: Int?, onSelect: (Int) -> Unit) {
     val measurer = rememberTextMeasurer()
     val labelStyle = MaterialTheme.typography.labelMedium
     val density = LocalDensity.current
@@ -141,23 +141,24 @@ internal fun PatientNavigationBar(selectedTab: Int, pendingCount: Int, onSelect:
 }
 
 @Composable
-private fun DestinationIcon(index: Int, pendingCount: Int) {
+private fun DestinationIcon(index: Int, pendingCount: Int?) {
     BadgedBox(badge = { PendingDestinationBadge(index, pendingCount) }) {
         Icon(destinations[index].icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
 @Composable
-private fun PendingDestinationBadge(index: Int, pendingCount: Int) {
-    if (index == 3 && pendingCount > 0) Badge(Modifier.clearAndSetSemantics {}) {
+private fun PendingDestinationBadge(index: Int, pendingCount: Int?) {
+    if (index == 3 && pendingCount != null && pendingCount > 0) Badge(Modifier.clearAndSetSemantics {}) {
         Text(if (pendingCount > 99) "99+" else pendingCount.toString())
     }
 }
 
 // The visible badge is abbreviated; assistive technology receives the complete local count.
-private fun Modifier.pendingDescription(index: Int, pendingCount: Int): Modifier =
+private fun Modifier.pendingDescription(index: Int, pendingCount: Int?): Modifier =
     if (index == 3) semantics {
         stateDescription = when (pendingCount) {
+            null -> "Carregando fila do aplicativo"
             0 -> "Sem registros pendentes no aplicativo"
             1 -> "1 registro pendente no aplicativo"
             else -> "$pendingCount registros pendentes no aplicativo"
