@@ -18,24 +18,26 @@ internal class PatientWellnessActions(
         failure = "Não foi possível confirmar a exclusão dos registros de água de hoje. Confira o total antes de tentar novamente.",
     ) { records.resetTodayHydration() }
 
-    suspend fun saveBreathingSession(durationSeconds: Int) {
+    suspend fun saveBreathingSession(durationSeconds: Int, onResult: (Boolean) -> Unit = {}) {
         if (durationSeconds <= 0) return
         perform(
             success = "Tempo de respiração salvo neste celular: ${durationSeconds / 60} min ${durationSeconds % 60} s.",
             failure = "Não foi possível confirmar o registro de respiração neste celular. Confira o tempo total salvo.",
+            onResult = onResult,
         ) { records.saveBreathingSession(durationSeconds) }
     }
 
-    private suspend fun perform(success: String, failure: String, write: suspend () -> Unit) {
-        try {
+    private suspend fun perform(success: String, failure: String, onResult: (Boolean) -> Unit = {}, write: suspend () -> Unit) {
+        val saved = try {
             write()
+            true
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {
-            notify(failure, true)
-            return
+            false
         }
-        // A notification failure must not be misreported as a storage failure.
-        notify(success, false)
+        // Report the write before notifying. Neither callback belongs to the storage catch.
+        onResult(saved)
+        notify(if (saved) success else failure, !saved)
     }
 }

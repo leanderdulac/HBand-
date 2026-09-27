@@ -223,6 +223,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         hydrationDao, breathingDao, com.example.util.localCalendarChanges(application)
     )
     private val wellnessActions = PatientWellnessActions(localWellness, ::showNotification)
+    private val breathingSave = PatientBreathingSave(viewModelScope, wellnessActions::saveBreathingSession)
+    val breathingSaveState = breathingSave.state
 
     val userProfile: StateFlow<com.example.data.local.UserProfileEntity?> = userProfileDao.getUserProfileFlow()
         .stateIn(
@@ -262,12 +264,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun saveBreathingSession(durationSeconds: Int) {
-        if (durationSeconds <= 0) return
-        viewModelScope.launch {
-            wellnessActions.saveBreathingSession(durationSeconds)
-        }
-    }
+    fun saveBreathingSession(token: String, durationSeconds: Int) = breathingSave.save(token, durationSeconds)
 
     fun generateGeminiInsight() {
         viewModelScope.launch {

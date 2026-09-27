@@ -36,7 +36,7 @@ class PatientTabContinuityTest {
             MyApplicationTheme {
                 PatientTabContent(tab.intValue) {
                     if (tab.intValue == 0) Column(Modifier.verticalScroll(rememberScrollState())) {
-                        BreathingExerciseCard(0, { saves++ })
+                        BreathingExerciseCard(0, { _, _ -> saves++ })
                     } else Text("Outra aba")
                 }
             }

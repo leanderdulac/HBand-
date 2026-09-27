@@ -31,6 +31,8 @@ import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SelfImprovement
 import androidx.compose.material3.Button
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -65,6 +67,9 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlinx.coroutines.delay
+import com.example.ui.BreathingSaveState
+import com.example.ui.BreathingSaveStatus
+import java.util.UUID
 
 enum class BreathingPhase(val label: String, val durationSeconds: Int, val color: Color) {
     INHALE("Inspire profundamente...", 4, Color(0xFF0288D1)),
@@ -76,8 +81,9 @@ enum class BreathingPhase(val label: String, val durationSeconds: Int, val color
 @Composable
 fun BreathingExerciseCard(
     totalBreathingSeconds: Int?,
-    onSaveSession: (Int) -> Unit,
-    modifier: Modifier = Modifier
+    onSaveSession: (String, Int) -> Unit,
+    modifier: Modifier = Modifier,
+    saveState: BreathingSaveState? = null,
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -87,6 +93,52 @@ fun BreathingExerciseCard(
     var currentPhase by rememberSaveable { mutableStateOf(BreathingPhase.INHALE) }
     var phaseSecondsRemaining by rememberSaveable { mutableIntStateOf(BreathingPhase.INHALE.durationSeconds) }
     var sessionTotalSeconds by rememberSaveable { mutableIntStateOf(0) }
+    var requestToken by rememberSaveable { mutableStateOf<String?>(null) }
+    var confirmRetry by remember { mutableStateOf(false) }
+    var confirmDiscard by remember { mutableStateOf(false) }
+    val receipt = saveState?.takeIf { it.token == requestToken && it.seconds == sessionTotalSeconds }
+    val saving = requestToken != null && receipt?.status == BreathingSaveStatus.SAVING
+    val unconfirmed = requestToken != null && receipt?.status != BreathingSaveStatus.SAVED && !saving
+    val anySaving = saveState?.status == BreathingSaveStatus.SAVING
+
+    fun clearDraft() {
+        isRunning = false
+        sessionTotalSeconds = 0
+        phaseSecondsRemaining = BreathingPhase.INHALE.durationSeconds
+        currentPhase = BreathingPhase.INHALE
+        requestToken = null
+    }
+
+    fun submit() {
+        if (sessionTotalSeconds <= 0 || anySaving) return
+        isRunning = false
+        val token = UUID.randomUUID().toString()
+        requestToken = token
+        onSaveSession(token, sessionTotalSeconds)
+    }
+
+    LaunchedEffect(receipt) {
+        if (receipt?.status == BreathingSaveStatus.SAVED) clearDraft()
+    }
+
+    if (confirmRetry && unconfirmed) {
+        AlertDialog(
+            onDismissRequest = { confirmRetry = false },
+            title = { Text("Conferir antes de tentar novamente") },
+            text = { Text("O tempo pode já ter sido salvo. Confira o total salvo. Uma nova tentativa pode duplicar esse tempo.") },
+            confirmButton = { TextButton(onClick = { confirmRetry = false; submit() }, enabled = !anySaving) { Text("Conferi; salvar novamente") } },
+            dismissButton = { TextButton(onClick = { confirmRetry = false }) { Text("Voltar") } },
+        )
+    }
+    if (confirmDiscard && unconfirmed) {
+        AlertDialog(
+            onDismissRequest = { confirmDiscard = false },
+            title = { Text("Encerrar sem salvar novamente?") },
+            text = { Text("Isso descarta somente o tempo deste exercício na tela. Um registro que já tenha sido salvo continuará no celular.") },
+            confirmButton = { TextButton(onClick = { confirmDiscard = false; clearDraft() }, enabled = !anySaving) { Text("Descartar rascunho") } },
+            dismissButton = { TextButton(onClick = { confirmDiscard = false }) { Text("Voltar") } },
+        )
+    }
 
     val vibrator = remember(context) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -126,6 +178,7 @@ fun BreathingExerciseCard(
             triggerVibrationForPhase(currentPhase)
             while (isRunning) {
                 delay(1000L)
+                if (!isRunning || requestToken != null) break
                 sessionTotalSeconds++
                 phaseSecondsRemaining--
 
@@ -245,7 +298,7 @@ fun BreathingExerciseCard(
             Spacer(modifier = Modifier.height(20.dp))
 
             Text(
-                "Para guardar o tempo, toque em Concluir e salvar antes de sair desta tela.",
+                "Para guardar o tempo, toque em Concluir e salvar e aguarde a confirmação.",
                 style = MaterialTheme.typography.bodyLarge,
             )
             Spacer(modifier = Modifier.height(16.dp))
@@ -336,7 +389,8 @@ fun BreathingExerciseCard(
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Button(
-                    onClick = { isRunning = !isRunning },
+                    onClick = { if (requestToken == null) isRunning = !isRunning },
+                    enabled = requestToken == null && !anySaving,
                     shape = RoundedCornerShape(18.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = MaterialTheme.colorScheme.primary
@@ -358,14 +412,17 @@ fun BreathingExerciseCard(
                 }
 
                 if (sessionTotalSeconds > 0) {
+                    if (saving || unconfirmed) Text(
+                        text = if (saving) "Salvando o tempo deste exercício…" else "Gravação não confirmada. O tempo deste exercício foi mantido. Confira o total salvo antes de decidir o que fazer.",
+                        modifier = Modifier.testTag("breathing_save_feedback"),
+                        style = MaterialTheme.typography.bodyLarge,
+                    )
                     Button(
                         onClick = {
-                            isRunning = false
-                            onSaveSession(sessionTotalSeconds)
-                            sessionTotalSeconds = 0
-                            phaseSecondsRemaining = BreathingPhase.INHALE.durationSeconds
-                            currentPhase = BreathingPhase.INHALE
+                            if (requestToken == null) submit()
+                            else if (unconfirmed) confirmRetry = true
                         },
+                        enabled = !anySaving && receipt?.status != BreathingSaveStatus.SAVED,
                         shape = RoundedCornerShape(18.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                         modifier = Modifier
@@ -379,10 +436,15 @@ fun BreathingExerciseCard(
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = "Concluir e salvar",
+                            text = if (saving) "Salvando…" else if (unconfirmed) "Tentar salvar novamente" else "Concluir e salvar",
                             style = MaterialTheme.typography.labelLarge
                         )
                     }
+                    if (unconfirmed) OutlinedButton(
+                        onClick = { confirmDiscard = true },
+                        enabled = !anySaving,
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp),
+                    ) { Text("Encerrar sem salvar novamente") }
                 }
             }
         }

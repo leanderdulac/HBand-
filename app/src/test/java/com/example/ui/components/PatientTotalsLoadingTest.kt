@@ -55,7 +55,7 @@ class PatientTotalsLoadingTest {
     @Test fun breathing_loading_is_distinct_from_confirmed_zero() {
         val seconds = mutableStateOf<Int?>(null)
         compose.setContent { MyApplicationTheme { Column(Modifier.verticalScroll(rememberScrollState())) {
-            BreathingExerciseCard(seconds.value, {})
+            BreathingExerciseCard(seconds.value, { _, _ -> })
         } } }
         compose.onNodeWithTag("total_breathing_duration_badge").assertTextEquals("Carregando tempo salvo…")
         compose.runOnIdle { seconds.value = 0 }

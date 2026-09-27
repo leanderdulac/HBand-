@@ -139,6 +139,7 @@ fun HomeScreen(
 
     val todayHydrationMl by viewModel.todayHydrationMl.collectAsStateWithLifecycle()
     val totalBreathingSeconds by viewModel.totalBreathingSeconds.collectAsStateWithLifecycle()
+    val breathingSaveState by viewModel.breathingSaveState.collectAsStateWithLifecycle()
 
     val sharePreview: PatientSharePreviewViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
     val activeShareData = sharePreview.data
@@ -219,7 +220,8 @@ fun HomeScreen(
                     onAddWater = { viewModel.addWaterIntake(it) },
                     onResetHydration = { viewModel.resetTodayHydration() },
                     totalBreathingSeconds = totalBreathingSeconds,
-                    onSaveBreathingSession = { viewModel.saveBreathingSession(it) },
+                    onSaveBreathingSession = viewModel::saveBreathingSession,
+                    breathingSaveState = breathingSaveState,
                     onGenerateShareData = sharePreview::open,
                     onShowHistory = { selectedTab = 1 },
                     capabilities = deviceCapabilities,
@@ -382,7 +384,8 @@ private fun DashboardTab(
     onAddWater: (Int) -> Unit = {},
     onResetHydration: () -> Unit = {},
     totalBreathingSeconds: Int? = null,
-    onSaveBreathingSession: (Int) -> Unit = {},
+    onSaveBreathingSession: (String, Int) -> Unit = { _, _ -> },
+    breathingSaveState: BreathingSaveState? = null,
     onGenerateShareData: (com.example.util.ShareProgressData) -> Unit = {},
     shareSensorMetrics: List<com.example.data.local.HBandSensorMetricEntity>? = null,
     onShowHistory: () -> Unit = {},
@@ -516,6 +519,7 @@ private fun DashboardTab(
         com.example.ui.components.BreathingExerciseCard(
             totalBreathingSeconds = totalBreathingSeconds,
             onSaveSession = onSaveBreathingSession,
+            saveState = breathingSaveState,
             modifier = Modifier.fillMaxWidth()
         )
 

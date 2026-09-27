@@ -118,7 +118,7 @@ class PatientVisualReviewTest {
 
     @Test fun breathing_large_text() = capture("breathing_large_text", 1.6f) {
         Column(Modifier.verticalScroll(rememberScrollState()).padding(16.dp)) {
-            BreathingExerciseCard(120, {})
+            BreathingExerciseCard(120, { _, _ -> })
         }
     }
 

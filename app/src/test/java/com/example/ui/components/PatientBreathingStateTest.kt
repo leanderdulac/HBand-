@@ -4,6 +4,9 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.mutableStateOf
+import com.example.ui.BreathingSaveState
+import com.example.ui.BreathingSaveStatus
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.*
@@ -28,6 +31,7 @@ import org.robolectric.annotation.Config
 class PatientBreathingStateTest {
     @get:Rule val compose = createComposeRule()
     private val saved = mutableListOf<Int>()
+    private val receipt = mutableStateOf<BreathingSaveState?>(null)
 
     @Test fun leaving_the_visible_app_pauses_the_draft_and_returning_requires_a_new_tap() {
         val owner = object : LifecycleOwner {
@@ -100,7 +104,10 @@ class PatientBreathingStateTest {
             CompositionLocalProvider(LocalLifecycleOwner provides (owner ?: LocalLifecycleOwner.current)) {
                 MyApplicationTheme {
                     Column(Modifier.verticalScroll(rememberScrollState())) {
-                        BreathingExerciseCard(120, { saved += it })
+                        BreathingExerciseCard(120, { token, seconds ->
+                            saved += seconds
+                            receipt.value = BreathingSaveState(token, seconds, BreathingSaveStatus.SAVED)
+                        }, saveState = receipt.value)
                     }
                 }
             }

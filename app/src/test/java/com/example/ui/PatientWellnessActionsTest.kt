@@ -178,6 +178,40 @@ class PatientWellnessActionsTest {
         assertTrue(notices.isEmpty())
     }
 
+    @Test fun breathing_receipt_precedes_notice_and_confirms_real_room_write() = runBlocking {
+        val events = mutableListOf<String>()
+        val action = PatientWellnessActions(records) { _, _ -> events += "notice"; throw IllegalStateException("notice") }
+        try {
+            action.saveBreathingSession(75) { saved -> events += "result:$saved" }
+            fail("Expected notification exception")
+        } catch (_: IllegalStateException) { }
+        assertEquals(listOf("result:true", "notice"), events)
+        assertEquals(75, db.breathingDao().getAllSessionsFlow().first().single().durationSeconds)
+    }
+
+    @Test fun breathing_post_commit_exception_reports_uncertain_before_notice_without_retry() = runBlocking {
+        afterWrite = true
+        failure = IllegalStateException("synthetic-private-detail")
+        val events = mutableListOf<String>()
+        val action = PatientWellnessActions(records) { _, error -> events += "notice:$error" }
+        action.saveBreathingSession(75) { saved -> events += "result:$saved" }
+        assertEquals(listOf("result:false", "notice:true"), events)
+        assertEquals(1, calls)
+        assertEquals(75, db.breathingDao().getAllSessionsFlow().first().single().durationSeconds)
+    }
+
+    @Test fun result_callback_failure_is_not_reclassified_as_storage_failure() = runBlocking {
+        val failure = IllegalStateException("receipt")
+        val results = mutableListOf<Boolean>()
+        try {
+            actions.saveBreathingSession(75) { results += it; throw failure }
+            fail("Expected callback failure")
+        } catch (actual: IllegalStateException) { assertSame(failure, actual) }
+        assertEquals(listOf(true), results)
+        assertTrue(notices.isEmpty())
+        assertEquals(75, db.breathingDao().getAllSessionsFlow().first().single().durationSeconds)
+    }
+
     @Test fun notification_failure_is_not_reclassified_or_repeated_after_successful_write() = runBlocking {
         val notificationFailure = IllegalStateException("synthetic notification failure")
         var notifications = 0
