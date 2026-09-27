@@ -91,7 +91,6 @@ fun HomeScreen(
     val isScanning by viewModel.isScanning.collectAsStateWithLifecycle()
     val scanFailure by viewModel.scanFailure.collectAsStateWithLifecycle()
     val latestTelemetry by viewModel.latestTelemetry.collectAsStateWithLifecycle()
-    val allSensorMetrics by viewModel.allSensorMetrics.collectAsStateWithLifecycle()
     val shareSensorMetrics by viewModel.shareSensorMetrics.collectAsStateWithLifecycle()
     val queuePresentation by viewModel.queuePresentation.collectAsStateWithLifecycle()
     val allQueueItems = queuePresentation?.items
@@ -199,7 +198,7 @@ fun HomeScreen(
                     apiHealth = apiHealth,
                     connectedDevice = connectedDevice,
                     latestTelemetry = latestTelemetry,
-                    sensorMetrics = allSensorMetrics,
+                    sensorMetrics = shareSensorMetrics,
                     shareSensorMetrics = shareSensorMetrics,
                     autoIngestLive = autoIngestLive,
                     onTriggerSync = { viewModel.triggerWorkManagerSync() },
@@ -253,7 +252,7 @@ fun HomeScreen(
                 )
 
                 1 -> com.example.ui.components.RechartsSensorDashboard(
-                    sensorMetrics = allSensorMetrics,
+                    sensorMetrics = shareSensorMetrics,
                     onSimulateBatch = { viewModel.enqueueBatchSimulated(it) }
                 )
 
@@ -365,7 +364,7 @@ private fun DashboardTab(
     apiHealth: com.example.data.repository.ApiHealthState,
     connectedDevice: com.example.data.model.HBandDevice?,
     latestTelemetry: com.example.data.model.HBandTelemetry?,
-    sensorMetrics: List<com.example.data.local.HBandSensorMetricEntity>,
+    sensorMetrics: List<com.example.data.local.HBandSensorMetricEntity>?,
     autoIngestLive: Boolean,
     onTriggerSync: () -> Unit,
     onRefreshHealth: () -> Unit,

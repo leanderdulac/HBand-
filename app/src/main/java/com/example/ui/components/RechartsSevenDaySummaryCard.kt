@@ -33,13 +33,13 @@ import com.example.data.local.HBandSensorMetricEntity
 
 @Composable
 fun RechartsSevenDaySummaryCard(
-    metrics: List<HBandSensorMetricEntity>,
+    metrics: List<HBandSensorMetricEntity>?,
     modifier: Modifier = Modifier,
 ) {
     val now by rememberHistoryTime()
-    val days = remember(metrics, now) { buildSavedWeek(metrics, now) }
+    val days = remember(metrics, now) { metrics?.let { buildSavedWeek(it, now) } }
     var daysAgo by rememberSaveable { mutableIntStateOf(0) }
-    val selectedDay = days[6 - daysAgo]
+    val selectedDay = days?.get(6 - daysAgo)
 
     Card(modifier.fillMaxWidth().testTag("recharts_7day_summary_card"), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
         Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -48,13 +48,17 @@ fun RechartsSevenDaySummaryCard(
                 "Registros salvos neste aparelho. As datas seguem o horário do aparelho.",
                 style = MaterialTheme.typography.bodyLarge,
             )
-            Text(
-                selectedDay.dateLabel,
-                style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.testTag("history_selected_date").semantics { liveRegion = LiveRegionMode.Polite },
-            )
-            HistoryDayControls(daysAgo, { daysAgo++ }, { daysAgo-- }, { daysAgo = 0 })
-            SavedDayValues(selectedDay)
+            if (selectedDay == null) {
+                Text("Carregando registros…", style = MaterialTheme.typography.bodyLarge)
+            } else {
+                Text(
+                    selectedDay.dateLabel,
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.testTag("history_selected_date").semantics { liveRegion = LiveRegionMode.Polite },
+                )
+                HistoryDayControls(daysAgo, { daysAgo++ }, { daysAgo-- }, { daysAgo = 0 })
+                SavedDayValues(selectedDay)
+            }
         }
     }
 }

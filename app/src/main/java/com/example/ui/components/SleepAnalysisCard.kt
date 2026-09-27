@@ -50,16 +50,18 @@ fun analyzeSleepMetrics(
 }
 
 @Composable
-fun SleepAnalysisCard(metrics: List<HBandSensorMetricEntity>, modifier: Modifier = Modifier) {
+fun SleepAnalysisCard(metrics: List<HBandSensorMetricEntity>?, modifier: Modifier = Modifier) {
     val now by rememberHistoryTime()
-    val saved = remember(metrics, now) { analyzeSleepMetrics(metrics, now) }
+    val saved = remember(metrics, now) { metrics?.let { analyzeSleepMetrics(it, now) } }
     Card(
         modifier.fillMaxWidth().testTag("sleep_analysis_card"),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
     ) {
         Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Text("Meu registro de sono", style = MaterialTheme.typography.titleLarge)
-            if (saved == null) {
+            if (metrics == null) {
+                Text("Carregando registros de sono…", style = MaterialTheme.typography.bodyLarge)
+            } else if (saved == null) {
                 Text("Sem registro de sono disponível nos últimos 7 dias.", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.testTag("sleep_waiting_empty_state"))
                 Text("Conecte seu relógio. Depois, em Ajustes, abra Opções do relógio para receber o histórico.", style = MaterialTheme.typography.bodyLarge)
             } else {

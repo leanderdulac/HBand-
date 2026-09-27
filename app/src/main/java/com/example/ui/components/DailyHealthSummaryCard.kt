@@ -18,16 +18,20 @@ import com.example.data.local.HBandSensorMetricEntity
 
 @Composable
 fun DailyHealthSummaryCard(
-    metrics: List<HBandSensorMetricEntity>,
+    metrics: List<HBandSensorMetricEntity>?,
     modifier: Modifier = Modifier,
 ) {
     val now by rememberHistoryTime()
-    val today = remember(metrics, now) { buildSavedWeek(metrics, now).last() }
+    val today = remember(metrics, now) { metrics?.let { buildSavedWeek(it, now).last() } }
     Card(modifier.fillMaxWidth().testTag("daily_health_summary_card"), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
         Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Text("Registros de hoje", style = MaterialTheme.typography.titleLarge)
-            Text(today.dateLabel, style = MaterialTheme.typography.bodyLarge)
-            SavedDayValues(today)
+            if (today == null) {
+                Text("Carregando registros…", style = MaterialTheme.typography.bodyLarge)
+            } else {
+                Text(today.dateLabel, style = MaterialTheme.typography.bodyLarge)
+                SavedDayValues(today)
+            }
             Text(
                 "Tempo em atividade: indisponível. Os registros atuais não informam essa duração.",
                 style = MaterialTheme.typography.bodyMedium,

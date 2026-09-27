@@ -48,7 +48,7 @@ enum class ChartMetricType(val label: String) {
 
 @Composable
 fun RechartsSensorDashboard(
-    sensorMetrics: List<HBandSensorMetricEntity>,
+    sensorMetrics: List<HBandSensorMetricEntity>?,
     onSimulateBatch: (Int) -> Unit,
     modifier: Modifier = Modifier,
     isScrollable: Boolean = true,
@@ -58,9 +58,9 @@ fun RechartsSensorDashboard(
     var showGraph by rememberSaveable { mutableStateOf(false) }
     val now by rememberHistoryTime()
     val records = remember(sensorMetrics, selectedMetric, now) {
-        sensorMetrics.filter { it.timestampMillis > 0 && it.timestampMillis <= now }
-            .filter { savedMetricValue(it, selectedMetric) != null }
-            .sortedByDescending { it.timestampMillis }.take(15)
+        sensorMetrics?.filter { it.timestampMillis > 0 && it.timestampMillis <= now }
+            ?.filter { savedMetricValue(it, selectedMetric) != null }
+            ?.sortedByDescending { it.timestampMillis }?.take(15)
     }
     val columnModifier = if (isScrollable) modifier.fillMaxSize().verticalScroll(rememberScrollState())
         else modifier.fillMaxWidth()
@@ -95,7 +95,9 @@ fun RechartsSensorDashboard(
                         if (selectedMetric == ChartMetricType.HEART_RATE) "Batimentos por minuto" else selectedMetric.label,
                         style = MaterialTheme.typography.titleLarge,
                     )
-                    if (records.isEmpty()) {
+                    if (records == null) {
+                        Text("Carregando registros…", style = MaterialTheme.typography.bodyLarge)
+                    } else if (records.isEmpty()) {
                         Text("Sem medições disponíveis", style = MaterialTheme.typography.titleMedium)
                         Text(
                             "Ainda não há registros com data e valor disponíveis para esta medição. Confira a conexão na aba Relógio.",
