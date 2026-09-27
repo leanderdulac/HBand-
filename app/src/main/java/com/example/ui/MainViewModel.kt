@@ -222,6 +222,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val localWellness = com.example.data.local.LocalWellnessRecords(
         hydrationDao, breathingDao, com.example.util.localCalendarChanges(application)
     )
+    private val wellnessActions = PatientWellnessActions(localWellness, ::showNotification)
 
     val userProfile: StateFlow<com.example.data.local.UserProfileEntity?> = userProfileDao.getUserProfileFlow()
         .stateIn(
@@ -251,23 +252,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun addWaterIntake(amountMl: Int) {
         viewModelScope.launch {
-            localWellness.addWaterIntake(amountMl)
-            showNotification("Mais $amountMl mL de água registrados neste celular.")
+            wellnessActions.addWaterIntake(amountMl)
         }
     }
 
     fun resetTodayHydration() {
         viewModelScope.launch {
-            localWellness.resetTodayHydration()
-            showNotification("Registros de água de hoje apagados neste celular.")
+            wellnessActions.resetTodayHydration()
         }
     }
 
     fun saveBreathingSession(durationSeconds: Int) {
         if (durationSeconds <= 0) return
         viewModelScope.launch {
-            localWellness.saveBreathingSession(durationSeconds)
-            showNotification("Tempo de respiração salvo neste celular: ${durationSeconds / 60} min ${durationSeconds % 60} s.")
+            wellnessActions.saveBreathingSession(durationSeconds)
         }
     }
 
