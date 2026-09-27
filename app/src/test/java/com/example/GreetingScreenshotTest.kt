@@ -27,6 +27,7 @@ class GreetingScreenshotTest {
           apiHealth = com.example.data.repository.ApiHealthState(
             isOnline = true,
             latencyMs = 45,
+            lastCheckTime = 1790506800000,
             message = "OK"
           ),
           onRefreshHealth = {}

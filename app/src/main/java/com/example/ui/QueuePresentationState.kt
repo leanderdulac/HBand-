@@ -30,7 +30,7 @@ internal fun QueuePresentationState?.displayStatus(syncing: Boolean, health: Api
     this == null -> SyncDisplayStatus.LOADING
     syncing -> SyncDisplayStatus.SYNCING
     items.any(QueueAuthorization::isBlocked) -> SyncDisplayStatus.AUTH_REQUIRED
-    !health.isOnline -> SyncDisplayStatus.OFFLINE
+    health.lastCheckTime > 0 && !health.isOnline -> SyncDisplayStatus.OFFLINE
     failedCount > 0 -> SyncDisplayStatus.FAILED
     pendingCount > 0 -> SyncDisplayStatus.PENDING_QUEUE
     else -> SyncDisplayStatus.FULLY_SYNCED

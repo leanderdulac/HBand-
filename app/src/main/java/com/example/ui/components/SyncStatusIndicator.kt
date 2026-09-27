@@ -49,7 +49,7 @@ fun SyncStatusIndicator(
     val title = when (syncStatus) {
         SyncDisplayStatus.LOADING -> "Carregando fila…"
         SyncDisplayStatus.SYNCING -> "Enviando registros"
-        SyncDisplayStatus.OFFLINE -> "Não foi possível acessar o serviço de envio"
+        SyncDisplayStatus.OFFLINE -> "Última verificação do serviço falhou"
         SyncDisplayStatus.FULLY_SYNCED -> "Envio de dados"
         SyncDisplayStatus.PENDING_QUEUE -> "Há registros aguardando envio"
         SyncDisplayStatus.FAILED -> "Não foi possível enviar alguns registros"
@@ -58,7 +58,7 @@ fun SyncStatusIndicator(
     val description = when (syncStatus) {
         SyncDisplayStatus.LOADING -> "Aguarde a consulta dos registros salvos no aplicativo."
         SyncDisplayStatus.SYNCING -> "Aguarde enquanto o aplicativo tenta enviar os registros."
-        SyncDisplayStatus.OFFLINE -> "Confira a conexão do celular com a internet e tente novamente. O serviço também pode estar indisponível."
+        SyncDisplayStatus.OFFLINE -> "Confira a conexão e a configuração do serviço. Se precisar, peça ajuda à equipe responsável pelo aplicativo."
         SyncDisplayStatus.FULLY_SYNCED -> "A fila exibida não tem envios pendentes. Isso não confirma o recebimento pela equipe de saúde."
         SyncDisplayStatus.PENDING_QUEUE -> "Os registros continuam na fila do aplicativo. Você pode tentar enviá-los agora."
         SyncDisplayStatus.FAILED -> "Há registros que não puderam ser enviados. Confira os detalhes da falha antes de tentar novamente."

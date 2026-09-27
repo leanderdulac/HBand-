@@ -82,7 +82,7 @@ class QueuePresentationStateTest {
             errorMessage = "Falha de autenticação na API HealthTech (HTTP 401): denied")))
         assertEquals(SyncDisplayStatus.SYNCING, blocked.displayStatus(true, online))
         assertEquals(SyncDisplayStatus.AUTH_REQUIRED, blocked.displayStatus(false, ApiHealthState()))
-        assertEquals(SyncDisplayStatus.OFFLINE, QueuePresentationState(listOf(row)).displayStatus(false, ApiHealthState()))
+        assertEquals(SyncDisplayStatus.OFFLINE, QueuePresentationState(listOf(row)).displayStatus(false, ApiHealthState(lastCheckTime = 1234)))
         assertEquals(SyncDisplayStatus.LOADING, (null as QueuePresentationState?).displayStatus(true, online))
     }
 }
