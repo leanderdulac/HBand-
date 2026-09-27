@@ -22,6 +22,9 @@ import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import org.robolectric.shadows.ShadowDialog
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import java.io.File
 
 /** Production dialog and Android saved-state harness with simulated receipts only. */
 @RunWith(RobolectricTestRunner::class)
@@ -54,6 +57,31 @@ class PatientProfileSaveUiTest {
         val (token, row) = requests.last()
         receipt.value = ProfileSaveState(token, row.id, row.patientId, status)
     }
+    private fun captureExit(path: String) = compose.runOnIdle {
+        // Draw this exact dialog window: Roborazzi's multi-window capture can place
+        // the underlying editor on top, and View capture selects the Activity root.
+        val view = ShadowDialog.getLatestDialog().window!!.decorView
+        val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
+        view.draw(Canvas(bitmap))
+        File(path).outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        bitmap.recycle()
+    }
+    private fun assertExitWarningAndActions(height: Float) {
+        val layouts = mutableListOf<TextLayoutResult>()
+        compose.onNodeWithTag("profile_discard_explanation")
+            .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+        val layout = layouts.single()
+        assertFalse("Exit warning must keep every line", layout.hasVisualOverflow)
+        val scroll = compose.onNodeWithTag("profile_discard_scroll")
+        scroll.performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, 3000f) }
+        val viewport = scroll.fetchSemanticsNode().boundsInRoot
+        val text = compose.onNodeWithTag("profile_discard_explanation").fetchSemanticsNode()
+        assertTrue(text.positionInRoot.y + layout.getLineTop(layout.lineCount - 1) >= viewport.top - 1f)
+        assertTrue(text.positionInRoot.y + layout.getLineBottom(layout.lineCount - 1) <= viewport.bottom + 1f)
+        val keep = compose.onNodeWithTag("profile_continue_editing").assertIsDisplayed().assertIsEnabled().fetchSemanticsNode().boundsInRoot
+        val exit = compose.onNodeWithTag("profile_discard_changes").assertIsDisplayed().assertIsEnabled().fetchSemanticsNode().boundsInRoot
+        assertTrue(keep.top >= 0 && keep.bottom <= exit.top && exit.bottom <= height)
+    }
     @Test fun pending_write_keeps_edited_profile_open_and_blocks_actions() {
         content(); submit()
         compose.onNodeWithTag("btn_save_profile").assertIsNotEnabled().performClick()
@@ -64,6 +92,29 @@ class PatientProfileSaveUiTest {
             assertTrue(open.value)
             assertEquals(original.copy(fullName = "Nome corrigido"), requests.single().second)
         }
+    }
+    @Suppress("DEPRECATION")
+    @Test fun back_before_recomposition_cannot_close_an_unchanged_pending_profile() {
+        content()
+        compose.onNodeWithTag("btn_save_profile").performSemanticsAction(SemanticsActions.OnClick) { click ->
+            click()
+            ShadowDialog.getLatestDialog().onBackPressed()
+        }
+        compose.runOnIdle { assertTrue("Back must wait even before the next composition", open.value) }
+        result(ProfileSaveStatus.UNCONFIRMED)
+        compose.onNodeWithTag("profile_discard_dialog").assertDoesNotExist()
+    }
+    @Test
+    @Config(qualifiers = "w640dp-h320dp-mdpi")
+    fun short_landscape_exit_keeps_complete_uncertainty_warning() {
+        content(2f); submit(); result(ProfileSaveStatus.UNCONFIRMED)
+        compose.onNodeWithText("Cancelar").performClick()
+        compose.onNodeWithTag("profile_discard_dialog").assertIsDisplayed()
+        captureExit("build/profile-save-exit-short.png")
+        assertExitWarningAndActions(320f)
+        captureExit("build/profile-save-exit-short-scrolled.png")
+        compose.onNodeWithTag("profile_continue_editing").performClick()
+        compose.runOnIdle { assertTrue(open.value); assertEquals(1, requests.size) }
     }
     @Test fun room_emission_is_not_confirmation_and_only_matching_receipt_closes() {
         content(); submit()
@@ -156,10 +207,8 @@ class PatientProfileSaveUiTest {
         compose.onNodeWithText("Cancelar").performClick()
         compose.onNodeWithTag("profile_discard_dialog").assertIsDisplayed()
         // Explicitly capture the top Android window; multiple dialogs confuse root capture order.
-        ShadowDialog.getLatestDialog().window!!.decorView.captureRoboImage(filePath = "build/profile-save-exit-large.png")
-        val layouts = mutableListOf<TextLayoutResult>()
-        compose.onNodeWithText("A gravação anterior não foi confirmada.", substring = true)
-            .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
-        assertFalse("Exit warning must not truncate the saved-profile explanation", layouts.single().hasVisualOverflow)
+        captureExit("build/profile-save-exit-large.png")
+        assertExitWarningAndActions(740f)
+        captureExit("build/profile-save-exit-large-scrolled.png")
     }
 }

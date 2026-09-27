@@ -2,6 +2,7 @@ package com.example.ui.components
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.ScrollState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.KeyboardActions
@@ -96,7 +97,7 @@ private fun ProfileEditor(
         contact != initial.emergencyContact || notes != initial.medicalNotes
     val focusManager = LocalFocusManager.current
     val requestClose: () -> Unit = {
-        if (pending || receipt?.status == ProfileSaveStatus.SAVED) {
+        if (submissionPending || anySaving || receipt?.status == ProfileSaveStatus.SAVED) {
             // Back/outside taps cannot discard a write whose result is still pending.
         } else if (hasChanges || requestToken != null) {
             focusManager.clearFocus()
@@ -226,26 +227,36 @@ private fun ProfileEditorDialog(
 
 @Composable
 internal fun ProfileDiscardConfirmation(onContinueEditing: () -> Unit, onDiscard: () -> Unit, uncertainSave: Boolean = false) {
-    AlertDialog(
-        onDismissRequest = onContinueEditing,
-        modifier = Modifier.testTag("profile_discard_dialog"),
-        title = { Text(if (uncertainSave) "Fechar sem salvar novamente?" else "Sair sem salvar?") },
-        text = { Text(if (uncertainSave)
-            "A gravação anterior não foi confirmada. Fechar descarta somente as alterações desta tela; um perfil já salvo no celular será mantido."
-            else "Você alterou seu perfil. Se sair agora, essas alterações serão perdidas.") },
-        confirmButton = {
-            Button(
-                onClick = onContinueEditing,
-                modifier = Modifier.heightIn(min = 56.dp).testTag("profile_continue_editing"),
-            ) { Text("Continuar editando") }
-        },
-        dismissButton = {
-            TextButton(
-                onClick = onDiscard,
-                modifier = Modifier.heightIn(min = 56.dp).testTag("profile_discard_changes"),
-            ) { Text(if (uncertainSave) "Fechar edição" else "Sair sem salvar") }
-        },
-    )
+    Dialog(onDismissRequest = onContinueEditing, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Surface(
+            modifier = Modifier.widthIn(max = 560.dp).fillMaxWidth().padding(16.dp).testTag("profile_discard_dialog"),
+            shape = RoundedCornerShape(28.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        ) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(
+                    Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()).testTag("profile_discard_scroll"),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Text(if (uncertainSave) "Fechar sem salvar novamente?" else "Sair sem salvar?",
+                        style = MaterialTheme.typography.headlineSmall, modifier = Modifier.semantics { heading() })
+                    Text(if (uncertainSave)
+                        "A gravação anterior não foi confirmada. Fechar descarta somente as alterações desta tela; um perfil já salvo no celular será mantido."
+                        else "Você alterou seu perfil. Se sair agora, essas alterações serão perdidas.",
+                        style = MaterialTheme.typography.bodyLarge,
+                        modifier = Modifier.testTag("profile_discard_explanation"))
+                }
+                Button(
+                    onClick = onContinueEditing,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag("profile_continue_editing"),
+                ) { Text("Continuar editando") }
+                OutlinedButton(
+                    onClick = onDiscard,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag("profile_discard_changes"),
+                ) { Text(if (uncertainSave) "Fechar edição" else "Sair sem salvar") }
+            }
+        }
+    }
 }
 
 internal fun profileDecimal(value: String): Float? =

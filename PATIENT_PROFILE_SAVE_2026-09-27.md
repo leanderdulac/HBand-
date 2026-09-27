@@ -21,6 +21,12 @@ por um teste focal no primeiro candidato. A árvore do editor passa a usar key(i
 patientId), pois inputs de rememberSaveable não validam identidade já restaurada.
 Assim outro paciente não herda os campos/token anteriores; identidade igual mantém
 restauração. Não introduz fluxo operacional de troca de paciente.
+Testes focais adicionais reproduziram confirmação de descarte deixada pendente
+por Voltar antes da recomposição e aviso de saída truncado em paisagem/fonte2.
+O fechamento consulta a trava síncrona; a confirmação tem título/explicação
+roláveis e ações empilhadas fora da rolagem. Capturas da confirmação desenham a
+decorView exata da janela via Bitmap/Canvas no Robolectric, pois a captura de
+múltiplas janelas pelo harness colocava a janela de fundo sobre a confirmação.
 
 IDs somente leitura e cópia dos campos originais preservados. Sem alteração de
 DAO/REPLACE, schema, filas, chaves, SDK/BLE ou transporte. Callback setPatientId
