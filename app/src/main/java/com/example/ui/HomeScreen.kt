@@ -551,7 +551,7 @@ private fun DashboardTab(
             )
 
             com.example.ui.components.CsvExportCard(
-                metrics = sensorMetrics,
+                metrics = shareSensorMetrics,
                 onShowNotification = onShowNotification,
                 modifier = Modifier.fillMaxWidth()
             )

@@ -24,7 +24,7 @@ import kotlinx.coroutines.withContext
 
 @Composable
 fun CsvExportCard(
-    metrics: List<HBandSensorMetricEntity>,
+    metrics: List<HBandSensorMetricEntity>?,
     onShowNotification: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -35,11 +35,12 @@ fun CsvExportCard(
             var preparing by remember { mutableStateOf(false) }
             val scope = rememberCoroutineScope()
             fun prepareThen(action: suspend (String) -> Unit) {
+                val availableMetrics = metrics?.takeIf { it.isNotEmpty() } ?: return
                 if (preparing) return
                 preparing = true
                 scope.launch {
                     try {
-                        val csvString = withContext(Dispatchers.Default) { buildCsvString(metrics) }
+                        val csvString = withContext(Dispatchers.Default) { buildCsvString(availableMetrics) }
                         action(csvString)
                     } catch (cancelled: CancellationException) {
                         throw cancelled
@@ -51,12 +52,15 @@ fun CsvExportCard(
                 }
             }
             Text("Arquivo com os registros salvos", style = MaterialTheme.typography.titleLarge)
-            Text("${metrics.size} registros disponíveis neste celular.", style = MaterialTheme.typography.bodyLarge)
+            Text(
+                if (metrics == null) "Carregando registros…" else "${metrics.size} registros disponíveis neste celular.",
+                style = MaterialTheme.typography.bodyLarge,
+            )
             Text("O formato CSV permite abrir os registros em uma planilha. O arquivo mantém os campos originais, inclusive valores cuja medição não foi confirmada.", style = MaterialTheme.typography.bodyLarge)
             Text("Confira o destinatário antes de compartilhar seus dados de saúde.", style = MaterialTheme.typography.bodyLarge)
             Button(
                 onClick = { prepareThen { shareCsvFile(context, it, onShowNotification) } },
-                enabled = metrics.isNotEmpty() && !preparing,
+                enabled = !metrics.isNullOrEmpty() && !preparing,
                 modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag("share_csv_button"),
             ) { Text("Escolher com quem compartilhar") }
             OutlinedButton(
@@ -66,7 +70,7 @@ fun CsvExportCard(
                         onShowNotification("Conteúdo copiado. Você pode colá-lo no local escolhido.")
                     }
                 },
-                enabled = metrics.isNotEmpty() && !preparing,
+                enabled = !metrics.isNullOrEmpty() && !preparing,
                 modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag("copy_csv_button"),
             ) { Text("Copiar conteúdo do arquivo") }
             if (preparing) {
@@ -74,10 +78,11 @@ fun CsvExportCard(
                 Text("Preparando arquivo…", style = MaterialTheme.typography.bodyLarge)
             }
             OutlinedButton(
-                onClick = { showPreview = !showPreview },
+                onClick = { if (metrics != null) showPreview = !showPreview },
+                enabled = metrics != null,
                 modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag("toggle_csv_preview"),
             ) { Text(if (showPreview) "Fechar prévia do arquivo" else "Ver prévia do arquivo") }
-            if (showPreview) {
+            if (showPreview && metrics != null) {
                 val preview = remember(metrics) { buildCsvString(metrics.take(5)) }
                 Text("Cabeçalho e até cinco registros. Deslize para o lado para ver as colunas.", style = MaterialTheme.typography.bodyLarge)
                 Text(

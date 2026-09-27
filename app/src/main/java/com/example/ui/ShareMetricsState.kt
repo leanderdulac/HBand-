@@ -9,7 +9,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 
 /** null means no query response yet; an emitted empty list is a confirmed empty result.
- * Dedicated to card preparation, without changing history/automatic-insight consumers.
+ * Used by card/CSV preparation, without changing history/automatic-insight consumers.
  */
 internal fun Flow<List<HBandSensorMetricEntity>>.shareMetricsState(
     scope: CoroutineScope,
