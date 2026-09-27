@@ -35,6 +35,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -55,6 +56,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.example.util.ShareProgressData
+import kotlinx.coroutines.launch
 
 @Composable
 fun ShareProgressDialog(
@@ -66,8 +68,11 @@ fun ShareProgressDialog(
     var actionFeedback by rememberSaveable(shareData.uri.toString(), shareData.summaryText) {
         mutableStateOf<String?>(null)
     }
+    val feedbackScroll = rememberScrollState()
+    val feedbackScope = rememberCoroutineScope()
     fun showActionFeedback(message: String) {
         actionFeedback = message
+        feedbackScope.launch { feedbackScroll.scrollTo(0) }
         onShowSnackbar(message)
     }
 
@@ -88,17 +93,17 @@ fun ShareProgressDialog(
                     color = Color(0xFF0F172A),
                 )
                 Spacer(Modifier.height(12.dp))
-                actionFeedback?.let { message ->
-                    Text(
-                        message,
-                        style = MaterialTheme.typography.bodyLarge,
-                        modifier = Modifier.testTag("share_action_feedback").semantics {
-                            liveRegion = LiveRegionMode.Polite
-                        },
-                    )
-                    Spacer(Modifier.height(12.dp))
-                }
-                Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
+                Column(Modifier.weight(1f, fill = false).verticalScroll(feedbackScroll)) {
+                    actionFeedback?.let { message ->
+                        Text(
+                            message,
+                            style = MaterialTheme.typography.bodyLarge,
+                            modifier = Modifier.testTag("share_action_feedback").semantics {
+                                liveRegion = LiveRegionMode.Polite
+                            },
+                        )
+                        Spacer(Modifier.height(12.dp))
+                    }
                     Text(
                         text = "Compartilhe somente com quem você escolher.",
                         style = MaterialTheme.typography.bodyLarge,
