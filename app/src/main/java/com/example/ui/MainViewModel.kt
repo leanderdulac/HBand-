@@ -111,6 +111,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             initialValue = emptyList()
         )
 
+    // Observe the DAO-backed source, not allSensorMetrics' initial empty sentinel.
+    val shareSensorMetrics = repository.allSensorMetrics.shareMetricsState(viewModelScope)
+
     val allQueueItems: StateFlow<List<IngestQueueEntity>> = repository.allQueueItems
         .stateIn(
             scope = viewModelScope,

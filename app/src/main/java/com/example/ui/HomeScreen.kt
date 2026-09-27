@@ -93,6 +93,7 @@ fun HomeScreen(
     val scanFailure by viewModel.scanFailure.collectAsStateWithLifecycle()
     val latestTelemetry by viewModel.latestTelemetry.collectAsStateWithLifecycle()
     val allSensorMetrics by viewModel.allSensorMetrics.collectAsStateWithLifecycle()
+    val shareSensorMetrics by viewModel.shareSensorMetrics.collectAsStateWithLifecycle()
     val allQueueItems by viewModel.allQueueItems.collectAsStateWithLifecycle()
     val pendingCount by viewModel.pendingCount.collectAsStateWithLifecycle()
     val syncedCount by viewModel.syncedCount.collectAsStateWithLifecycle()
@@ -206,6 +207,7 @@ fun HomeScreen(
                     connectedDevice = connectedDevice,
                     latestTelemetry = latestTelemetry,
                     sensorMetrics = allSensorMetrics,
+                    shareSensorMetrics = shareSensorMetrics,
                     autoIngestLive = autoIngestLive,
                     onTriggerSync = { viewModel.triggerWorkManagerSync() },
                     onRefreshHealth = { viewModel.checkHealth() },
@@ -391,6 +393,7 @@ private fun DashboardTab(
     totalBreathingSeconds: Int? = null,
     onSaveBreathingSession: (Int) -> Unit = {},
     onGenerateShareData: (com.example.util.ShareProgressData) -> Unit = {},
+    shareSensorMetrics: List<com.example.data.local.HBandSensorMetricEntity>? = null,
     onShowHistory: () -> Unit = {},
     capabilities: com.example.data.hband.DeviceCapabilities = com.example.data.hband.DeviceCapabilities(),
     hardwareConnected: Boolean = false,
@@ -540,7 +543,7 @@ private fun DashboardTab(
             forceExpanded = false,
         ) {
             com.example.ui.components.ShareProgressCard(
-                sensorMetrics = sensorMetrics,
+                sensorMetrics = shareSensorMetrics,
                 hydrationMl = todayHydrationMl,
                 breathingSeconds = totalBreathingSeconds,
                 onGenerateShareData = onGenerateShareData,

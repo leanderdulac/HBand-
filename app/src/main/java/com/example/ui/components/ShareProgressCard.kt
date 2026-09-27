@@ -54,7 +54,7 @@ import kotlinx.coroutines.withContext
 
 @Composable
 fun ShareProgressCard(
-    sensorMetrics: List<HBandSensorMetricEntity>,
+    sensorMetrics: List<HBandSensorMetricEntity>?,
     hydrationMl: Int?,
     breathingSeconds: Int?,
     onGenerateShareData: (ShareProgressData) -> Unit,
@@ -131,14 +131,14 @@ fun ShareProgressCard(
                             withContext(Dispatchers.Default) {
                                 ProgressImageGenerator.generateWeeklyProgressImage(
                                     context = context,
-                                    metrics = sensorMetrics,
+                                    metrics = checkNotNull(sensorMetrics),
                                     hydrationMl = hydrationMl,
                                     breathingSeconds = breathingSeconds
                                 )
                             }
                         },
                         onPrepared = onGenerateShareData,
-                        enabled = hydrationMl != null && breathingSeconds != null,
+                        enabled = sensorMetrics != null && hydrationMl != null && breathingSeconds != null,
                     )
                 }
             }
