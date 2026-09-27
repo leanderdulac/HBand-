@@ -15,7 +15,7 @@ afirmação de rollback. Callback de aviso fica fora do tratamento de gravação
 MainViewModel mantém viewModelScope.launch, duração inválida ignorada e coletores.
 
 Testes usam o helper produtivo, LocalWellnessRecords e Room em memória: sucesso,
-preservação de registros anteriores, três falhas antes da escrita, banco fechado,
+preservação de registros anteriores, três falhas antes da escrita, cancelamento ao fechar o banco,
 falha simulada após commit sem repetição, cancelamento, duração inválida, Error
 e exceção do callback de notificação. Não executam backend, BLE, app operacional,
 armazenamento real, emulador ou aparelho. Evidência LOCAL/DEMO no SHA dos checks.

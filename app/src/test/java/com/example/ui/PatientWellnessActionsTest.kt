@@ -159,10 +159,13 @@ class PatientWellnessActionsTest {
         assertEquals(250, db.hydrationDao().getHydrationLogsForDate("1970-01-01").first().single().amountMl)
     }
 
-    @Test fun closed_room_database_is_reported_without_exposing_internal_exception() = runBlocking {
+    @Test fun closed_room_database_cancellation_is_preserved_without_failure_notice() = runBlocking {
         db.close()
-        actions.addWaterIntake(250)
-        assertFailureNotice("água")
+        try { actions.addWaterIntake(250); fail("Expected Room cancellation") } catch (_: CancellationException) {
+            // Room cancels its coroutine scope on close; this is not a recoverable write exception.
+        }
+        assertEquals(1, calls)
+        assertTrue(notices.isEmpty())
     }
 
     @Test fun fatal_errors_are_not_swallowed_as_recoverable_storage_errors() = runBlocking {
