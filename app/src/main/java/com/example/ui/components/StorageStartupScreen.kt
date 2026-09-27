@@ -22,15 +22,23 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import com.example.data.local.StorageStartupState
+import kotlinx.coroutines.CancellationException
 
 @Composable
-fun RequestPermissionsWhenStorageReady(state: StorageStartupState, requestPermissions: () -> Unit) {
+fun RequestPermissionsWhenStorageReady(
+    state: StorageStartupState,
+    onRequestFailure: () -> Unit = {},
+    requestPermissions: () -> Unit,
+) {
     var requested by rememberSaveable { mutableStateOf(false) }
     val request by rememberUpdatedState(requestPermissions)
+    val reportFailure by rememberUpdatedState(onRequestFailure)
     LaunchedEffect(state) {
         if (state == StorageStartupState.READY && !requested) {
             requested = true
-            request()
+            try { request() }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { reportFailure() }
         }
     }
 }

@@ -28,9 +28,9 @@ class MainActivity : ComponentActivity() {
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
-        val allGranted = permissions.entries.all { it.value }
+        val allGranted = allRequestedPermissionsGranted(permissions)
         if (allGranted && (application as? HBandHealthSyncApp)?.storageStartup?.isReady == true) {
-            mainViewModel.showNotification("Permissões Bluetooth concedidas com sucesso!")
+            mainViewModel.showNotification("Permissões solicitadas concedidas.")
         }
     }
 
@@ -41,7 +41,12 @@ class MainActivity : ComponentActivity() {
         setContent {
             val startup = (application as HBandHealthSyncApp).storageStartup
             val state by startup.state.collectAsStateWithLifecycle()
-            RequestPermissionsWhenStorageReady(state) { checkAndRequestBlePermissions() }
+            RequestPermissionsWhenStorageReady(state, onRequestFailure = {
+                mainViewModel.showNotification(
+                    "Não foi possível solicitar permissões. Tente conectar pela aba Relógio; notificações ficam em Ajustes.",
+                    isError = true,
+                )
+            }) { checkAndRequestBlePermissions() }
             MyApplicationTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     StorageStartupScreen(state) { HomeScreen(viewModel = mainViewModel) }
@@ -84,3 +89,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 }
+
+internal fun allRequestedPermissionsGranted(permissions: Map<String, Boolean>): Boolean =
+    permissions.isNotEmpty() && permissions.entries.all { it.value }
