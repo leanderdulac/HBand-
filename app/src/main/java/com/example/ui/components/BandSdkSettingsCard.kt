@@ -34,11 +34,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.data.hband.AlarmUiState
+import com.example.data.hband.WatchSettingConfirmation
 import com.example.data.hband.AutoMeasureUiState
 import com.example.data.hband.DeviceCapabilities
 import com.example.data.hband.FindDeviceUiState
@@ -155,10 +158,11 @@ fun BandSdkSettingsCard(
                     settingAvailability(capabilities.probed)
                 },
                 checked = autoMeasure.heartRateEnabled,
-                enabled = actionsEnabled && autoMeasure.supported,
+                enabled = actionsEnabled && autoMeasure.supported && autoMeasure.heartRateConfirmation != WatchSettingConfirmation.PENDING,
                 testTag = "auto_measure_switch",
                 onCheckedChange = onAutoMeasureChange,
             )
+            if (autoMeasure.supported) WatchSettingFeedback(autoMeasure.heartRateConfirmation, "auto_measure_result")
 
             SettingToggleRow(
                 title = "Oxigênio durante a noite",
@@ -168,10 +172,11 @@ fun BandSdkSettingsCard(
                     settingAvailability(capabilities.probed)
                 },
                 checked = autoMeasure.spo2NightAutoEnabled,
-                enabled = actionsEnabled && autoMeasure.spo2AutoSupported,
+                enabled = actionsEnabled && autoMeasure.spo2AutoSupported && autoMeasure.spo2Confirmation != WatchSettingConfirmation.PENDING,
                 testTag = "spo2_auto_switch",
                 onCheckedChange = onSpo2AutoChange,
             )
+            if (autoMeasure.spo2AutoSupported) WatchSettingFeedback(autoMeasure.spo2Confirmation, "spo2_auto_result")
 
             val wearHint = when (wearDetect.lastWorn) {
                 true -> "Último estado: em uso"
@@ -186,10 +191,11 @@ fun BandSdkSettingsCard(
                     settingAvailability(capabilities.probed)
                 },
                 checked = wearDetect.enabled,
-                enabled = actionsEnabled && wearDetect.supported,
+                enabled = actionsEnabled && wearDetect.supported && wearDetect.confirmation != WatchSettingConfirmation.PENDING,
                 testTag = "wear_detect_switch",
                 onCheckedChange = onWearDetectChange,
             )
+            if (wearDetect.supported) WatchSettingFeedback(wearDetect.confirmation, "wear_detect_result")
 
             if (historySync.isRunning) {
                 Column {
@@ -393,3 +399,16 @@ private fun capabilityLine(caps: DeviceCapabilities): String {
 
 private fun settingAvailability(probed: Boolean): String =
     if (probed) "Não disponível neste relógio." else "Ainda não foi verificado."
+
+@Composable
+private fun WatchSettingFeedback(status: WatchSettingConfirmation, tag: String) {
+    val text = when (status) {
+        WatchSettingConfirmation.UNKNOWN -> "Configuração ainda não confirmada nesta conexão."
+        WatchSettingConfirmation.PENDING -> "Aguardando o retorno do relógio. O valor anterior permanece indicado."
+        WatchSettingConfirmation.CONFIRMED -> "Último retorno recebido do relógio."
+        WatchSettingConfirmation.UNCONFIRMED -> "Alteração não confirmada. O valor anterior foi mantido na tela; parte da solicitação pode ter sido aplicada. Confira antes de tentar novamente."
+    }
+    Text(text, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.testTag(tag).semantics {
+        liveRegion = LiveRegionMode.Polite
+    })
+}

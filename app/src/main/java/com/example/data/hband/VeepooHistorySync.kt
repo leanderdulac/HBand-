@@ -202,18 +202,29 @@ class VeepooHistorySync(
             }
             return writeAutoMeasure(pulse)
         }
-        val updated = current.map { item ->
-            if (item.funType == EAutoMeasureType.PULSE_RATE || item.funType == EAutoMeasureType.BLOOD_OXYGEN) {
-                item.apply { isSwitchOpen = enabled }
-            } else {
-                item
+        val received = linkedMapOf<EAutoMeasureType, AutoMeasureData>()
+        var incomplete = false
+        for (item in current) {
+            // SDK data is mutable. Build a separate request without changing the last observation.
+            val request = AutoMeasureData().apply {
+                protocolType = item.protocolType
+                funType = item.funType
+                isSwitchOpen = if (item.funType == EAutoMeasureType.PULSE_RATE || item.funType == EAutoMeasureType.BLOOD_OXYGEN) enabled else item.isSwitchOpen
+                stepUnit = item.stepUnit
+                isSlotModify = item.isSlotModify
+                isIntervalModify = item.isIntervalModify
+                supportStartMinute = item.supportStartMinute
+                supportEndMinute = item.supportEndMinute
+                measureInterval = item.measureInterval
+                currentStartMinute = item.currentStartMinute
+                currentEndMinute = item.currentEndMinute
             }
+            val response = writeAutoMeasure(request)
+            if (response == null) incomplete = true
+            else response.forEach { received[it.funType] = it }
         }
-        var last: List<AutoMeasureData>? = null
-        for (item in updated) {
-            last = writeAutoMeasure(item) ?: last
-        }
-        return last ?: updated
+        // Partial success does not establish the complete requested configuration or rollback.
+        return if (incomplete) null else received.values.toList()
     }
 
     suspend fun setSpo2AutoEnabled(enabled: Boolean, existing: AllSetData?): AllSetData? {
@@ -255,11 +266,24 @@ class VeepooHistorySync(
     }
 
     fun wearEnabledFrom(data: CheckWearData?, requested: Boolean): Boolean {
-        return when (data?.checkWearState) {
-            ECheckWear.OPEN_SUCCESS -> true
-            ECheckWear.CLOSE_SUCCESS -> false
-            ECheckWear.READ_SUCCESS -> requested
-            else -> requested
+        return confirmedWearEnabled(data) ?: requested
+    }
+
+    fun confirmedWearEnabled(data: CheckWearData?): Boolean? = when (data?.checkWearState) {
+        ECheckWear.OPEN_SUCCESS -> true
+        ECheckWear.CLOSE_SUCCESS -> false
+        else -> null // READ_SUCCESS carries no enabled bit; it cannot establish this value.
+    }
+
+    fun confirmedSpo2Enabled(data: AllSetData?): Boolean? {
+        if (data == null || data.type != EAllSetType.SPO2H_NIGHT_AUTO_DETECT) return null
+        return when (data.oprateResult) {
+            com.veepoo.protocol.model.enums.EAllSetStatus.OPEN_SUCCESS -> true
+            com.veepoo.protocol.model.enums.EAllSetStatus.CLOSE_SUCCESS -> false
+            com.veepoo.protocol.model.enums.EAllSetStatus.SETTING_SUCCESS,
+            com.veepoo.protocol.model.enums.EAllSetStatus.READ_SUCCESS ->
+                if (data.isOpen in 0..1 && data.openState in 0..1) data.isOpen == 1 || data.openState == 1 else null
+            else -> null
         }
     }
 
@@ -311,7 +335,8 @@ class VeepooHistorySync(
                 data,
                 object : IAutoMeasureSettingDataListener {
                     override fun onSettingDataChange(list: MutableList<AutoMeasureData>?) {
-                        done(list?.toList() ?: listOf(data))
+                        if (list.isNullOrEmpty() || list.none { it.funType == data.funType }) fail("empty or unrelated auto-measure result")
+                        else done(list.toList())
                     }
 
                     override fun onSettingDataChangeFail() {

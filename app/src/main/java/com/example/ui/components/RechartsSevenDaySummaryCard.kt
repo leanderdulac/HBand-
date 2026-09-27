@@ -56,7 +56,7 @@ fun RechartsSevenDaySummaryCard(
                     style = MaterialTheme.typography.titleMedium,
                     modifier = Modifier.testTag("history_selected_date").semantics { liveRegion = LiveRegionMode.Polite },
                 )
-                HistoryDayControls(daysAgo, { daysAgo++ }, { daysAgo-- }, { daysAgo = 0 })
+                HistoryDayControls(daysAgo, { daysAgo = (daysAgo + 1).coerceAtMost(6) }, { daysAgo = (daysAgo - 1).coerceAtLeast(0) }, { daysAgo = 0 })
                 SavedDayValues(selectedDay)
             }
         }

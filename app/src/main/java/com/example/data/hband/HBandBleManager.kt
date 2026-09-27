@@ -74,6 +74,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -261,6 +263,10 @@ class HBandBleManager(
     private var liveLinkWatchdog: Runnable? = null
     private var lastFunctionSupport: FunctionDeviceSupportData? = null
     private var lastAutoMeasureSettings: List<AutoMeasureData> = emptyList()
+    private val watchSettingsMutex = Mutex()
+    private var autoMeasureRevision = 0L
+    private var spo2SettingRevision = 0L
+    private var wearSettingRevision = 0L
     private var historySync: VeepooHistorySync? = null
     private val p1Controller = VeepooP1Controller(vpManager)
     private var postHandshakeJob: Job? = null
@@ -1998,47 +2004,95 @@ class HBandBleManager(
     }
 
     fun setAutoMeasureEnabled(enabled: Boolean) {
+        if (_autoMeasureState.value.heartRateConfirmation == WatchSettingConfirmation.PENDING) return
+        autoMeasureRevision++
         prefs.edit().putBoolean(PREF_AUTO_MEASURE, enabled).apply()
-        _autoMeasureState.value = _autoMeasureState.value.copy(heartRateEnabled = enabled)
+        _autoMeasureState.value = _autoMeasureState.value.copy(heartRateConfirmation = WatchSettingConfirmation.UNCONFIRMED)
         if (!hasLiveHardwareSession() || !_capabilities.value.isSupportAutoMeasure) return
-        scope.launch(Dispatchers.Main) {
-            val sync = historyClient()
+        val sync = historyClient()
+        _autoMeasureState.value = _autoMeasureState.value.copy(heartRateConfirmation = WatchSettingConfirmation.PENDING)
+        runWatchSetting(sync, onUnconfirmed = {
+            if (_autoMeasureState.value.heartRateConfirmation == WatchSettingConfirmation.PENDING)
+                _autoMeasureState.value = _autoMeasureState.value.copy(heartRateConfirmation = WatchSettingConfirmation.UNCONFIRMED)
+        }) {
             val updated = sync.setAutoMeasureEnabled(lastAutoMeasureSettings, enabled)
-            if (updated != null) {
+            if (currentSettingsClient(sync) && updated != null) {
                 lastAutoMeasureSettings = updated
-                applyAutoMeasureUi(updated, _autoMeasureState.value.spo2NightAutoEnabled)
+                applyAutoMeasureUi(updated, null, updateReadTime = false)
             }
         }
     }
 
     fun setSpo2AutoDetectEnabled(enabled: Boolean) {
+        if (_autoMeasureState.value.spo2Confirmation == WatchSettingConfirmation.PENDING) return
+        spo2SettingRevision++
         prefs.edit().putBoolean(PREF_SPO2_AUTO, enabled).apply()
-        _autoMeasureState.value = _autoMeasureState.value.copy(spo2NightAutoEnabled = enabled)
+        _autoMeasureState.value = _autoMeasureState.value.copy(spo2Confirmation = WatchSettingConfirmation.UNCONFIRMED)
         if (!hasLiveHardwareSession() || !_capabilities.value.isSupportSpo2AutoDetect) return
-        scope.launch(Dispatchers.Main) {
-            val sync = historyClient()
-            val result = sync.setSpo2AutoEnabled(enabled, null)
-            if (result != null) {
+        val sync = historyClient()
+        _autoMeasureState.value = _autoMeasureState.value.copy(spo2Confirmation = WatchSettingConfirmation.PENDING)
+        runWatchSetting(sync, onUnconfirmed = {
+            if (_autoMeasureState.value.spo2Confirmation == WatchSettingConfirmation.PENDING)
+                _autoMeasureState.value = _autoMeasureState.value.copy(spo2Confirmation = WatchSettingConfirmation.UNCONFIRMED)
+        }) {
+            val result = sync.confirmedSpo2Enabled(sync.setSpo2AutoEnabled(enabled, null))
+            if (currentSettingsClient(sync) && result != null) {
                 _autoMeasureState.value = _autoMeasureState.value.copy(
-                    spo2NightAutoEnabled = result.isOpen == 1 || result.openState == 1,
-                    lastReadAtMs = System.currentTimeMillis(),
+                    spo2NightAutoEnabled = result, spo2Confirmation = WatchSettingConfirmation.CONFIRMED,
                 )
             }
         }
     }
 
     fun setWearDetectEnabled(enabled: Boolean) {
+        if (_wearDetectState.value.confirmation == WatchSettingConfirmation.PENDING) return
+        wearSettingRevision++
         prefs.edit().putBoolean(PREF_WEAR_DETECT, enabled).apply()
-        _wearDetectState.value = _wearDetectState.value.copy(enabled = enabled)
+        _wearDetectState.value = _wearDetectState.value.copy(confirmation = WatchSettingConfirmation.UNCONFIRMED)
         if (!hasLiveHardwareSession() || !_capabilities.value.isSupportWearDetect) return
-        scope.launch(Dispatchers.Main) {
-            val sync = historyClient()
+        val sync = historyClient()
+        _wearDetectState.value = _wearDetectState.value.copy(confirmation = WatchSettingConfirmation.PENDING)
+        runWatchSetting(sync, onUnconfirmed = {
+            if (_wearDetectState.value.confirmation == WatchSettingConfirmation.PENDING)
+                _wearDetectState.value = _wearDetectState.value.copy(confirmation = WatchSettingConfirmation.UNCONFIRMED)
+        }) {
             val data = sync.applyWearDetect(enabled)
-            _wearDetectState.value = _wearDetectState.value.copy(
-                enabled = sync.wearEnabledFrom(data, enabled),
-                lastResult = data?.checkWearState?.name.orEmpty(),
-            )
+            val result = sync.confirmedWearEnabled(data)
+            if (currentSettingsClient(sync) && result != null) {
+                _wearDetectState.value = _wearDetectState.value.copy(
+                    enabled = result, lastResult = data!!.checkWearState.name,
+                    confirmation = WatchSettingConfirmation.CONFIRMED,
+                )
+            }
         }
+    }
+
+    private fun currentSettingsClient(sync: VeepooHistorySync): Boolean =
+        historySync === sync && !sync.cancelled && !userRequestedDisconnect && hasLiveHardwareSession()
+
+    private fun runWatchSetting(sync: VeepooHistorySync, onUnconfirmed: () -> Unit, action: suspend () -> Unit) {
+        scope.launch(Dispatchers.Main) {
+            try {
+                watchSettingsMutex.withLock {
+                    if (currentSettingsClient(sync)) action()
+                }
+            }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { /* Completion marks the request unconfirmed, without implying rollback. */ }
+        }.invokeOnCompletion {
+            // Also runs if the scope was cancelled before the coroutine started.
+            if (historySync === sync) onUnconfirmed()
+        }
+    }
+
+    private fun invalidateSettingConfirmations() {
+        fun invalidated(status: WatchSettingConfirmation) = if (status == WatchSettingConfirmation.PENDING)
+            WatchSettingConfirmation.UNCONFIRMED else WatchSettingConfirmation.UNKNOWN
+        _autoMeasureState.value = _autoMeasureState.value.copy(
+            heartRateConfirmation = invalidated(_autoMeasureState.value.heartRateConfirmation),
+            spo2Confirmation = invalidated(_autoMeasureState.value.spo2Confirmation),
+        )
+        _wearDetectState.value = _wearDetectState.value.copy(confirmation = invalidated(_wearDetectState.value.confirmation))
     }
 
     fun startEcgDetect() = startGatedDetect(_capabilities.value.isSupportEcg, _ecgState) {
@@ -2261,10 +2315,14 @@ class HBandBleManager(
     }
 
     private fun startPostHandshakeSync(includeLiveSensors: Boolean = true) {
+        invalidateSettingConfirmations()
         postHandshakeJob?.cancel()
         historySync?.cancelled = true
         val sync = VeepooHistorySync(vpManager, mainHandler)
         historySync = sync
+        val initialAutoRevision = autoMeasureRevision
+        val initialSpo2Revision = spo2SettingRevision
+        val initialWearRevision = wearSettingRevision
         postHandshakeJob = scope.launch(Dispatchers.Main) {
             val queryContext = currentCoroutineContext()
             val queryDeviceId = currentConnectedMac()
@@ -2285,11 +2343,14 @@ class HBandBleManager(
                 _wearDetectState.value = _wearDetectState.value.copy(supported = caps.isSupportWearDetect)
                 applyP1CapabilityFlags(caps)
 
-                val extras = sync.readHandshakeExtras(
-                    caps = caps,
-                    wearEnabled = _wearDetectState.value.enabled,
-                    onBattery = { setBatteryLevel(it, simulated = false) },
-                )
+                val extras = watchSettingsMutex.withLock {
+                    if (historySync !== sync || sync.cancelled || userRequestedDisconnect) return@launch
+                    sync.readHandshakeExtras(
+                        caps = caps,
+                        wearEnabled = prefs.getBoolean(PREF_WEAR_DETECT, true),
+                        onBattery = { setBatteryLevel(it, simulated = false) },
+                    )
+                }
                 if (historySync !== sync || sync.cancelled || !queryContext.isActive || userRequestedDisconnect) return@launch
                 extras.batteryPercent?.let { setBatteryLevel(it, simulated = false) }
                 extras.sport?.let { reading ->
@@ -2299,14 +2360,18 @@ class HBandBleManager(
                     currentDistance = reading.distanceMeters ?: 0f
                     onSportReading(queryDeviceId, reading)
                 }
-                lastAutoMeasureSettings = extras.autoMeasure
-                applyAutoMeasureUi(extras.autoMeasure, extras.spo2Auto?.let { it.isOpen == 1 || it.openState == 1 }
-                    ?: _autoMeasureState.value.spo2NightAutoEnabled)
-                extras.wear?.let { wear ->
+                // An older handshake snapshot cannot overwrite a later explicit request, even
+                // after that request has completed and is no longer pending.
+                val auto = if (initialAutoRevision == autoMeasureRevision && _autoMeasureState.value.heartRateConfirmation != WatchSettingConfirmation.PENDING) extras.autoMeasure else emptyList()
+                if (auto.isNotEmpty()) lastAutoMeasureSettings = auto
+                val spo2 = if (initialSpo2Revision == spo2SettingRevision && _autoMeasureState.value.spo2Confirmation != WatchSettingConfirmation.PENDING) sync.confirmedSpo2Enabled(extras.spo2Auto) else null
+                applyAutoMeasureUi(auto, spo2)
+                val wearEnabled = if (initialWearRevision == wearSettingRevision && _wearDetectState.value.confirmation != WatchSettingConfirmation.PENDING) sync.confirmedWearEnabled(extras.wear) else null
+                if (wearEnabled != null) {
                     _wearDetectState.value = _wearDetectState.value.copy(
-                        supported = true,
-                        enabled = sync.wearEnabledFrom(wear, _wearDetectState.value.enabled),
-                        lastResult = wear.checkWearState?.name.orEmpty(),
+                        supported = true, enabled = wearEnabled,
+                        lastResult = extras.wear!!.checkWearState.name,
+                        confirmation = WatchSettingConfirmation.CONFIRMED,
                     )
                 }
                 readP1Settings(caps)
@@ -2354,19 +2419,20 @@ class HBandBleManager(
         }
     }
 
-    private fun applyAutoMeasureUi(items: List<AutoMeasureData>, spo2Night: Boolean) {
+    private fun applyAutoMeasureUi(items: List<AutoMeasureData>, spo2Night: Boolean?, updateReadTime: Boolean = true) {
         val pulse = items.firstOrNull { it.funType == EAutoMeasureType.PULSE_RATE }
-        _autoMeasureState.value = _autoMeasureState.value.copy(
+        val before = _autoMeasureState.value
+        _autoMeasureState.value = before.copy(
             supported = _capabilities.value.isSupportAutoMeasure,
             spo2AutoSupported = _capabilities.value.isSupportSpo2AutoDetect,
-            heartRateEnabled = pulse?.isSwitchOpen ?: _autoMeasureState.value.heartRateEnabled,
-            spo2NightAutoEnabled = spo2Night,
-            lastReadAtMs = System.currentTimeMillis(),
-            summary = items.joinToString { "${it.funType}=${it.isSwitchOpen}" },
+            heartRateEnabled = pulse?.isSwitchOpen ?: before.heartRateEnabled,
+            spo2NightAutoEnabled = spo2Night ?: before.spo2NightAutoEnabled,
+            lastReadAtMs = if (updateReadTime && (pulse != null || spo2Night != null)) System.currentTimeMillis() else before.lastReadAtMs,
+            summary = if (items.isNotEmpty()) items.joinToString { "${it.funType}=${it.isSwitchOpen}" } else before.summary,
+            heartRateConfirmation = if (pulse != null) WatchSettingConfirmation.CONFIRMED else before.heartRateConfirmation,
+            spo2Confirmation = if (spo2Night != null) WatchSettingConfirmation.CONFIRMED else before.spo2Confirmation,
         )
-        pulse?.let {
-            prefs.edit().putBoolean(PREF_AUTO_MEASURE, it.isSwitchOpen).apply()
-        }
+        pulse?.let { prefs.edit().putBoolean(PREF_AUTO_MEASURE, it.isSwitchOpen).apply() }
     }
 
     private fun liveScanBatteryLevel(isCurrent: Boolean): Int? {
@@ -2420,6 +2486,7 @@ class HBandBleManager(
     }
 
     private fun cancelHistorySync() {
+        invalidateSettingConfirmations()
         historySync?.cancelled = true
         postHandshakeJob?.cancel()
         postHandshakeJob = null

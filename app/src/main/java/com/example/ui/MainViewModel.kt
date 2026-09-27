@@ -407,7 +407,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun requestHistorySync() {
         bleManager.requestHistorySync()
-        showNotification("Busca de dados do relógio solicitada. Confira o andamento na tela Relógio.")
+        showNotification("Busca de dados do relógio solicitada. Confira o andamento em Ajustes → Opções do relógio.")
     }
 
     fun startEcgDetect() {
