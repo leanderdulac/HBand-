@@ -19,6 +19,7 @@ import com.example.util.ShareProgressData
 import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.rules.TemporaryFolder
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -30,6 +31,7 @@ import org.robolectric.annotation.Config
 @Config(qualifiers = "w320dp-h740dp-mdpi", sdk = [36], application = android.app.Application::class)
 class PatientShareDialogFeedbackTest {
     @get:Rule val compose = createComposeRule()
+    @get:Rule val temporary = TemporaryFolder()
     private val messages = mutableListOf<String>()
 
     @Test
@@ -105,7 +107,7 @@ class PatientShareDialogFeedbackTest {
 
     private fun content(fontScale: Float = 1.6f, onDismiss: () -> Unit = {}): StateRestorationTester {
         val data = ShareProgressData(
-            Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888), File("share-fixture.png"),
+            Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888), temporary.newFile("share.png").apply { writeBytes(byteArrayOf(1)) },
             Uri.parse("content://test/fixture"), "Dados artificiais de teste",
         )
         val restoration = StateRestorationTester(compose)

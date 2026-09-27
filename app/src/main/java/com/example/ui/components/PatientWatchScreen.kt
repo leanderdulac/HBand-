@@ -53,21 +53,26 @@ fun PatientWatchScreen(
     fun isGranted(permission: String) = ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
         val action = pendingAction
+        val requested = pendingPermissions
         pendingAction = null
-        if (action == null || pendingPermissions.isEmpty()) {
+        pendingPermissions = emptyList()
+        if (action == null || requested.isEmpty()) {
             // The result can outlive the screen that requested it. Without the
             // original action, ask for another explicit tap instead of guessing
             // which watch/action to resume or calling the result a denial.
             permissionMessage = "Não foi possível retomar a ação. Toque novamente na opção de busca ou conexão."
-        } else if (pendingPermissions.all { result[it] == true || isGranted(it) }) {
+        } else if (requested.all { result[it] == true || isGranted(it) }) {
             permissionMessage = null
             action()
         } else {
             permissionMessage = "A permissão não foi concedida. A busca ou conexão não foi iniciada. Você pode tentar novamente ou abrir as permissões do aplicativo."
         }
-        pendingPermissions = emptyList()
     }
     fun withPermissions(permissions: List<String>, action: () -> Unit) {
+        if (pendingPermissions.isNotEmpty()) {
+            permissionMessage = "Conclua a solicitação de permissão antes de iniciar outra ação."
+            return
+        }
         val missing = permissions.filterNot(::isGranted)
         if (missing.isEmpty()) {
             permissionMessage = null
@@ -77,7 +82,13 @@ fun PatientWatchScreen(
                 (missing + Manifest.permission.ACCESS_COARSE_LOCATION).distinct() else missing
             pendingPermissions = requested
             pendingAction = action
-            launcher.launch(requested.toTypedArray())
+            try {
+                launcher.launch(requested.toTypedArray())
+            } catch (_: Exception) {
+                pendingAction = null
+                pendingPermissions = emptyList()
+                permissionMessage = "Não foi possível abrir a solicitação de permissão. Toque novamente na opção de busca ou conexão para tentar outra vez."
+            }
         }
     }
     val connectPermissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
@@ -106,7 +117,11 @@ fun PatientWatchScreen(
         onConnectByMac = { mac -> withPermissions(connectPermissions) { onConnectByMac(mac) } },
         onDisconnectDevice = { withPermissions(connectPermissions, onDisconnectDevice) },
         onOpenPermissions = {
-            context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, "package:${context.packageName}".toUri()))
+            try {
+                context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, "package:${context.packageName}".toUri()))
+            } catch (_: Exception) {
+                permissionMessage = "Não foi possível abrir as permissões. Tente novamente ou procure este aplicativo nas configurações do Android."
+            }
         },
     )
 }

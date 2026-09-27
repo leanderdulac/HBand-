@@ -35,6 +35,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.key
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -63,6 +64,18 @@ fun ShareProgressDialog(
     shareData: ShareProgressData,
     onDismiss: () -> Unit,
     onShowSnackbar: (String) -> Unit
+) {
+    // Saved-state inputs alone do not reject feedback restored for another snapshot.
+    key(shareData.uri.toString(), shareData.summaryText) {
+        ShareProgressContent(shareData, onDismiss, onShowSnackbar)
+    }
+}
+
+@Composable
+private fun ShareProgressContent(
+    shareData: ShareProgressData,
+    onDismiss: () -> Unit,
+    onShowSnackbar: (String) -> Unit,
 ) {
     val context = LocalContext.current
     var actionFeedback by rememberSaveable(shareData.uri.toString(), shareData.summaryText) {
@@ -140,6 +153,12 @@ fun ShareProgressDialog(
                             onClick = {
                                 actionFeedback = null
                                 try {
+                                    // Cached bytes can disappear while the bitmap preview is retained.
+                                    // This checks availability now, not delivery or future receiver access.
+                                    if (!shareData.file.isFile || !shareData.file.canRead() || shareData.file.length() == 0L) {
+                                        showActionFeedback("A imagem deste cartão não está mais disponível. Feche o cartão e prepare outro para compartilhar, ou copie o texto dos registros.")
+                                        return@Button
+                                    }
                                     val shareIntent = Intent(Intent.ACTION_SEND).apply {
                                         type = "image/png"
                                         putExtra(Intent.EXTRA_STREAM, shareData.uri)

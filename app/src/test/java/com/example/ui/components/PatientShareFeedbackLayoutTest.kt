@@ -20,6 +20,7 @@ import com.github.takahirom.roborazzi.captureRoboImage
 import java.io.File
 import org.junit.After
 import org.junit.Assert.*
+import org.junit.rules.TemporaryFolder
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -34,15 +35,17 @@ import org.robolectric.annotation.GraphicsMode
 @Config(qualifiers = "w640dp-h320dp-mdpi", sdk = [36], application = android.app.Application::class)
 class PatientShareFeedbackLayoutTest {
     @get:Rule val compose = createComposeRule()
+    @get:Rule val temporary = TemporaryFolder()
     private var attempts = 0
     private var dismissals = 0
     private val messages = mutableListOf<String>()
     @After fun resetFontScale() { RuntimeEnvironment.setFontScale(1f) }
 
-    private fun open(fontScale: Float = 2f): StateRestorationTester {
+    private fun open(fontScale: Float = 2f, missingFile: Boolean = false): StateRestorationTester {
         RuntimeEnvironment.setFontScale(fontScale)
         val data = ShareProgressData(Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888),
-            File("share-layout-fixture.png"), Uri.parse("content://test/layout"), "Dados artificiais de teste")
+            if (missingFile) File(temporary.root, "absent.png") else temporary.newFile("share.png").apply { writeBytes(byteArrayOf(1)) },
+            Uri.parse("content://test/layout"), "Dados artificiais de teste")
         val restoration = StateRestorationTester(compose)
         restoration.setContent {
             val base = LocalContext.current
@@ -113,6 +116,22 @@ class PatientShareFeedbackLayoutTest {
         assertFeedbackReadable()
         compose.onNodeWithTag("dismiss_share_progress_button").assertIsDisplayed().performClick()
         compose.runOnIdle { assertEquals(1, attempts); assertEquals(1, messages.size); assertEquals(1, dismissals) }
+    }
+
+    @Test fun unavailable_image_guidance_and_actions_remain_reachable_with_large_type() {
+        open(missingFile = true)
+        compose.onNodeWithTag("share_progress_intent_button").performScrollTo().performClick()
+        val layouts = mutableListOf<TextLayoutResult>()
+        compose.onNodeWithTag("share_action_feedback")
+            .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+        assertFalse(layouts.single().hasVisualOverflow)
+        compose.onNode(isDialog()).captureRoboImage(filePath = "build/share-recovery-missing-guidance.png")
+        compose.onNodeWithText("Dados artificiais de teste").performScrollTo().assertIsDisplayed()
+        val action = compose.onNodeWithTag("copy_progress_summary_button").performScrollTo().assertIsDisplayed().fetchSemanticsNode()
+        assertTrue(action.boundsInRoot.height >= action.size.height - 1f)
+        compose.onNodeWithTag("dismiss_share_progress_button").assertIsDisplayed()
+        compose.onNode(isDialog()).captureRoboImage(filePath = "build/share-recovery-missing-actions.png")
+        compose.runOnIdle { assertEquals(0, attempts); assertEquals(1, messages.size) }
     }
 
 }
