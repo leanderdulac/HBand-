@@ -11,14 +11,14 @@ import com.example.data.local.HydrationLogEntity
 @Composable
 fun HydrationCard(
     currentMl: Int?,
-    targetGoalMl: Int,
+    targetGoalMl: Int?,
     logs: List<HydrationLogEntity>,
     onAddWater: (Int) -> Unit,
     onResetToday: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var confirmReset by remember { mutableStateOf(false) }
-    val progress = if (currentMl != null && targetGoalMl > 0) (currentMl.toFloat() / targetGoalMl).coerceIn(0f, 1f) else null
+    val progress = if (currentMl != null && targetGoalMl != null && targetGoalMl > 0) (currentMl.toFloat() / targetGoalMl).coerceIn(0f, 1f) else null
 
     Card(
         modifier.fillMaxWidth().testTag("hydration_card"),
@@ -28,15 +28,21 @@ fun HydrationCard(
             Text("Água que registrei hoje", style = MaterialTheme.typography.titleLarge)
             Text(currentMl?.let { "$it mL" } ?: "Carregando registros de água…", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.testTag("hydration_current_ml_text"))
             Text("Este total vem dos registros que você adiciona no aplicativo.", style = MaterialTheme.typography.bodyLarge)
+            Text(
+                when {
+                    targetGoalMl == null -> "Meta de água indisponível."
+                    targetGoalMl <= 0 -> "Nenhuma meta de água cadastrada."
+                    else -> "Meta cadastrada: $targetGoalMl mL por dia"
+                },
+                style = MaterialTheme.typography.bodyLarge,
+                modifier = Modifier.testTag("hydration_goal_text"),
+            )
             if (progress != null) {
-                Text("Meta cadastrada: $targetGoalMl mL por dia", style = MaterialTheme.typography.bodyLarge)
                 LinearProgressIndicator(
                     progress = { progress },
                     modifier = Modifier.fillMaxWidth().height(12.dp).testTag("hydration_progress_bar"),
                 )
                 Text("${(progress * 100).toInt()}% da meta cadastrada", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.testTag("hydration_percentage_badge"))
-            } else if (targetGoalMl <= 0) {
-                Text("Nenhuma meta de água cadastrada.", style = MaterialTheme.typography.bodyLarge)
             }
             Text("Adicionar a quantidade que bebi", style = MaterialTheme.typography.titleMedium)
             for (amount in listOf(250, 500, 750)) {
