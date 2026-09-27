@@ -32,6 +32,14 @@ public final class ProviderProbeService extends Service {
                 result.putInt("uid", android.os.Process.myUid());
                 result.putInt("pid", android.os.Process.myPid());
                 try {
+                    if (request.what == 3) {
+                        result.putString("receipt", getSharedPreferences("share-chooser-lab", MODE_PRIVATE)
+                                .getString("receipt", ""));
+                        Message reply = Message.obtain(null, request.what);
+                        reply.setData(result);
+                        request.replyTo.send(reply);
+                        return;
+                    }
                     Uri uri = Uri.parse(request.getData().getString("uri", ""));
                     if (!"content".equals(uri.getScheme()) || ! (TARGET + ".fileprovider").equals(uri.getAuthority())) {
                         throw new IllegalArgumentException("Only the synthetic target provider is allowed");
