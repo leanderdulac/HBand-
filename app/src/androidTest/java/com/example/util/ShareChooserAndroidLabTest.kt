@@ -58,9 +58,26 @@ class ShareChooserAndroidLabTest {
         var bound = false
         val automation = instrumentation.uiAutomation
         fun screenshot(name: String) {
-            val bitmap = checkNotNull(automation.takeScreenshot())
-            File(context.filesDir, "$name.png").outputStream().use { check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)) }
-            bitmap.recycle()
+            // Accessibility/Compose state can advance before the animation is drawn.
+            // Require consecutive identical frames after a minimum animation interval.
+            SystemClock.sleep(600)
+            var previous = checkNotNull(automation.takeScreenshot())
+            repeat(12) {
+                SystemClock.sleep(250)
+                val current = checkNotNull(automation.takeScreenshot())
+                val stable = current.sameAs(previous)
+                previous.recycle()
+                if (stable) {
+                    File(context.filesDir, "$name.png").outputStream().use {
+                        check(current.compress(Bitmap.CompressFormat.PNG, 100, it))
+                    }
+                    current.recycle()
+                    return
+                }
+                previous = current
+            }
+            previous.recycle()
+            error("No stable screenshot: $name")
         }
         fun probe(operation: Int): Bundle {
             checkNotNull(remote).send(Message.obtain(null, operation).apply {
@@ -124,6 +141,15 @@ class ShareChooserAndroidLabTest {
             assertEquals(0, result.getInt("flags") and Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
             assertArrayEquals(before, card.file.readBytes())
             assertTrue(context.databaseList().isEmpty())
+            val visibleDeadline = SystemClock.elapsedRealtime() + 10000
+            var receiverVisible = false
+            while (!receiverVisible && SystemClock.elapsedRealtime() < visibleDeadline) {
+                val root = automation.rootInActiveWindow
+                receiverVisible = root?.packageName?.toString() == recipient &&
+                    root.findAccessibilityNodeInfosByText("Synthetic card received").isNotEmpty()
+                if (!receiverVisible) SystemClock.sleep(100)
+            }
+            check(receiverVisible) { "Synthetic receiver UI not visible" }
             screenshot("synthetic-receiver")
             File(context.filesDir, "share-chooser-evidence.json").writeText(JSONObject()
                 .put("targetUid", android.os.Process.myUid()).put("targetPid", android.os.Process.myPid())
