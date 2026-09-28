@@ -37,7 +37,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import androidx.lifecycle.asFlow
@@ -210,11 +209,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private var lastAlertTimeMs: Long? = null
 
-    private val _geminiInsightText = MutableStateFlow("")
-    val geminiInsightText: StateFlow<String> = _geminiInsightText.asStateFlow()
-
-    private val _isGeneratingGeminiInsight = MutableStateFlow(false)
-    val isGeneratingGeminiInsight: StateFlow<Boolean> = _isGeneratingGeminiInsight.asStateFlow()
+    private val insightReview = PatientInsightReview(viewModelScope, com.example.BuildConfig.DEBUG, repository.allSensorMetrics) { metrics ->
+        com.example.data.remote.GeminiHealthAnalyzer.generateSevenDayInsight(metrics)
+    }
+    val geminiInsightText = insightReview.state.map { it.text }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
+    val isGeneratingGeminiInsight = insightReview.state.map { it.isLoading }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
     private val hydrationDao = db.hydrationDao()
     private val breathingDao = db.breathingDao()
@@ -271,15 +272,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun saveBreathingSession(token: String, durationSeconds: Int) = breathingSave.save(token, durationSeconds)
 
-    fun generateGeminiInsight() {
-        viewModelScope.launch {
-            _isGeneratingGeminiInsight.value = true
-            val metricsList = allSensorMetrics.value
-            val insight = com.example.data.remote.GeminiHealthAnalyzer.generateSevenDayInsight(metricsList)
-            _geminiInsightText.value = insight
-            _isGeneratingGeminiInsight.value = false
-        }
-    }
+    fun generateGeminiInsight() = insightReview.request()
 
     init {
         bleManager.isAutoReconnectEnabled = _autoReconnectBle.value
@@ -307,16 +300,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
 
-        viewModelScope.launch {
-            allSensorMetrics.map { com.example.data.remote.clinicalInsightRecords(it) }.distinctUntilChanged().collect { metrics ->
-                if (metrics.isNotEmpty() && _geminiInsightText.value.isEmpty() && !_isGeneratingGeminiInsight.value) {
-                    _isGeneratingGeminiInsight.value = true
-                    val insight = com.example.data.remote.GeminiHealthAnalyzer.generateSevenDayInsight(metrics)
-                    _geminiInsightText.value = insight
-                    _isGeneratingGeminiInsight.value = false
-                }
-            }
-        }
     }
 
     fun setUpperHrThreshold(value: Int) {
@@ -617,7 +600,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             hydrationDao.clearAll()
             breathingDao.clearAll()
             bleManager.resetBiometricsToZero()
-            _geminiInsightText.value = ""
+            insightReview.clear()
             true
         }
     }
