@@ -1,7 +1,6 @@
 package com.example.util
 
 import android.content.ClipData
-import android.content.ClipDescription
 import android.content.ClipboardManager
 import android.content.Context
 import android.os.PersistableBundle
@@ -13,7 +12,8 @@ import java.io.OutputStream
 internal fun copyHealthText(context: Context, label: String, text: String) {
     val clip = ClipData.newPlainText(label, text).apply {
         description.extras = PersistableBundle().apply {
-            putBoolean(ClipDescription.EXTRA_IS_SENSITIVE, true)
+            // Official key spelling also works below API33 without referencing a newer field.
+            putBoolean("android.content.extra.IS_SENSITIVE", true)
         }
     }
     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
