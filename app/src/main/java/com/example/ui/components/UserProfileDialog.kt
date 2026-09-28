@@ -32,12 +32,18 @@ fun UserProfileDialog(
     onDismissRequest: () -> Unit,
     onSaveProfile: (String, UserProfileEntity) -> Unit,
     saveState: ProfileSaveState? = null,
+    readAvailable: Boolean = true,
+    readFailed: Boolean = false,
+    onRetryRead: () -> Unit = {},
 ) {
     if (currentProfile == null) {
         AlertDialog(
             onDismissRequest = onDismissRequest,
             title = { Text("Meu perfil") },
-            text = { Text("Não foi possível mostrar seu perfil. Se ele continuar indisponível, peça ajuda à equipe responsável pelo seu cadastro.") },
+            text = {
+                if (readFailed) LocalReadNotice("seu perfil", onRetryRead)
+                else Text(if (!readAvailable) "Carregando perfil…" else "Não foi possível mostrar seu perfil. Se ele continuar indisponível, peça ajuda à equipe responsável pelo seu cadastro.")
+            },
             confirmButton = { TextButton(onClick = onDismissRequest, modifier = Modifier.heightIn(min = 56.dp)) { Text("Fechar") } },
         )
         return
@@ -45,7 +51,7 @@ fun UserProfileDialog(
     // Saveable inputs alone are not validated against a restored registry.
     // Put the editor under its identity so a different patient cannot inherit its draft.
     key(currentProfile.id, currentProfile.patientId) {
-        ProfileEditor(currentProfile, onDismissRequest, onSaveProfile, saveState)
+        ProfileEditor(currentProfile, onDismissRequest, onSaveProfile, saveState, readAvailable, readFailed, onRetryRead)
     }
 }
 
@@ -55,6 +61,9 @@ private fun ProfileEditor(
     onDismissRequest: () -> Unit,
     onSaveProfile: (String, UserProfileEntity) -> Unit,
     saveState: ProfileSaveState?,
+    readAvailable: Boolean,
+    readFailed: Boolean,
+    onRetryRead: () -> Unit,
 ) {
     val initial = currentProfile
     var name by rememberSaveable(initial.id, initial.patientId) { mutableStateOf(initial.fullName) }
@@ -79,7 +88,8 @@ private fun ProfileEditor(
     }
     val anySaving = saveState?.status == ProfileSaveStatus.SAVING
     val pending = submissionPending || anySaving
-    val editingEnabled = !pending && receipt?.status != ProfileSaveStatus.SAVED
+    val editingEnabled = readAvailable && !pending && receipt?.status != ProfileSaveStatus.SAVED
+    val canClose = !pending && receipt?.status != ProfileSaveStatus.SAVED
     val uncertain = requestToken != null && !pending && receipt?.status != ProfileSaveStatus.SAVED
     LaunchedEffect(receipt) {
         if (receipt != null && receipt.status != ProfileSaveStatus.SAVING) {
@@ -122,7 +132,10 @@ private fun ProfileEditor(
                 Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
-                Text("Este é o perfil salvo neste aparelho. Confira seus dados antes de salvar.", style = MaterialTheme.typography.bodyLarge)
+                Text(if (readAvailable) "Este é o perfil salvo neste aparelho. Confira seus dados antes de salvar."
+                    else "O rascunho abaixo foi mantido. Aguarde uma nova leitura do perfil antes de salvar.", style = MaterialTheme.typography.bodyLarge)
+                if (readFailed) LocalReadNotice("seu perfil", onRetryRead)
+                else if (!readAvailable) Text("Consultando perfil novamente. Suas alterações nesta tela foram mantidas.")
                 if (requestToken != null) Text(
                     text = if (pending) "Salvando perfil neste celular…" else
                         "Gravação não confirmada. Suas alterações foram mantidas nesta tela. Confira os dados antes de salvar novamente; a tentativa anterior pode já ter sido gravada.",
@@ -161,7 +174,7 @@ private fun ProfileEditor(
         confirmButton = {
             Button(
                 onClick = {
-                    if (valid && !submissionPending && !anySaving && receipt?.status != ProfileSaveStatus.SAVED) {
+                    if (valid && readAvailable && !submissionPending && !anySaving && receipt?.status != ProfileSaveStatus.SAVED) {
                         focusManager.clearFocus()
                         val token = UUID.randomUUID().toString()
                         requestToken = token
@@ -179,11 +192,11 @@ private fun ProfileEditor(
             ) { Text(if (pending) "Salvando…" else "Salvar perfil") }
         },
         dismissButton = {
-            TextButton(onClick = requestClose, enabled = editingEnabled, modifier = Modifier.heightIn(min = 56.dp)) { Text("Cancelar") }
+            TextButton(onClick = requestClose, enabled = canClose, modifier = Modifier.heightIn(min = 56.dp)) { Text("Cancelar") }
         },
     )
 
-    if (confirmDiscard && editingEnabled) {
+    if (confirmDiscard && canClose) {
         ProfileDiscardConfirmation(
             onContinueEditing = { confirmDiscard = false },
             onDiscard = onDismissRequest,

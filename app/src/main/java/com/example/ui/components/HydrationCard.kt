@@ -16,7 +16,13 @@ fun HydrationCard(
     onAddWater: (Int) -> Unit,
     onResetToday: () -> Unit,
     modifier: Modifier = Modifier,
+    readFailed: Boolean = false,
+    onRetryRead: () -> Unit = {},
 ) {
+    if (readFailed) {
+        LocalReadNotice("os registros de água", onRetryRead, modifier)
+        return
+    }
     var confirmReset by remember { mutableStateOf(false) }
     val progress = if (currentMl != null && targetGoalMl != null && targetGoalMl > 0) (currentMl.toFloat() / targetGoalMl).coerceIn(0f, 1f) else null
 

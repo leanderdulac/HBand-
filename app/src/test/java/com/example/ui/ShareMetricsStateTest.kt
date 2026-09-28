@@ -21,15 +21,15 @@ class ShareMetricsStateTest {
         val state = source.shareMetricsState(backgroundScope)
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { state.collect() }
         runCurrent()
-        assertNull(state.value)
+        assertEquals(LocalReadState.Loading, state.value)
         source.emit(emptyList())
         runCurrent()
-        assertEquals(emptyList<HBandSensorMetricEntity>(), state.value)
+        assertEquals(emptyList<HBandSensorMetricEntity>(), state.value.valueOrNull())
         val result = listOf(row)
         source.emit(result)
         runCurrent()
-        assertSame(result, state.value)
-        assertEquals(91L, state.value!!.single().id)
+        assertSame(result, state.value.valueOrNull())
+        assertEquals(91L, state.value.valueOrNull()!!.single().id)
     }
 
     @Test fun last_observer_leaving_discards_replay_and_resume_waits_for_new_response() = runTest {
@@ -39,16 +39,16 @@ class ShareMetricsStateTest {
         runCurrent()
         source.emit(listOf(row))
         runCurrent()
-        assertEquals(listOf(row), state.value)
+        assertEquals(listOf(row), state.value.valueOrNull())
         first.cancel()
         runCurrent()
-        assertNull(state.value)
+        assertEquals(LocalReadState.Loading, state.value)
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { state.collect() }
         runCurrent()
-        assertNull(state.value)
+        assertEquals(LocalReadState.Loading, state.value)
         source.emit(emptyList())
         runCurrent()
-        assertEquals(emptyList<HBandSensorMetricEntity>(), state.value)
+        assertEquals(emptyList<HBandSensorMetricEntity>(), state.value.valueOrNull())
     }
 
     @Test fun source_is_not_observed_without_a_consumer_and_stops_after_last_consumer() = runTest {
@@ -68,10 +68,10 @@ class ShareMetricsStateTest {
         first.cancel()
         runCurrent()
         assertEquals(0, stops)
-        assertEquals(listOf(row), state.value)
+        assertEquals(listOf(row), state.value.valueOrNull())
         second.cancel()
         runCurrent()
         assertEquals(1, stops)
-        assertNull(state.value)
+        assertEquals(LocalReadState.Loading, state.value)
     }
 }

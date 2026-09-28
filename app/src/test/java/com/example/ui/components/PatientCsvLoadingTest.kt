@@ -15,6 +15,7 @@ import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
 import com.example.data.local.HBandSensorMetricEntity
 import com.example.ui.theme.MyApplicationTheme
+import com.example.ui.valueOrNull
 import com.example.ui.shareMetricsState
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
@@ -112,7 +113,7 @@ class PatientCsvLoadingTest {
         // Production loaded-metrics policy, shared by the card and CSV; no operational startup.
         val state = source.shareMetricsState(scope)
         compose.setContent { MyApplicationTheme {
-            val metrics = state.collectAsState().value
+            val metrics = state.collectAsState().value.valueOrNull()
             Column(Modifier.verticalScroll(rememberScrollState())) { CsvExportCard(metrics, {}) }
         } }
         compose.onNodeWithText("Arquivo para suporte").performClick()

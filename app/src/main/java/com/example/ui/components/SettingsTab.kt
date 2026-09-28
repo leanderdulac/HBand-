@@ -67,6 +67,8 @@ import com.example.ui.theme.MinimalBorder
 @OptIn(ExperimentalLayoutApi::class)
 fun SettingsTab(
     userProfile: com.example.data.local.UserProfileEntity? = null,
+    profileReadFailed: Boolean = false,
+    onRetryProfileRead: () -> Unit = {},
     onEditProfileClick: () -> Unit = {},
     autoReconnectBle: Boolean = true,
     onAutoReconnectChange: (Boolean) -> Unit = {},
@@ -125,6 +127,7 @@ fun SettingsTab(
         ) {
             Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("Meu perfil", style = MaterialTheme.typography.titleLarge)
+                if (profileReadFailed) LocalReadNotice("seu perfil", onRetryProfileRead)
                 Text(userProfile?.fullName ?: "Perfil indisponível no momento", style = MaterialTheme.typography.bodyLarge)
                 Button(
                     onClick = onEditProfileClick,

@@ -20,7 +20,6 @@ import com.example.data.hband.WearDetectUiState
 import com.example.data.ingest.IngestPayloadMapper
 import com.example.data.local.AppDatabase
 import com.example.data.local.localWriteTransaction
-import com.example.data.local.HBandSensorMetricEntity
 import com.example.data.local.IngestQueueEntity
 import com.example.data.local.QueueStatus
 import com.example.data.model.HBandDevice
@@ -105,15 +104,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val findDeviceState: StateFlow<FindDeviceUiState> = bleManager.findDeviceState
     val healthRemindState: StateFlow<HealthRemindUiState> = bleManager.healthRemindState
 
-    val allSensorMetrics: StateFlow<List<HBandSensorMetricEntity>> = repository.allSensorMetrics
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
-            initialValue = emptyList()
-        )
-
-    // Observe the DAO-backed source, not allSensorMetrics' initial empty sentinel.
-    val shareSensorMetrics = repository.allSensorMetrics.shareMetricsState(viewModelScope)
+    private val metricsReadRetries = MutableStateFlow(0)
+    val shareSensorMetrics = repository.allSensorMetrics.shareMetricsState(viewModelScope, metricsReadRetries)
+    fun retryMetricsRead() { metricsReadRetries.value += 1 }
 
     private val allQueueItems: StateFlow<List<IngestQueueEntity>> = queuePresentation
         .map { it?.takeUnless { state -> state.readFailed }?.items.orEmpty() }
@@ -233,35 +226,33 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val wellnessActions = PatientWellnessActions(localWellness, ::showNotification)
     private val breathingSave = PatientBreathingSave(viewModelScope, wellnessActions::saveBreathingSession)
     val breathingSaveState = breathingSave.state
-    private val profileSave = PatientProfileSave(viewModelScope, userProfileDao::saveUserProfile) { profile ->
+    private val profileRead = PatientProfileRead(viewModelScope, userProfileDao.getUserProfileFlow())
+    val userProfile = profileRead.state
+    val profileForEditor = profileRead.editorProfile
+    fun retryProfileRead() = profileRead.retry()
+    private val profileSave = PatientProfileSave(viewModelScope, { profile ->
+        check(profileRead.canSave(profile)) { "Profile read unavailable or identity changed" }
+        userProfileDao.saveUserProfile(profile)
+    }) { profile ->
         bleManager.setPatientId(profile.patientId)
         showNotification("Perfil salvo neste celular.")
     }
     val profileSaveState = profileSave.state
 
-    val userProfile: StateFlow<com.example.data.local.UserProfileEntity?> = userProfileDao.getUserProfileFlow()
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
-            initialValue = null
-        )
-
     private val _autoReconnectBle = MutableStateFlow(prefs.getBoolean("auto_reconnect_ble", true))
     val autoReconnectBle: StateFlow<Boolean> = _autoReconnectBle.asStateFlow()
 
-    val todayHydrationMl: StateFlow<Int?> = localWellness.todayHydrationMl
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(stopTimeoutMillis = 0, replayExpirationMillis = 0),
-            initialValue = null
-        )
-
-    val totalBreathingSeconds: StateFlow<Int?> = localWellness.totalBreathingSeconds
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(stopTimeoutMillis = 0, replayExpirationMillis = 0),
-            initialValue = null
-        )
+    private val hydrationReadRetries = MutableStateFlow(0)
+    private val breathingReadRetries = MutableStateFlow(0)
+    val todayHydrationMl = localWellness.todayHydrationMl.localReadState(viewModelScope, hydrationReadRetries) { it == null }
+    val totalBreathingSeconds = localWellness.totalBreathingSeconds.localReadState(viewModelScope, breathingReadRetries) { it == null }
+    fun retryHydrationRead() { hydrationReadRetries.value += 1 }
+    fun retryBreathingRead() { breathingReadRetries.value += 1 }
+    fun retryShareReads() {
+        if (shareSensorMetrics.value == LocalReadState.Failed) retryMetricsRead()
+        if (todayHydrationMl.value == LocalReadState.Failed) retryHydrationRead()
+        if (totalBreathingSeconds.value == LocalReadState.Failed) retryBreathingRead()
+    }
 
     val hydrationTargetGoalMl: Int = 2500
 
@@ -286,7 +277,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         checkHealth()
 
         viewModelScope.launch {
-            userProfileDao.getUserProfile()?.let { bleManager.setPatientId(it.patientId) }
+            profileRead.firstConfirmed()?.let { bleManager.setPatientId(it.patientId) }
         }
 
         viewModelScope.launch {
@@ -480,7 +471,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * (175cm/72kg/32 anos) — essa era a causa da PA estimada não bater com o visor do relógio.
      */
     private fun syncBiometricProfileToBleManager() {
-        val profile = userProfile.value ?: return
+        val profile = userProfile.value.valueOrNull() ?: return
         val isMale = !profile.gender.trim().lowercase().startsWith("f")
         bleManager.updateBiometricProfile(
             heightCm = profile.heightCm.toInt(),
@@ -491,7 +482,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
+    private fun profileReadReady(): Boolean {
+        if (userProfile.value is LocalReadState.Ready) return true
+        showNotification("Aguarde a leitura do perfil. Se houver falha, abra Meu perfil e tente a leitura novamente.", isError = true)
+        return false
+    }
+
     fun connectDevice(device: HBandDevice) {
+        if (!profileReadReady()) return
         syncBiometricProfileToBleManager()
         if (bleManager.connectDevice(device)) {
             showNotification("Tentando conectar a ${device.name}...")
@@ -499,6 +497,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun connectByMacAddress(macAddress: String, customName: String = "VE30 Smart Band") {
+        if (!profileReadReady()) return
         syncBiometricProfileToBleManager()
         val trimmed = macAddress.trim().uppercase()
         val dev = HBandDevice(
@@ -522,6 +521,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun triggerSpotCheck() {
+        if (!profileReadReady()) return
         val telemetry = bleManager.triggerSpotCheck()
         if (telemetry == null || !IngestPayloadMapper.isIngestible(telemetry)) {
             showNotification(
@@ -530,7 +530,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             )
             return
         }
-        val patientId = userProfile.value?.patientId ?: bleManager.currentPatientId
+        val patientId = userProfile.value.valueOrNull()?.patientId ?: bleManager.currentPatientId
         runQueueAction {
             repository.enqueueAndProcessTelemetry(telemetry, patientId)
         }

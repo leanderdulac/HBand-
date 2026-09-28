@@ -52,7 +52,16 @@ fun RechartsSensorDashboard(
     onSimulateBatch: (Int) -> Unit,
     modifier: Modifier = Modifier,
     isScrollable: Boolean = true,
+    readFailed: Boolean = false,
+    onRetryRead: () -> Unit = {},
 ) {
+    if (readFailed) {
+        Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            Text("Histórico", style = MaterialTheme.typography.headlineMedium)
+            LocalReadNotice("o histórico", onRetryRead)
+        }
+        return
+    }
     var selectedMetric by rememberSaveable { mutableStateOf(ChartMetricType.SEVEN_DAY_SUMMARY) }
     var menuOpen by remember { mutableStateOf(false) }
     var showGraph by rememberSaveable { mutableStateOf(false) }

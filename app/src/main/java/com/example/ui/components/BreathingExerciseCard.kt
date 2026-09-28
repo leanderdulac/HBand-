@@ -83,6 +83,8 @@ fun BreathingExerciseCard(
     onSaveSession: (String, Int) -> Unit,
     modifier: Modifier = Modifier,
     saveState: BreathingSaveState? = null,
+    readFailed: Boolean = false,
+    onRetryRead: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -288,7 +290,7 @@ fun BreathingExerciseCard(
                     color = Color(0xFFECFDF5)
                 ) {
                     Text(
-                        text = totalBreathingSeconds?.let { "Tempo salvo: ${it / 60}\u00A0min ${it % 60}\u00A0s" }
+                        text = if (readFailed) "Tempo salvo indisponível" else totalBreathingSeconds?.let { "Tempo salvo: ${it / 60}\u00A0min ${it % 60}\u00A0s" }
                             ?: "Carregando tempo salvo…",
                         style = MaterialTheme.typography.bodyLarge,
                         color = Color(0xFF047857),
@@ -300,6 +302,8 @@ fun BreathingExerciseCard(
             }
 
             Spacer(modifier = Modifier.height(20.dp))
+
+            if (readFailed) LocalReadNotice("o tempo salvo", onRetryRead)
 
             Text(
                 "Para guardar o tempo, toque em Concluir e salvar e aguarde a confirmação.",

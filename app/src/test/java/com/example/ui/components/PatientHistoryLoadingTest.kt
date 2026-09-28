@@ -12,6 +12,7 @@ import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
 import com.example.data.local.HBandSensorMetricEntity
 import com.example.ui.theme.MyApplicationTheme
+import com.example.ui.valueOrNull
 import com.example.ui.shareMetricsState
 import com.github.takahirom.roborazzi.captureRoboImage
 import org.junit.After
@@ -43,7 +44,7 @@ class PatientHistoryLoadingTest {
             .shareMetricsState(scope)
         try {
             compose.setContent { MyApplicationTheme {
-                val metrics = state.collectAsState().value
+                val metrics = state.collectAsState().value.valueOrNull()
                 Column(Modifier.verticalScroll(rememberScrollState())) { content(metrics) }
             } }
             verify()

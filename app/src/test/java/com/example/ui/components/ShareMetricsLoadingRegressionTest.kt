@@ -12,6 +12,7 @@ import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
 import com.example.data.local.HBandSensorMetricEntity
 import com.example.ui.theme.MyApplicationTheme
+import com.example.ui.valueOrNull
 import com.example.ui.shareMetricsState
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
@@ -35,7 +36,7 @@ class ShareMetricsLoadingRegressionTest {
         var prepared = 0
         try {
             compose.setContent { MyApplicationTheme {
-                val metrics = state.collectAsState().value
+                val metrics = state.collectAsState().value.valueOrNull()
                 Column(Modifier.verticalScroll(rememberScrollState())) {
                     ShareProgressCard(metrics, 0, 0, { prepared++ })
                 }

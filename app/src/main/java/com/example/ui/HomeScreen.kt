@@ -91,7 +91,8 @@ fun HomeScreen(
     val isScanning by viewModel.isScanning.collectAsStateWithLifecycle()
     val scanFailure by viewModel.scanFailure.collectAsStateWithLifecycle()
     val latestTelemetry by viewModel.latestTelemetry.collectAsStateWithLifecycle()
-    val shareSensorMetrics by viewModel.shareSensorMetrics.collectAsStateWithLifecycle()
+    val metricsRead by viewModel.shareSensorMetrics.collectAsStateWithLifecycle()
+    val shareSensorMetrics = metricsRead.valueOrNull()
     val queuePresentation by viewModel.queuePresentation.collectAsStateWithLifecycle()
     val readableQueue = queuePresentation?.takeUnless { it.readFailed }
     val allQueueItems = readableQueue?.items
@@ -106,7 +107,9 @@ fun HomeScreen(
     val selectedModalItem by viewModel.selectedQueueItemForPreview.collectAsStateWithLifecycle()
     val notification by viewModel.notification.collectAsStateWithLifecycle()
 
-    val userProfile by viewModel.userProfile.collectAsStateWithLifecycle()
+    val profileRead by viewModel.userProfile.collectAsStateWithLifecycle()
+    val userProfile = profileRead.valueOrNull()
+    val profileForEditor by viewModel.profileForEditor.collectAsStateWithLifecycle()
     val profileSaveState by viewModel.profileSaveState.collectAsStateWithLifecycle()
     val autoReconnectBle by viewModel.autoReconnectBle.collectAsStateWithLifecycle()
     val deviceCapabilities by viewModel.deviceCapabilities.collectAsStateWithLifecycle()
@@ -138,8 +141,10 @@ fun HomeScreen(
     val geminiInsightText by viewModel.geminiInsightText.collectAsStateWithLifecycle()
     val isGeneratingGeminiInsight by viewModel.isGeneratingGeminiInsight.collectAsStateWithLifecycle()
 
-    val todayHydrationMl by viewModel.todayHydrationMl.collectAsStateWithLifecycle()
-    val totalBreathingSeconds by viewModel.totalBreathingSeconds.collectAsStateWithLifecycle()
+    val hydrationRead by viewModel.todayHydrationMl.collectAsStateWithLifecycle()
+    val todayHydrationMl = hydrationRead.valueOrNull()
+    val breathingRead by viewModel.totalBreathingSeconds.collectAsStateWithLifecycle()
+    val totalBreathingSeconds = breathingRead.valueOrNull()
     val breathingSaveState by viewModel.breathingSaveState.collectAsStateWithLifecycle()
 
     val sharePreview: PatientSharePreviewViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
@@ -203,6 +208,13 @@ fun HomeScreen(
                     latestTelemetry = latestTelemetry,
                     sensorMetrics = shareSensorMetrics,
                     shareSensorMetrics = shareSensorMetrics,
+                    metricsReadFailed = metricsRead == LocalReadState.Failed,
+                    hydrationReadFailed = hydrationRead == LocalReadState.Failed,
+                    breathingReadFailed = breathingRead == LocalReadState.Failed,
+                    onRetryMetricsRead = viewModel::retryMetricsRead,
+                    onRetryHydrationRead = viewModel::retryHydrationRead,
+                    onRetryBreathingRead = viewModel::retryBreathingRead,
+                    onRetryShareReads = viewModel::retryShareReads,
                     autoIngestLive = autoIngestLive,
                     onTriggerSync = { viewModel.triggerWorkManagerSync() },
                     onRefreshHealth = { viewModel.checkHealth() },
@@ -256,6 +268,8 @@ fun HomeScreen(
 
                 1 -> com.example.ui.components.RechartsSensorDashboard(
                     sensorMetrics = shareSensorMetrics,
+                    readFailed = metricsRead == LocalReadState.Failed,
+                    onRetryRead = viewModel::retryMetricsRead,
                     onSimulateBatch = { viewModel.enqueueBatchSimulated(it) }
                 )
 
@@ -297,6 +311,8 @@ fun HomeScreen(
 
                 4 -> SettingsTab(
                     userProfile = userProfile,
+                    profileReadFailed = profileRead == LocalReadState.Failed,
+                    onRetryProfileRead = viewModel::retryProfileRead,
                     onEditProfileClick = { showProfileDialog = true },
                     autoReconnectBle = autoReconnectBle,
                     onAutoReconnectChange = { viewModel.setAutoReconnectBle(it) },
@@ -342,7 +358,10 @@ fun HomeScreen(
 
     if (showProfileDialog) {
         com.example.ui.components.UserProfileDialog(
-            currentProfile = userProfile,
+            currentProfile = profileForEditor,
+            readAvailable = profileRead is LocalReadState.Ready,
+            readFailed = profileRead == LocalReadState.Failed,
+            onRetryRead = viewModel::retryProfileRead,
             onDismissRequest = { showProfileDialog = false },
             onSaveProfile = viewModel::saveUserProfile,
             saveState = profileSaveState,
@@ -395,6 +414,13 @@ private fun DashboardTab(
     breathingSaveState: BreathingSaveState? = null,
     onGenerateShareData: (com.example.util.ShareProgressData) -> Unit = {},
     shareSensorMetrics: List<com.example.data.local.HBandSensorMetricEntity>? = null,
+    metricsReadFailed: Boolean = false,
+    hydrationReadFailed: Boolean = false,
+    breathingReadFailed: Boolean = false,
+    onRetryMetricsRead: () -> Unit = {},
+    onRetryHydrationRead: () -> Unit = {},
+    onRetryBreathingRead: () -> Unit = {},
+    onRetryShareReads: () -> Unit = {},
     onShowHistory: () -> Unit = {},
     capabilities: com.example.data.hband.DeviceCapabilities = com.example.data.hband.DeviceCapabilities(),
     hardwareConnected: Boolean = false,
@@ -449,7 +475,8 @@ private fun DashboardTab(
         }, second = {
             TelemetryGauges(telemetry = latestTelemetry)
 
-            com.example.ui.components.DailyHealthSummaryCard(
+            if (metricsReadFailed) com.example.ui.components.LocalReadNotice("o histórico", onRetryMetricsRead)
+            else com.example.ui.components.DailyHealthSummaryCard(
                 metrics = sensorMetrics,
                 modifier = Modifier.fillMaxWidth()
             )
@@ -516,6 +543,8 @@ private fun DashboardTab(
         ) {
             com.example.ui.components.HydrationCard(
                 currentMl = todayHydrationMl,
+                readFailed = hydrationReadFailed,
+                onRetryRead = onRetryHydrationRead,
                 targetGoalMl = hydrationTargetMl,
                 logs = emptyList(),
                 onAddWater = onAddWater,
@@ -526,6 +555,8 @@ private fun DashboardTab(
 
         com.example.ui.components.BreathingExerciseCard(
             totalBreathingSeconds = totalBreathingSeconds,
+            readFailed = breathingReadFailed,
+            onRetryRead = onRetryBreathingRead,
             onSaveSession = onSaveBreathingSession,
             saveState = breathingSaveState,
             modifier = Modifier.fillMaxWidth()
@@ -535,7 +566,8 @@ private fun DashboardTab(
             title = "Sono",
             forceExpanded = false,
         ) {
-            com.example.ui.components.SleepAnalysisCard(
+            if (metricsReadFailed) com.example.ui.components.LocalReadNotice("os registros de sono", onRetryMetricsRead)
+            else com.example.ui.components.SleepAnalysisCard(
                 metrics = sensorMetrics,
                 modifier = Modifier.fillMaxWidth()
             )
@@ -545,18 +577,15 @@ private fun DashboardTab(
             title = "Compartilhar registros",
             forceExpanded = false,
         ) {
-            com.example.ui.components.ShareProgressCard(
-                sensorMetrics = shareSensorMetrics,
+            com.example.ui.components.PatientShareRecords(
+                metrics = shareSensorMetrics,
                 hydrationMl = todayHydrationMl,
                 breathingSeconds = totalBreathingSeconds,
-                onGenerateShareData = onGenerateShareData,
-                modifier = Modifier.fillMaxWidth()
-            )
-
-            com.example.ui.components.CsvExportCard(
-                metrics = shareSensorMetrics,
-                onShowNotification = onShowNotification,
-                modifier = Modifier.fillMaxWidth()
+                metricsReadFailed = metricsReadFailed,
+                diaryReadFailed = hydrationReadFailed || breathingReadFailed,
+                onRetryRead = onRetryShareReads,
+                onGenerate = onGenerateShareData,
+                onNotify = onShowNotification,
             )
         }
 
