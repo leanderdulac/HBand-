@@ -36,7 +36,11 @@ private val destinations = listOf(
 )
 
 @Composable
-internal fun PatientNavigationRail(selectedTab: Int, pendingCount: Int?, onSelect: (Int) -> Unit) {
+internal fun PatientNavigationRail(selectedTab: Int, pendingCount: Int?, onSelect: (Int) -> Unit) =
+    PatientNavigationRail(selectedTab, pendingCount, onSelect, false)
+
+@Composable
+internal fun PatientNavigationRail(selectedTab: Int, pendingCount: Int?, onSelect: (Int) -> Unit, queueReadFailed: Boolean) {
     val style = MaterialTheme.typography.labelLarge
     val measurer = rememberTextMeasurer()
     val density = LocalDensity.current
@@ -55,7 +59,7 @@ internal fun PatientNavigationRail(selectedTab: Int, pendingCount: Int?, onSelec
                     .background(if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent, RoundedCornerShape(20.dp))
                     .selectable(selected, role = Role.Tab, onClick = { onSelect(index) })
                     .padding(horizontal = 4.dp, vertical = 12.dp)
-                    .testTag(destination.tag).pendingDescription(index, pendingCount),
+                    .testTag(destination.tag).pendingDescription(index, pendingCount, queueReadFailed),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
@@ -68,7 +72,11 @@ internal fun PatientNavigationRail(selectedTab: Int, pendingCount: Int?, onSelec
 }
 
 @Composable
-internal fun PatientNavigationBar(selectedTab: Int, pendingCount: Int?, onSelect: (Int) -> Unit) {
+internal fun PatientNavigationBar(selectedTab: Int, pendingCount: Int?, onSelect: (Int) -> Unit) =
+    PatientNavigationBar(selectedTab, pendingCount, onSelect, false)
+
+@Composable
+internal fun PatientNavigationBar(selectedTab: Int, pendingCount: Int?, onSelect: (Int) -> Unit, queueReadFailed: Boolean) {
     val measurer = rememberTextMeasurer()
     val labelStyle = MaterialTheme.typography.labelMedium
     val density = LocalDensity.current
@@ -90,7 +98,7 @@ internal fun PatientNavigationBar(selectedTab: Int, pendingCount: Int?, onSelect
                         onClick = { onSelect(index) },
                         icon = { DestinationIcon(index, pendingCount) },
                         label = { Text(destination.label, style = labelStyle) },
-                        modifier = Modifier.testTag(destination.tag).pendingDescription(index, pendingCount),
+                        modifier = Modifier.testTag(destination.tag).pendingDescription(index, pendingCount, queueReadFailed),
                     )
                 }
             }
@@ -114,7 +122,7 @@ internal fun PatientNavigationBar(selectedTab: Int, pendingCount: Int?, onSelect
                                     )
                                     .selectable(selected, role = Role.Tab, onClick = { onSelect(index) })
                                     .padding(horizontal = 4.dp, vertical = 8.dp)
-                                    .testTag(destination.tag).pendingDescription(index, pendingCount),
+                                    .testTag(destination.tag).pendingDescription(index, pendingCount, queueReadFailed),
                                 horizontalAlignment = Alignment.CenterHorizontally,
                                 verticalArrangement = if (compactRows) Arrangement.Center else Arrangement.spacedBy(4.dp),
                             ) {
@@ -155,9 +163,9 @@ private fun PendingDestinationBadge(index: Int, pendingCount: Int?) {
 }
 
 // The visible badge is abbreviated; assistive technology receives the complete local count.
-private fun Modifier.pendingDescription(index: Int, pendingCount: Int?): Modifier =
+private fun Modifier.pendingDescription(index: Int, pendingCount: Int?, readFailed: Boolean): Modifier =
     if (index == 3) semantics {
-        stateDescription = when (pendingCount) {
+        stateDescription = if (readFailed) "Fila indisponível: falha na leitura" else when (pendingCount) {
             null -> "Carregando fila do aplicativo"
             0 -> "Sem registros pendentes no aplicativo"
             1 -> "1 registro pendente no aplicativo"

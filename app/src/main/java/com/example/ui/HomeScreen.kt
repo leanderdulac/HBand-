@@ -93,7 +93,8 @@ fun HomeScreen(
     val latestTelemetry by viewModel.latestTelemetry.collectAsStateWithLifecycle()
     val shareSensorMetrics by viewModel.shareSensorMetrics.collectAsStateWithLifecycle()
     val queuePresentation by viewModel.queuePresentation.collectAsStateWithLifecycle()
-    val allQueueItems = queuePresentation?.items
+    val readableQueue = queuePresentation?.takeUnless { it.readFailed }
+    val allQueueItems = readableQueue?.items
     val pendingCount = queuePresentation?.pendingCount ?: 0
     val syncedCount = queuePresentation?.syncedCount ?: 0
     val failedCount = queuePresentation?.failedCount ?: 0
@@ -168,7 +169,8 @@ fun HomeScreen(
     com.example.ui.components.PatientAdaptiveScaffold(
         modifier = modifier,
         selectedTab = selectedTab,
-        pendingCount = queuePresentation?.pendingCount,
+        pendingCount = readableQueue?.pendingCount,
+        queueReadFailed = queuePresentation?.readFailed == true,
         onSelect = { selectedTab = it },
         snackbarHost = { SnackbarHost(snackbarHostState) },
         header = {
@@ -190,6 +192,7 @@ fun HomeScreen(
             when (selectedTab) {
                 0 -> DashboardTab(
                     syncDisplayStatus = syncDisplayStatus,
+                    onRetryQueueRead = viewModel::retryQueueRead,
                     pendingCount = pendingCount,
                     syncedCount = syncedCount,
                     failedCount = failedCount,
@@ -273,6 +276,8 @@ fun HomeScreen(
                     syncedCount = syncedCount,
                     failedCount = failedCount,
                     queueItems = allQueueItems,
+                    readFailed = queuePresentation?.readFailed == true,
+                    onRetryRead = viewModel::retryQueueRead,
                     syncLogs = syncLogs,
                     isSyncing = isSyncing,
                     onSyncNow = { viewModel.syncQueueNow() },
@@ -368,6 +373,7 @@ private fun DashboardTab(
     autoIngestLive: Boolean,
     onTriggerSync: () -> Unit,
     onRefreshHealth: () -> Unit,
+    onRetryQueueRead: () -> Unit,
     onRetryAll: () -> Unit = {},
     onToggleAutoIngest: (Boolean) -> Unit,
     onSpotCheck: () -> Unit,
@@ -457,6 +463,7 @@ private fun DashboardTab(
 
         com.example.ui.components.SyncStatusIndicator(
             syncStatus = syncDisplayStatus,
+            onRetryRead = onRetryQueueRead,
             pendingCount = pendingCount,
             syncedCount = syncedCount,
             failedCount = failedCount,

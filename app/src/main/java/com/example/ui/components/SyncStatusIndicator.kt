@@ -25,6 +25,7 @@ import androidx.compose.ui.unit.dp
 
 enum class SyncDisplayStatus {
     LOADING,
+    READ_ERROR,
     SYNCING,
     OFFLINE,
     FULLY_SYNCED,
@@ -43,11 +44,14 @@ fun SyncStatusIndicator(
     modifier: Modifier = Modifier,
     consecutiveFailures: Int = 0,
     onRefreshHealth: (() -> Unit)? = null,
-    onRetryAll: (() -> Unit)? = null
+    onRetryAll: (() -> Unit)? = null,
+    onRetryRead: (() -> Unit)? = null,
 ) {
     val syncing = syncStatus == SyncDisplayStatus.SYNCING
+    val readable = syncStatus != SyncDisplayStatus.LOADING && syncStatus != SyncDisplayStatus.READ_ERROR
     val title = when (syncStatus) {
         SyncDisplayStatus.LOADING -> "Carregando fila…"
+        SyncDisplayStatus.READ_ERROR -> "Não foi possível ler a fila"
         SyncDisplayStatus.SYNCING -> "Enviando registros"
         SyncDisplayStatus.OFFLINE -> "Última verificação do serviço falhou"
         SyncDisplayStatus.FULLY_SYNCED -> "Envio de dados"
@@ -57,6 +61,7 @@ fun SyncStatusIndicator(
     }
     val description = when (syncStatus) {
         SyncDisplayStatus.LOADING -> "Aguarde a consulta dos registros salvos no aplicativo."
+        SyncDisplayStatus.READ_ERROR -> "Os registros não foram apagados por esta tentativa. Tente ler a fila novamente. Essa ação não envia dados."
         SyncDisplayStatus.SYNCING -> "Aguarde enquanto o aplicativo tenta enviar os registros."
         SyncDisplayStatus.OFFLINE -> "Confira a conexão e a configuração do serviço. Se precisar, peça ajuda à equipe responsável pelo aplicativo."
         SyncDisplayStatus.FULLY_SYNCED -> "A fila exibida não tem envios pendentes. Isso não confirma o recebimento pela equipe de saúde."
@@ -81,9 +86,14 @@ fun SyncStatusIndicator(
                 Text(description, style = MaterialTheme.typography.bodyLarge)
             }
             if (syncing || syncStatus == SyncDisplayStatus.LOADING) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-            if (syncStatus != SyncDisplayStatus.LOADING && pendingCount > 0) Text("Aguardando envio: $pendingCount", style = MaterialTheme.typography.bodyLarge)
-            if (syncStatus != SyncDisplayStatus.LOADING && failedCount > 0) Text("Registros com falha no envio: $failedCount", style = MaterialTheme.typography.bodyLarge)
-            if (syncStatus != SyncDisplayStatus.LOADING && (syncStatus != SyncDisplayStatus.FULLY_SYNCED || pendingCount > 0 || failedCount > 0)) {
+            if (syncStatus == SyncDisplayStatus.READ_ERROR && onRetryRead != null) {
+                OutlinedButton(onClick = onRetryRead, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag("retry_queue_read")) {
+                    Text("Tentar ler a fila novamente")
+                }
+            }
+            if (readable && pendingCount > 0) Text("Aguardando envio: $pendingCount", style = MaterialTheme.typography.bodyLarge)
+            if (readable && failedCount > 0) Text("Registros com falha no envio: $failedCount", style = MaterialTheme.typography.bodyLarge)
+            if (readable && (syncStatus != SyncDisplayStatus.FULLY_SYNCED || pendingCount > 0 || failedCount > 0)) {
                 Button(
                     onClick = if ((failedCount > 0 || syncStatus == SyncDisplayStatus.AUTH_REQUIRED) && onRetryAll != null) onRetryAll else onTriggerSync,
                     enabled = !syncing,

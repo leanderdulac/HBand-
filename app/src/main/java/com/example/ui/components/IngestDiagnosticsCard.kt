@@ -18,7 +18,9 @@ fun IngestDiagnosticsCard(diagnostics: IngestDiagnostics, modifier: Modifier = M
     Surface(modifier.fillMaxWidth().testTag("ingest_diagnostics_card"), color = MaterialTheme.colorScheme.surfaceVariant) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("Diagnóstico de envio", style = MaterialTheme.typography.titleMedium)
-            if (!diagnostics.loaded) {
+            if (diagnostics.readFailed) {
+                Text("Não foi possível ler a fila. Tente a leitura novamente na tela Envios.")
+            } else if (!diagnostics.loaded) {
                 Text("Carregando configuração e registros locais…")
             } else {
                 val config = diagnostics.configuration

@@ -18,6 +18,7 @@ internal fun PatientAdaptiveScaffold(
     onSelect: (Int) -> Unit,
     modifier: Modifier = Modifier,
     snackbarHost: @Composable () -> Unit = {},
+    queueReadFailed: Boolean = false,
     header: @Composable () -> Unit,
     content: @Composable () -> Unit,
 ) {
@@ -29,10 +30,10 @@ internal fun PatientAdaptiveScaffold(
             modifier = Modifier.fillMaxSize(),
             containerColor = Color(0xFFF8F9FF),
             snackbarHost = snackbarHost,
-            bottomBar = { if (!rail) PatientNavigationBar(selectedTab, pendingCount, onSelect) },
+            bottomBar = { if (!rail) PatientNavigationBar(selectedTab, pendingCount, onSelect, queueReadFailed) },
         ) { padding ->
             Row(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding)) {
-                if (rail) PatientNavigationRail(selectedTab, pendingCount, onSelect)
+                if (rail) PatientNavigationRail(selectedTab, pendingCount, onSelect, queueReadFailed)
                 Box(Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.TopCenter) {
                     Column(
                         Modifier.widthIn(max = if (selectedTab == 0) 1120.dp else 840.dp)

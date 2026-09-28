@@ -9,6 +9,7 @@ data class IngestDiagnostics(
     val configuration: IngestConfigurationStatus = IngestConfigurationStatus(),
     val pending: Int = 0, val failed: Int = 0, val synced: Int = 0, val unknown: Int = 0,
     val authorizationPaused: Boolean = false,
+    val readFailed: Boolean = false,
 ) {
     companion object {
         fun from(items: List<IngestQueueEntity>, configuration: IngestConfigurationStatus) = IngestDiagnostics(

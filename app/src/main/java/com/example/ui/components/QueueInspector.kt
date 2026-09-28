@@ -39,17 +39,19 @@ fun QueueInspector(
     onRefreshWorkManager: () -> Unit,
     p1LocationHint: String? = null,
     modifier: Modifier = Modifier,
+    readFailed: Boolean = false,
+    onRetryRead: (() -> Unit)? = null,
 ) {
     // Leave the loaded composition entirely, including any remembered removal dialog.
     // No queue operation is offered until a fresh query response is available.
-    if (queueItems == null) {
+    if (queueItems == null || readFailed) {
         Column(
             modifier.fillMaxSize().verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Text("Envios", style = MaterialTheme.typography.headlineMedium)
-            SyncStatusIndicator(SyncDisplayStatus.LOADING, 0, 0, 0, onSyncNow)
-            PatientSection("Ver registros da fila") {
+            SyncStatusIndicator(if (readFailed) SyncDisplayStatus.READ_ERROR else SyncDisplayStatus.LOADING, 0, 0, 0, onSyncNow, onRetryRead = onRetryRead)
+            if (!readFailed) PatientSection("Ver registros da fila") {
                 Text("Aguarde a consulta dos registros salvos no aplicativo.", style = MaterialTheme.typography.bodyLarge)
             }
         }

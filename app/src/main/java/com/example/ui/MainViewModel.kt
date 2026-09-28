@@ -68,9 +68,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val isSyncing: StateFlow<Boolean> = repository.isSyncing
     val lastSyncResult: StateFlow<String?> = repository.lastSyncResult
 
-    val ingestDiagnostics = combine(repository.allQueueItems, RetrofitClient.configurationState) { items, configuration ->
-        com.example.data.ingest.IngestDiagnostics.from(items, configuration)
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), com.example.data.ingest.IngestDiagnostics())
+    private val queueReadRetries = MutableStateFlow(0)
+    val queuePresentation = repository.allQueueItems.queuePresentationState(viewModelScope, queueReadRetries)
+
+    fun retryQueueRead() { queueReadRetries.value += 1 }
+
+    val ingestDiagnostics = combine(queuePresentation, RetrofitClient.configurationState) { state, configuration ->
+        when {
+            state == null -> com.example.data.ingest.IngestDiagnostics(configuration = configuration)
+            state.readFailed -> com.example.data.ingest.IngestDiagnostics(configuration = configuration, readFailed = true)
+            else -> com.example.data.ingest.IngestDiagnostics.from(state.items, configuration)
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(0, replayExpirationMillis = 0), com.example.data.ingest.IngestDiagnostics())
 
     val scannedDevices: StateFlow<List<HBandDevice>> = bleManager.scannedDevices
     val connectedDevice: StateFlow<HBandDevice?> = bleManager.connectedDevice
@@ -106,19 +115,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     // Observe the DAO-backed source, not allSensorMetrics' initial empty sentinel.
     val shareSensorMetrics = repository.allSensorMetrics.shareMetricsState(viewModelScope)
 
-    val allQueueItems: StateFlow<List<IngestQueueEntity>> = repository.allQueueItems
+    private val allQueueItems: StateFlow<List<IngestQueueEntity>> = queuePresentation
+        .map { it?.takeUnless { state -> state.readFailed }?.items.orEmpty() }
         .stateIn(
             scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
+            started = SharingStarted.WhileSubscribed(0, replayExpirationMillis = 0),
             initialValue = emptyList()
         )
 
-    // Dedicated screen observation: legacy diagnostic flows must not retain UI readiness.
-    val queuePresentation = repository.allQueueItems.queuePresentationState(viewModelScope)
-
     val failedCount: StateFlow<Int> = allQueueItems.combine(MutableStateFlow(0)) { items, _ ->
         items.count { it.status == QueueStatus.FAILED.name }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(0, replayExpirationMillis = 0), 0)
 
     val syncLogs: StateFlow<List<SyncLogEntry>> = combine(
         WorkManager.getInstance(application).getWorkInfosByTagLiveData("hband_sync_worker").asFlow(),
@@ -173,7 +180,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         logs.sortedByDescending { it.timestampMillis }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(0, replayExpirationMillis = 0), emptyList())
 
     val consecutiveFailures: StateFlow<Int> = combine(syncLogs, failedCount) { logs, failed ->
         var count = 0
@@ -185,7 +192,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
         if (count == 0 && failed > 0) failed else count
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(0, replayExpirationMillis = 0), 0)
 
     private val notificationState = PatientNotificationState()
     val notification: StateFlow<UiNotification?> = notificationState.notification

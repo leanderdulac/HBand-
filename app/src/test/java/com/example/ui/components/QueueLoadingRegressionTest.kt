@@ -23,6 +23,57 @@ import org.robolectric.annotation.Config
 class QueueLoadingRegressionTest {
     @get:Rule val compose = createComposeRule()
 
+    @Test fun read_failure_discards_removal_confirmation_and_retry_never_sends_or_deletes() {
+        val failed = mutableStateOf(false)
+        var actions = 0
+        var reads = 0
+        val rows = listOf(IngestQueueEntity(id = 57, payloadJson = "{}", status = "FAILED"))
+        compose.setContent { MyApplicationTheme {
+            QueueInspector(0, 0, 1, rows, emptyList(), false,
+                { actions++ }, { actions++ }, { actions++ }, { actions++ },
+                { actions++ }, { actions++ }, { actions++ }, { actions++ },
+                readFailed = failed.value, onRetryRead = { reads++ })
+        } }
+        compose.onNodeWithText("Detalhes para suporte").performScrollTo().performClick()
+        compose.onNodeWithTag("delete_queue_57").performScrollTo().performClick()
+        compose.onNodeWithTag("confirm_queue_removal").assertExists()
+        compose.runOnIdle { failed.value = true }
+        compose.onNodeWithTag("confirm_queue_removal").assertDoesNotExist()
+        compose.onNodeWithTag("trigger_workmanager_sync_button").assertDoesNotExist()
+        compose.onNodeWithText("Registros com falha no envio: 1").assertDoesNotExist()
+        compose.onNodeWithText("A lista exibida está vazia.").assertDoesNotExist()
+        compose.onNodeWithTag("retry_queue_read").performScrollTo().performClick()
+        compose.runOnIdle { assertEquals(1, reads); assertEquals(0, actions); failed.value = false }
+        compose.onNodeWithTag("confirm_queue_removal").assertDoesNotExist()
+    }
+
+    @Test fun dashboard_read_error_hides_stale_counts_and_offers_read_only_retry() {
+        var reads = 0
+        compose.setContent { MyApplicationTheme {
+            SyncStatusIndicator(SyncDisplayStatus.READ_ERROR, 9, 2, 4,
+                { error("Unexpected send") }, onRetryAll = { error("Unexpected retry") }, onRetryRead = { reads++ })
+        } }
+        compose.onNodeWithText("Aguardando envio: 9").assertDoesNotExist()
+        compose.onNodeWithText("Registros com falha no envio: 4").assertDoesNotExist()
+        compose.onNodeWithTag("trigger_workmanager_sync_button").assertDoesNotExist()
+        compose.onNodeWithTag("retry_queue_read").performClick()
+        compose.runOnIdle { assertEquals(1, reads) }
+    }
+
+    @Test fun navigation_announces_read_error_and_diagnostics_do_not_claim_zero() {
+        compose.setContent { MyApplicationTheme {
+            androidx.compose.foundation.layout.Column {
+                PatientNavigationBar(3, null, {}, queueReadFailed = true)
+                IngestDiagnosticsCard(com.example.data.ingest.IngestDiagnostics(readFailed = true))
+            }
+        } }
+        compose.onNodeWithTag("tab_queue").assert(SemanticsMatcher.expectValue(
+            SemanticsProperties.StateDescription, "Fila indisponível: falha na leitura"))
+        compose.onNodeWithText("Não foi possível ler a fila.", substring = true).assertExists()
+        compose.onNodeWithText("Aguardando envio: 0.", substring = true).assertDoesNotExist()
+        compose.onNodeWithText("Carregando configuração e registros locais…").assertDoesNotExist()
+    }
+
     @Test fun pending_query_does_not_claim_no_pending_records() = pendingQuery {
         compose.onNodeWithText("A fila exibida não tem envios pendentes.", substring = true).assertDoesNotExist()
     }
