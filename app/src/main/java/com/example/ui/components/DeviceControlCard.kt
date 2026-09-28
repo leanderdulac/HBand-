@@ -27,7 +27,6 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -48,12 +47,9 @@ fun DeviceControlCard(
     autoIngestLive: Boolean,
     onToggleAutoIngest: (Boolean) -> Unit,
     onSpotCheck: () -> Unit,
-    onSimulateBatch: (Int) -> Unit,
     onScanClick: () -> Unit,
     onDisconnect: () -> Unit,
     modifier: Modifier = Modifier,
-    onSimulateLowBattery: (() -> Unit)? = null,
-    onRechargeBattery: (() -> Unit)? = null
 ) {
     val batteryLevel = device?.batteryLevel
     val batterySimulated = device?.batteryIsSimulated == true
@@ -163,52 +159,6 @@ fun DeviceControlCard(
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text("Sincronizar Dados Vitais", style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Medium))
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                OutlinedButton(
-                    onClick = { onSimulateBatch(5) },
-                    modifier = Modifier
-                        .weight(1f)
-                        .testTag("simulate_batch_button"),
-                    shape = RoundedCornerShape(20.dp),
-                    border = BorderStroke(1.dp, MinimalBorder)
-                ) {
-                    Text("Teste em Lote (+5)", style = MaterialTheme.typography.labelMedium, color = Color(0xFF00639B))
-                }
-
-                if (onSimulateLowBattery != null && onRechargeBattery != null) {
-                    if (batterySimulated && (batteryLevel ?: 100) <= 20) {
-                        OutlinedButton(
-                            onClick = onRechargeBattery,
-                            modifier = Modifier
-                                .weight(1f)
-                                .testTag("recharge_battery_button"),
-                            shape = RoundedCornerShape(20.dp),
-                            border = BorderStroke(1.dp, Color(0xFF81C784)),
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF2E7D32))
-                        ) {
-                            Text("Sim. recarregar 98%", style = MaterialTheme.typography.labelMedium)
-                        }
-                    } else {
-                        OutlinedButton(
-                            onClick = onSimulateLowBattery,
-                            modifier = Modifier
-                                .weight(1f)
-                                .testTag("test_low_battery_button"),
-                            shape = RoundedCornerShape(20.dp),
-                            border = BorderStroke(1.dp, Color(0xFFFFCC80)),
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFE65100))
-                        ) {
-                            Text("Simular Bat. Fraca", style = MaterialTheme.typography.labelMedium)
-                        }
-                    }
-                }
             }
 
             Spacer(modifier = Modifier.height(12.dp))

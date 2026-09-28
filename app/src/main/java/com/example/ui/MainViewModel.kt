@@ -388,20 +388,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun testHighHrAlert() {
-        val upper = _upperHrThreshold.value
-        val testHr = (upper + 18).coerceAtLeast(125)
-        HrNotificationHelper.sendHighHrNotification(getApplication(), testHr, upper)
-        showNotification("⚠️ High Heart Rate Alert: $testHr BPM exceeds $upper BPM threshold limit!", isError = true)
-    }
-
-    fun testLowHrAlert() {
-        val lower = _lowerHrThreshold.value
-        val testHr = (lower - 8).coerceAtMost(42)
-        HrNotificationHelper.sendLowHrNotification(getApplication(), testHr, lower)
-        showNotification("⚠️ Low Heart Rate Alert: $testHr BPM is below $lower BPM threshold limit!", isError = true)
-    }
-
     fun setAutoReconnectBle(enabled: Boolean) {
         _autoReconnectBle.value = enabled
         bleManager.isAutoReconnectEnabled = enabled
@@ -498,27 +484,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun testSmokeHeartConnection(patientId: String = "PAT-HBAND-001") {
-        viewModelScope.launch {
-            try {
-                val apiKey = RetrofitClient.apiKey
-                val repo = com.healthtech.companion.net.HealthtechRepository.create(
-                    baseUrl = "https://healthtech-secure-api-5794833455.us-central1.run.app",
-                    apiKey = apiKey
-                )
-                val response = repo.smokeHeart(patientId)
-                if (response.isSuccessful) {
-                    showNotification("SmokeHeart Test Success (200 OK) for patient $patientId!")
-                } else {
-                    val err = response.errorBody()?.string() ?: response.message()
-                    showNotification("SmokeHeart Test (HTTP ${response.code()}): $err", isError = true)
-                }
-            } catch (e: Exception) {
-                showNotification("SmokeHeart Error: ${e.localizedMessage ?: "Connection failed"}", isError = true)
-            }
-        }
-    }
-
     fun startBleScan() {
         bleManager.checkBondedOrAutoConnect()
         bleManager.startScanning()
@@ -593,17 +558,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 })
             }
         }
-    }
-
-    fun enqueueBatchSimulated(count: Int) {
-        viewModelScope.launch {
-            repository.enqueueBatchSimulatedReadings(bleManager, count)
-            showNotification("Enqueued $count simulated HBand sensor batch readings to Room DB offline queue!")
-        }
-    }
-
-    fun quickConnectVE30() {
-        connectByMacAddress("C4:E3:42:VE:30:A4", "VE30 Smart Band")
     }
 
     fun markAllAsLocalSynced() {
@@ -727,16 +681,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 showNotification("Firestore Restore Error: $err", isError = true)
             }
         }
-    }
-
-    fun simulateLowBattery() {
-        bleManager.simulateLowBattery()
-        showNotification("Simulação de teste: aviso de bateria fraca (14%) — não é leitura da pulseira", isError = true)
-    }
-
-    fun rechargeBattery() {
-        bleManager.rechargeBattery()
-        showNotification("Simulação de teste: 98% — não é leitura da pulseira")
     }
 
     fun dismissNotification() {

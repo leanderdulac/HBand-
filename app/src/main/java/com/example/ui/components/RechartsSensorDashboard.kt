@@ -28,7 +28,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Analytics
 import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.automirrored.filled.DirectionsRun
@@ -38,15 +37,12 @@ import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Thermostat
 import androidx.compose.material.icons.filled.WaterDrop
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -91,7 +87,6 @@ enum class ChartMetricType(val label: String) {
 @Composable
 fun RechartsSensorDashboard(
     sensorMetrics: List<HBandSensorMetricEntity>,
-    onSimulateBatch: (Int) -> Unit,
     modifier: Modifier = Modifier,
     isScrollable: Boolean = true
 ) {
@@ -236,20 +231,10 @@ fun RechartsSensorDashboard(
                     )
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        text = "Gere métricas de teste do sensor HBand para popular o banco de dados Room SQLite local e visualizar os gráficos.",
+                        text = "Conecte a pulseira e sincronize para ver os gráficos.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = Color(0xFF44474E)
                     )
-                    Spacer(modifier = Modifier.height(20.dp))
-                    Button(
-                        onClick = { onSimulateBatch(5) },
-                        shape = RoundedCornerShape(20.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00639B))
-                    ) {
-                        Icon(imageVector = Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Adicionar 5 Métricas de Teste")
-                    }
                 }
             }
         } else {
@@ -290,15 +275,7 @@ fun RechartsSensorDashboard(
                             )
                         }
 
-                        OutlinedButton(
-                            onClick = { onSimulateBatch(1) },
-                            shape = RoundedCornerShape(16.dp),
-                            border = BorderStroke(1.dp, MinimalBorder)
-                        ) {
-                            Icon(imageVector = Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp), tint = Color(0xFF00639B))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("+1 Registro", style = MaterialTheme.typography.labelMedium, color = Color(0xFF00639B))
-                        }
+
                     }
 
                     Spacer(modifier = Modifier.height(16.dp))

@@ -213,7 +213,7 @@ fun QueueInspector(
 
         // Queue Items List
         Text(
-            text = "ITENS DA FILA OFFLINE ROOM (${queueItems.size})",
+            text = "Medições na fila (${queueItems.size})",
             style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold, letterSpacing = 1.sp),
             color = Color(0xFF44474E)
         )
@@ -226,7 +226,7 @@ fun QueueInspector(
                 contentAlignment = Alignment.Center
             ) {
                 Text(
-                    text = "A fila offline está vazia. As leituras dos sensores serão acumuladas aqui quando offline.",
+                    text = "A fila está vazia. As leituras da pulseira aparecem aqui quando o envio não acontece na hora.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = Color(0xFF44474E)
                 )
@@ -382,7 +382,7 @@ private fun QueueItemCard(
             if (!item.errorMessage.isNullOrBlank()) {
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = "Error: ${item.errorMessage}",
+                    text = "Falha: ${item.errorMessage}",
                     style = MaterialTheme.typography.labelSmall,
                     color = Color(0xFFBA1A1A)
                 )

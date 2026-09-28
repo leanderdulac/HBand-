@@ -116,12 +116,12 @@ fun SyncHistoryLog(
                     Spacer(modifier = Modifier.width(12.dp))
                     Column {
                         Text(
-                            text = "Histórico de Sincronização WorkManager",
+                            text = "Histórico de envio",
                             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                             color = Color(0xFF191C1E)
                         )
                         Text(
-                            text = "Registro de tarefas em segundo plano e envios via API",
+                            text = "Registro dos envios feitos em segundo plano",
                             style = MaterialTheme.typography.labelSmall,
                             color = Color(0xFF44474E)
                         )

@@ -91,36 +91,36 @@ fun SyncStatusIndicator(
         SyncDisplayStatus.SYNCING -> SyncUiConfig(
             bgColor = Color(0xFFD1E4FF),
             fgColor = Color(0xFF004A77),
-            title = "Syncing",
-            subtitle = "WorkManager uploading Room DB metrics to HealthTech API...",
+            title = "Sincronizando",
+            subtitle = "Enviando as medições guardadas no telefone…",
             icon = Icons.Default.Sync
         )
         SyncDisplayStatus.OFFLINE -> SyncUiConfig(
             bgColor = Color(0xFFFFF3E0),
             fgColor = Color(0xFFB56C00),
-            title = "Offline",
-            subtitle = "Metrics held in Room SQLite database until network restores",
+            title = "Sem rede",
+            subtitle = "As medições ficam no telefone até a rede voltar.",
             icon = Icons.Default.CloudOff
         )
         SyncDisplayStatus.FULLY_SYNCED -> SyncUiConfig(
             bgColor = Color(0xFFE8F5E9),
             fgColor = Color(0xFF2E7D32),
-            title = "Fully Synced",
-            subtitle = "All local Room database metrics uploaded to HealthTech API",
+            title = "Tudo enviado",
+            subtitle = "As medições locais já foram enviadas.",
             icon = Icons.Default.CheckCircle
         )
         SyncDisplayStatus.PENDING_QUEUE -> SyncUiConfig(
             bgColor = Color(0xFFF1F4F9),
             fgColor = Color(0xFF00639B),
-            title = "Queued ($pendingCount Pending)",
-            subtitle = "WorkManager periodic background sync scheduled",
+            title = "Na fila ($pendingCount)",
+            subtitle = "O envio em segundo plano está agendado.",
             icon = Icons.Default.Schedule
         )
         SyncDisplayStatus.FAILED -> SyncUiConfig(
             bgColor = Color(0xFFFFEBEE),
             fgColor = Color(0xFFC62828),
-            title = "Sync Warning ($failedCount Failed)",
-            subtitle = "Recent upload failed. Tap to retry WorkManager task.",
+            title = "Falha no envio ($failedCount)",
+            subtitle = "O último envio falhou. Toque para tentar de novo.",
             icon = Icons.Default.ErrorOutline
         )
     }
@@ -204,7 +204,7 @@ fun SyncStatusIndicator(
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = if (syncStatus == SyncDisplayStatus.SYNCING) "Syncing" else "Sync Now",
+                        text = if (syncStatus == SyncDisplayStatus.SYNCING) "Enviando" else "Enviar agora",
                         style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
                     )
                 }
@@ -222,11 +222,11 @@ fun SyncStatusIndicator(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                StatusPill("Pending Work", "$pendingCount", Color(0xFF00639B))
+                StatusPill("Na fila", "$pendingCount", Color(0xFF00639B))
                 StatusDivider()
-                StatusPill("Uploaded", "$syncedCount", Color(0xFF2E7D32))
+                StatusPill("Enviadas", "$syncedCount", Color(0xFF2E7D32))
                 StatusDivider()
-                StatusPill("Failed Retries", "$failedCount", Color(0xFFC62828))
+                StatusPill("Falhas", "$failedCount", Color(0xFFC62828))
             }
 
             AnimatedVisibility(visible = consecutiveFailures >= 2 || failedCount > 0 || syncStatus == SyncDisplayStatus.FAILED) {
@@ -246,22 +246,22 @@ fun SyncStatusIndicator(
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.Warning,
-                                    contentDescription = "Warning",
+                                    contentDescription = "Aviso",
                                     tint = Color(0xFFD32F2F),
                                     modifier = Modifier.size(22.dp)
                                 )
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
-                                        text = "Sync Warning: Multiple Consecutive Failures",
+                                        text = "Vários envios seguidos falharam",
                                         style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                                         color = Color(0xFFB71C1C)
                                     )
                                     Spacer(modifier = Modifier.height(2.dp))
                                     Text(
                                         text = if (consecutiveFailures >= 2) {
-                                            "$consecutiveFailures consecutive upload attempts failed. Please perform a manual connectivity check (Wi-Fi / Cellular) or verify API endpoint."
+                                            "$consecutiveFailures tentativas seguidas falharam. Confira o Wi-Fi ou os dados móveis."
                                         } else {
-                                            "Upload attempts encountered errors ($failedCount failed items). Suggest checking network connectivity and endpoint status."
+                                            "Há $failedCount medições que não foram enviadas. Confira a rede e tente de novo."
                                         },
                                         style = MaterialTheme.typography.bodySmall,
                                         color = Color(0xFF5D1010)

@@ -66,7 +66,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.example.BuildConfig
 import com.example.ui.components.ApiHeader
 import com.example.ui.components.DeviceControlCard
 import com.example.ui.components.HomeWelcomeHeader
@@ -313,10 +312,7 @@ fun HomeScreen(
                         onRetryAll = { viewModel.retryAllFailed() },
                         onToggleAutoIngest = { viewModel.setAutoIngestLiveReadings(it) },
                         onSpotCheck = { viewModel.triggerSpotCheck() },
-                        onSimulateBatch = { viewModel.enqueueBatchSimulated(it) },
                         onShowNotification = { viewModel.showNotification(it) },
-                        onSimulateLowBattery = if (BuildConfig.DEBUG) ({ viewModel.simulateLowBattery() }) else null,
-                        onRechargeBattery = if (BuildConfig.DEBUG) ({ viewModel.rechargeBattery() }) else null,
                         onScanClick = { selectedTab = 2 },
                         onDisconnect = { viewModel.disconnectDevice() },
                         geminiInsightText = geminiInsightText,
@@ -358,7 +354,6 @@ fun HomeScreen(
 
                     1 -> com.example.ui.components.RechartsSensorDashboard(
                         sensorMetrics = allSensorMetrics,
-                        onSimulateBatch = { viewModel.enqueueBatchSimulated(it) }
                     )
 
                     2 -> BleDevicesTab(
@@ -404,14 +399,11 @@ fun HomeScreen(
                         onUpperThresholdChange = { viewModel.setUpperHrThreshold(it) },
                         onLowerThresholdChange = { viewModel.setLowerHrThreshold(it) },
                         onAlertsEnabledChange = { viewModel.setHrAlertsEnabled(it) },
-                        onTestHighAlert = { viewModel.testHighHrAlert() },
-                        onTestLowAlert = { viewModel.testLowHrAlert() },
                         firestoreStatus = firestoreSyncStatus,
                         lastBackupTime = lastFirestoreBackupTime,
                         lastBackupCount = lastFirestoreBackupCount,
                         onTriggerBackup = { viewModel.triggerFirestoreBackup() },
                         onRestoreBackup = { viewModel.restoreFromFirestoreBackup() },
-                        onTestApiSmoke = { viewModel.testSmokeHeartConnection(userProfile?.patientId ?: "PAT-HBAND-001") },
                         onResetAllData = { viewModel.resetAllDataToZero() },
                         capabilities = deviceCapabilities,
                         autoMeasureState = autoMeasureState,
@@ -479,10 +471,7 @@ private fun DashboardTab(
     onRetryAll: () -> Unit = {},
     onToggleAutoIngest: (Boolean) -> Unit,
     onSpotCheck: () -> Unit,
-    onSimulateBatch: (Int) -> Unit,
     onShowNotification: (String) -> Unit,
-    onSimulateLowBattery: (() -> Unit)? = null,
-    onRechargeBattery: (() -> Unit)? = null,
     onScanClick: () -> Unit,
     onDisconnect: () -> Unit,
     geminiInsightText: String = "",
@@ -545,11 +534,8 @@ private fun DashboardTab(
             autoIngestLive = autoIngestLive,
             onToggleAutoIngest = onToggleAutoIngest,
             onSpotCheck = onSpotCheck,
-            onSimulateBatch = onSimulateBatch,
             onScanClick = onScanClick,
             onDisconnect = onDisconnect,
-            onSimulateLowBattery = onSimulateLowBattery,
-            onRechargeBattery = onRechargeBattery
         )
 
         TelemetryGauges(telemetry = latestTelemetry)
@@ -592,7 +578,6 @@ private fun DashboardTab(
 
         com.example.ui.components.LowBatteryWarningCard(
             device = connectedDevice,
-            onRechargeBattery = onRechargeBattery,
             modifier = Modifier.fillMaxWidth()
         )
 
@@ -631,7 +616,6 @@ private fun DashboardTab(
 
         com.example.ui.components.RechartsSensorDashboard(
             sensorMetrics = sensorMetrics,
-            onSimulateBatch = onSimulateBatch,
             isScrollable = false,
             modifier = Modifier.fillMaxWidth()
         )

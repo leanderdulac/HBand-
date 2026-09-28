@@ -24,7 +24,6 @@ import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.DeleteSweep
-import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.getValue
@@ -70,14 +69,11 @@ fun SettingsTab(
     onUpperThresholdChange: (Int) -> Unit,
     onLowerThresholdChange: (Int) -> Unit,
     onAlertsEnabledChange: (Boolean) -> Unit,
-    onTestHighAlert: () -> Unit,
-    onTestLowAlert: () -> Unit,
     firestoreStatus: String = "Idle",
     lastBackupTime: Long? = null,
     lastBackupCount: Int = 0,
     onTriggerBackup: () -> Unit = {},
     onRestoreBackup: () -> Unit = {},
-    onTestApiSmoke: () -> Unit = {},
     onResetAllData: () -> Unit = {},
     capabilities: com.example.data.hband.DeviceCapabilities = com.example.data.hband.DeviceCapabilities(),
     autoMeasureState: com.example.data.hband.AutoMeasureUiState = com.example.data.hband.AutoMeasureUiState(),
@@ -645,180 +641,6 @@ fun SettingsTab(
                             }
                         }
                     }
-                }
-            }
-        }
-
-        // Alert Simulation Testing Card
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .testTag("hr_alert_testing_card"),
-            shape = RoundedCornerShape(28.dp),
-            border = BorderStroke(1.dp, MinimalBorder),
-            colors = CardDefaults.cardColors(containerColor = Color.White)
-        ) {
-            Column(modifier = Modifier.padding(20.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        modifier = Modifier
-                            .size(38.dp)
-                            .clip(CircleShape)
-                            .background(Color(0xFFFFF3E0)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Warning,
-                            contentDescription = null,
-                            tint = Color(0xFFE65100),
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Column {
-                        Text(
-                            text = "Testar Notificações de Alerta",
-                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                            color = Color(0xFF191C1E)
-                        )
-                        Text(
-                            text = "Disparar alertas no canal de notificação do Android",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = Color(0xFF44474E)
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Button(
-                        onClick = onTestHighAlert,
-                        shape = RoundedCornerShape(18.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD32F2F)),
-                        modifier = Modifier
-                            .weight(1f)
-                            .testTag("test_high_hr_alert_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Favorite,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Testar FC Alta", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold))
-                    }
-
-                    OutlinedButton(
-                        onClick = onTestLowAlert,
-                        shape = RoundedCornerShape(18.dp),
-                        border = BorderStroke(1.dp, Color(0xFF0288D1)),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF0288D1)),
-                        modifier = Modifier
-                            .weight(1f)
-                            .testTag("test_low_hr_alert_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Favorite,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Testar FC Baixa", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold))
-                    }
-                }
-            }
-        }
-
-        // API Credentials & Smoke Test Card
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .testTag("api_credentials_smoke_test_card"),
-            shape = RoundedCornerShape(28.dp),
-            border = BorderStroke(1.dp, MinimalBorder),
-            colors = CardDefaults.cardColors(containerColor = Color.White)
-        ) {
-            Column(modifier = Modifier.padding(20.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        modifier = Modifier
-                            .size(38.dp)
-                            .clip(CircleShape)
-                            .background(Color(0xFFE0F2FE)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Settings,
-                            contentDescription = null,
-                            tint = Color(0xFF0284C7),
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Column {
-                        Text(
-                            text = "Credenciais & Teste de Conexão API",
-                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                            color = Color(0xFF191C1E)
-                        )
-                        Text(
-                            text = "Base: https://healthtech-secure-api-5794833455.us-central1.run.app",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = Color(0xFF0284C7)
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(14.dp))
-
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = Color(0xFFF1F5F9),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(modifier = Modifier.padding(12.dp)) {
-                        Text(
-                            text = "• Módulo: com.healthtech.companion.net.HealthtechRepository",
-                            style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp, fontWeight = FontWeight.Bold),
-                            color = Color(0xFF334155)
-                        )
-                        Text(
-                            text = "• Paciente Padrão: PAT-HBAND-001",
-                            style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
-                            color = Color(0xFF475569)
-                        )
-                        Text(
-                            text = "• Header X-API-Key: Configurado via BuildConfig / .env",
-                            style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
-                            color = Color(0xFF475569)
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                Button(
-                    onClick = onTestApiSmoke,
-                    shape = RoundedCornerShape(18.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7)),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("run_smoke_heart_test_button")
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.CloudUpload,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "Executar Teste de Ingestão (smokeHeart)",
-                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
-                    )
                 }
             }
         }
