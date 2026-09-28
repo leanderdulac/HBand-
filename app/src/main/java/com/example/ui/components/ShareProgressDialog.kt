@@ -1,8 +1,5 @@
 package com.example.ui.components
 
-import android.content.ClipData
-import android.content.ClipboardManager
-import android.content.Context
 import android.content.Intent
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -57,6 +54,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.example.util.ShareProgressData
+import com.example.util.copyHealthText
 import kotlinx.coroutines.launch
 
 @Composable
@@ -194,9 +192,7 @@ private fun ShareProgressContent(
                         OutlinedButton(
                             onClick = {
                                 val message = try {
-                                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                    val clip = ClipData.newPlainText("Registros next2u SAÚDE", shareData.summaryText)
-                                    clipboard.setPrimaryClip(clip)
+                                    copyHealthText(context, "Registros next2u SAÚDE", shareData.summaryText)
                                     "Texto dos registros copiado."
                                 } catch (_: Exception) {
                                     "Não foi possível copiar o texto. Tente novamente."

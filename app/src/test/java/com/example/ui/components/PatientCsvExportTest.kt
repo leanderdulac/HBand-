@@ -55,6 +55,7 @@ class PatientCsvExportTest {
             assertEquals(8, csv.lineSequence().filter { it.isNotEmpty() }.count())
             assertTrue(csv.startsWith("ID,Device ID,Timestamp,Timestamp_ms,"))
             assertEquals(1, notices)
+            assertTrue(clipboard.primaryClip!!.description.extras!!.getBoolean("android.content.extra.IS_SENSITIVE"))
         }
     }
 }

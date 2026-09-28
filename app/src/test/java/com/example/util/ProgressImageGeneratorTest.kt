@@ -1,6 +1,7 @@
 package com.example.util
 
 import android.content.Context
+import android.content.ContextWrapper
 import android.graphics.Bitmap
 import androidx.test.core.app.ApplicationProvider
 import com.example.data.local.HBandSensorMetricEntity
@@ -9,6 +10,8 @@ import java.util.Calendar
 import java.util.TimeZone
 import org.junit.Assert.*
 import org.junit.Test
+import org.junit.Rule
+import org.junit.rules.TemporaryFolder
 import org.junit.Assume.assumeTrue
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -19,6 +22,7 @@ import org.robolectric.annotation.GraphicsMode
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @Config(sdk = [36], application = android.app.Application::class)
 class ProgressImageGeneratorTest {
+    @get:Rule val temporary = TemporaryFolder()
     private val zone = TimeZone.getTimeZone("America/Sao_Paulo")
     private val now = Calendar.getInstance(zone).apply { clear(); set(2026, 8, 15, 12, 0) }.timeInMillis
 
@@ -62,6 +66,23 @@ class ProgressImageGeneratorTest {
         val output = File("build/patient-ui/share_empty.png")
         requireNotNull(output.parentFile).mkdirs()
         output.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+    }
+
+    @Test fun image_provider_failure_leaves_no_new_export_and_preserves_previous_files() {
+        val directory = temporary.newFolder()
+        val previous = File(directory, "previous.png").apply { writeText("earlier snapshot") }
+        val base = ApplicationProvider.getApplicationContext<Context>()
+        val context = object : ContextWrapper(base) {
+            override fun getCacheDir(): File = directory
+            override fun getPackageName(): String = "synthetic.missing.provider"
+        }
+        repeat(2) {
+            assertThrows(IllegalArgumentException::class.java) {
+                ProgressImageGenerator.generateWeeklyProgressImage(context, emptyList(), 0, 0)
+            }
+            assertEquals(listOf(previous), directory.listFiles()!!.toList())
+            assertEquals("earlier snapshot", previous.readText())
+        }
     }
 
     private fun metric(at: Long) = HBandSensorMetricEntity(

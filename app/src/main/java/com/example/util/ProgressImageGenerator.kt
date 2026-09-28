@@ -13,7 +13,7 @@ import androidx.core.content.FileProvider
 import com.example.R
 import com.example.data.local.HBandSensorMetricEntity
 import java.io.File
-import java.io.FileOutputStream
+import java.io.IOException
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -74,10 +74,25 @@ object ProgressImageGenerator {
     ): ShareProgressData {
         val summary = weeklyShareSummary(metrics, hydrationMl, breathingSeconds, System.currentTimeMillis())
         val bitmap = renderWeeklyProgressBitmap(context, summary)
-        val file = File(context.cacheDir, "weekly_health_progress_${System.nanoTime()}.png")
-        FileOutputStream(file).use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
-        val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
-        return ShareProgressData(bitmap, file, uri, summary.text)
+        try {
+            return prepareHealthExport(
+                directory = context.cacheDir,
+                prefix = "weekly_health_progress_",
+                suffix = ".png",
+                write = {
+                    if (!bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)) {
+                        throw IOException("Image compression failed")
+                    }
+                },
+                publish = { file ->
+                    val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+                    ShareProgressData(bitmap, file, uri, summary.text)
+                },
+            )
+        } catch (failure: Throwable) {
+            bitmap.recycle()
+            throw failure
+        }
     }
 
     internal fun renderWeeklyProgressBitmap(context: Context, summary: WeeklyShareSummary): Bitmap {

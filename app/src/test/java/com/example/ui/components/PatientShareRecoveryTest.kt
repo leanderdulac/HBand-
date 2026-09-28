@@ -1,6 +1,8 @@
 package com.example.ui.components
 
 import android.content.ContextWrapper
+import android.content.Context
+import android.content.ClipboardManager
 import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
@@ -64,6 +66,12 @@ class PatientShareRecoveryTest {
         compose.onNodeWithText(data.summaryText).performScrollTo().assertIsDisplayed()
         compose.onNodeWithTag("copy_progress_summary_button").performScrollTo().performClick()
         compose.onNodeWithText("Texto dos registros copiado.").assertExists()
+        compose.runOnIdle {
+            val app = org.robolectric.RuntimeEnvironment.getApplication()
+            val clip = (app.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).primaryClip!!
+            assertEquals(data.summaryText, clip.getItemAt(0).text.toString())
+            assertTrue(clip.description.extras!!.getBoolean("android.content.extra.IS_SENSITIVE"))
+        }
         compose.onNodeWithTag("dismiss_share_progress_button").assertIsDisplayed()
     }
 

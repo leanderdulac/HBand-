@@ -1,7 +1,5 @@
 package com.example.ui.components
 
-import android.content.ClipData
-import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import androidx.compose.foundation.horizontalScroll
@@ -16,6 +14,8 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import com.example.data.local.HBandSensorMetricEntity
+import com.example.util.copyHealthText
+import com.example.util.prepareHealthExport
 import java.io.File
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -66,7 +66,7 @@ fun CsvExportCard(
             OutlinedButton(
                 onClick = {
                     prepareThen {
-                        copyCsvToClipboard(context, it)
+                        copyHealthText(context, "HBand Health Metrics CSV", it)
                         onShowNotification("Conteúdo copiado. Você pode colá-lo no local escolhido.")
                     }
                 },
@@ -94,7 +94,6 @@ fun CsvExportCard(
         }
     }
 }
-
 private fun buildCsvString(metrics: List<HBandSensorMetricEntity>): String {
     val sb = StringBuilder()
     // CSV Header
@@ -128,18 +127,13 @@ private suspend fun shareCsvFile(
 ) {
     try {
         val uri = withContext(Dispatchers.IO) {
-            val exportDir = File(context.applicationContext.cacheDir, "exports")
-            if (!exportDir.exists()) {
-                exportDir.mkdirs()
-            }
             // Each request keeps its own snapshot, including while another app reads an earlier export.
-            val csvFile = File.createTempFile("hband_health_metrics_export_", ".csv", exportDir)
-            csvFile.writeText(csvContent)
-
-            FileProvider.getUriForFile(
-                context,
-                "${context.packageName}.fileprovider",
-                csvFile
+            prepareHealthExport(
+                directory = File(context.applicationContext.cacheDir, "exports"),
+                prefix = "hband_health_metrics_export_",
+                suffix = ".csv",
+                write = { it.write(csvContent.toByteArray(Charsets.UTF_8)) },
+                publish = { FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", it) },
             )
         }
 
@@ -161,10 +155,4 @@ private suspend fun shareCsvFile(
     } catch (e: Exception) {
         onShowNotification("Não foi possível preparar o arquivo. Tente novamente.")
     }
-}
-
-private fun copyCsvToClipboard(context: Context, csvContent: String) {
-    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-    val clip = ClipData.newPlainText("HBand Health Metrics CSV", csvContent)
-    clipboard.setPrimaryClip(clip)
 }
