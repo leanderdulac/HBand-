@@ -32,11 +32,12 @@ class HBandBleService : Service() {
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var observeJob: Job? = null
+    private var foregroundStarted = false
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    override fun onCreate() {
-        super.onCreate()
+    private fun ensureForeground() {
+        if (foregroundStarted) return
         createChannel()
         startInForeground(
             buildNotification(
@@ -44,16 +45,19 @@ class HBandBleService : Service() {
                 connected = false
             )
         )
+        foregroundStarted = true
         observeBleState()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_STOP) {
+            (application as? HBandHealthSyncApp)?.requestBleSessionStop()
+            stopSelfSafely()
+            return START_NOT_STICKY
+        }
+        if (bleManager() == null) { stopSelfSafely(); return START_NOT_STICKY }
+        ensureForeground()
         when (intent?.action) {
-            ACTION_STOP -> {
-                bleManager()?.disconnectDevice()
-                stopSelfSafely()
-                return START_NOT_STICKY
-            }
             ACTION_RECONNECT -> bleManager()?.reconnectLastDevice()
             else -> {
                 if (bleManager()?.connectedDevice?.value?.isConnected != true) {
@@ -71,7 +75,7 @@ class HBandBleService : Service() {
     }
 
     private fun bleManager(): HBandBleManager? =
-        (application as? HBandHealthSyncApp)?.bleManager
+        (application as? HBandHealthSyncApp)?.readyBleManagerOrNull()
 
     private fun observeBleState() {
         val manager = bleManager() ?: return
@@ -190,6 +194,7 @@ class HBandBleService : Service() {
         const val ACTION_RECONNECT = "com.example.data.hband.RECONNECT_BLE_SESSION"
 
         fun start(context: Context) {
+            if ((context.applicationContext as? HBandHealthSyncApp)?.readyBleManagerOrNull() == null) return
             val intent = Intent(context, HBandBleService::class.java)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(intent)
@@ -200,7 +205,9 @@ class HBandBleService : Service() {
 
         fun startIfPersistedSession(context: Context) {
             val app = context.applicationContext as? HBandHealthSyncApp ?: return
-            if (app.bleManager.hasPersistedSession() && app.bleManager.isAutoReconnectEnabled) {
+            if (app.startupStopRequested) return
+            val manager = app.readyBleManagerOrNull() ?: return
+            if (manager.hasPersistedSession() && manager.isAutoReconnectEnabled) {
                 start(context)
             }
         }

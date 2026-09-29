@@ -1,4 +1,5 @@
 import com.google.gms.googleservices.GoogleServicesPlugin.MissingGoogleServicesStrategy
+import java.util.Properties
 
 plugins {
   alias(libs.plugins.android.application)
@@ -7,6 +8,36 @@ plugins {
   alias(libs.plugins.roborazzi)
   alias(libs.plugins.secrets)
   alias(libs.plugins.google.services)
+}
+
+// Explicit test-only build. Never use this package as a pilot update.
+val storageLab = providers.gradleProperty("storageLab").orNull == "true"
+val bleLab = providers.gradleProperty("bleLab").orNull == "true"
+require(!(storageLab && bleLab)) { "Choose either storageLab or bleLab, never both." }
+if (bleLab) {
+  // Refuse private configuration, rather than copying credentials into a lab APK.
+  val labConfig = Properties().apply {
+    val configFile = rootProject.file(if (rootProject.file(".env").exists()) ".env" else ".env.example")
+    configFile.inputStream().use { load(it) }
+  }
+  val allowedKeys = mapOf(
+    "HEALTHTECH_INGEST_API_KEY" to setOf("", "YOUR_HEALTHTECH_API_KEY_HERE"),
+    "GEMINI_API_KEY" to setOf("", "YOUR_GEMINI_API_KEY", "YOUR_GEMINI_API_KEY_HERE"),
+  )
+  require(allowedKeys.all { (key, placeholders) -> labConfig.getProperty(key, "") in placeholders }) {
+    "BLE lab requires placeholder keys only. Preserve private configuration and use an isolated checkout."
+  }
+  // Secrets Plugin also reads ".properties" when the variant has no flavor.
+  // Refuse every root overlay, including unnamed and future variant overlays.
+  val buildInfrastructure = setOf("gradle.properties", "local.properties")
+  require(rootProject.projectDir.listFiles().orEmpty().none {
+    it.isFile && it.name.endsWith(".properties", ignoreCase = true) && it.name !in buildInfrastructure
+  }) {
+    "BLE lab forbids root secret overlays. Use an isolated checkout."
+  }
+  require(fileTree(projectDir) { include("**/google-services.json"); exclude("build/**") }.isEmpty) {
+    "BLE lab must not include google-services.json."
+  }
 }
 
 android {
@@ -21,6 +52,7 @@ android {
     versionName = "1.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    buildConfigField("boolean", "BLE_LAB", "false")
 
     // sqlcipher-android AAR ships libsqlcipher.so for these ABIs; arm64-v8a is
     // required on current VE30 companion phones. Do not drop it from the APK.
@@ -58,7 +90,23 @@ android {
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
       signingConfig = signingConfigs.getByName("release")
     }
-    debug { signingConfig = signingConfigs.getByName("debugConfig") }
+    debug {
+      signingConfig = signingConfigs.getByName("debugConfig")
+      if (storageLab) applicationIdSuffix = ".storagelab"
+      if (bleLab) {
+        applicationIdSuffix = ".blelab"
+        buildConfigField("boolean", "BLE_LAB", "true")
+      }
+    }
+  }
+  if (storageLab) {
+    sourceSets.getByName("debug").manifest.srcFile("src/storageLab/AndroidManifest.xml")
+  }
+  if (bleLab) {
+    sourceSets.getByName("debug").apply {
+      manifest.srcFile("src/bleLab/AndroidManifest.xml")
+      res.directories.add("src/bleLab/res")
+    }
   }
   compileOptions {
     sourceCompatibility = JavaVersion.VERSION_11
@@ -107,6 +155,9 @@ if (ingestKeyIsPlaceholder) {
 }
 
 gradle.taskGraph.whenReady {
+  if (bleLab && allTasks.any { it.name.contains("Release", ignoreCase = true) }) {
+    throw GradleException("BLE lab is debug-only; release tasks are forbidden with -PbleLab=true.")
+  }
   val runningRelease = allTasks.any { task ->
     val name = task.name
     name.contains("Release", ignoreCase = true) &&
@@ -125,6 +176,11 @@ googleServices { missingGoogleServicesStrategy = MissingGoogleServicesStrategy.W
 // Some unused dependencies are commented out below instead of being removed.
 // This makes it easy to add them back in the future if needed.
 dependencies {
+  constraints {
+    implementation(libs.androidx.fragment) {
+      because("Google Play services brings Fragment 1.1.0; ActivityResult requires 1.3.0 or newer")
+    }
+  }
   // SDK oficial Veepoo/HBand (VPOperateManager) para o VE30 — ver app/libs/THIRD_PARTY_NOTICE.md
   // gson-2.2.4.jar excluído: o projeto já traz Gson 2.10.1 (via Firebase/Retrofit), que
   // cobre a API que o vpprotocol usa e evita "duplicate class" no dexing.

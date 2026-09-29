@@ -1,255 +1,307 @@
 package com.example.ui.components
 
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AccountCircle
-import androidx.compose.material.icons.filled.Save
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Divider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.focus.FocusDirection
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.example.data.local.UserProfileEntity
-
-private val ProfileFieldText = Color(0xFF191C1E)
-private val ProfileFieldContainer = Color(0xFFF8F9FF)
-private val ProfileFieldLabel = Color(0xFF44474E)
-
-@Composable
-private fun profileTextFieldColors() = OutlinedTextFieldDefaults.colors(
-    focusedTextColor = ProfileFieldText,
-    unfocusedTextColor = ProfileFieldText,
-    disabledTextColor = ProfileFieldLabel,
-    cursorColor = Color(0xFF00639B),
-    focusedContainerColor = ProfileFieldContainer,
-    unfocusedContainerColor = ProfileFieldContainer,
-    disabledContainerColor = ProfileFieldContainer,
-    focusedBorderColor = Color(0xFF00639B),
-    unfocusedBorderColor = Color(0xFFDCE2F9),
-    focusedLabelColor = Color(0xFF00639B),
-    unfocusedLabelColor = ProfileFieldLabel,
-    focusedPlaceholderColor = ProfileFieldLabel,
-    unfocusedPlaceholderColor = ProfileFieldLabel
-)
+import com.example.ui.ProfileSaveState
+import com.example.ui.ProfileSaveStatus
+import java.util.UUID
 
 @Composable
 fun UserProfileDialog(
     currentProfile: UserProfileEntity?,
     onDismissRequest: () -> Unit,
-    onSaveProfile: (UserProfileEntity) -> Unit
+    onSaveProfile: (String, UserProfileEntity) -> Unit,
+    saveState: ProfileSaveState? = null,
+    readAvailable: Boolean = true,
+    readFailed: Boolean = false,
+    onRetryRead: () -> Unit = {},
 ) {
-    val initial = currentProfile ?: UserProfileEntity()
+    if (currentProfile == null) {
+        AlertDialog(
+            onDismissRequest = onDismissRequest,
+            title = { Text("Meu perfil") },
+            text = {
+                if (readFailed) LocalReadNotice("seu perfil", onRetryRead)
+                else Text(if (!readAvailable) "Carregando perfil…" else "Não foi possível mostrar seu perfil. Se ele continuar indisponível, peça ajuda à equipe responsável pelo seu cadastro.")
+            },
+            confirmButton = { TextButton(onClick = onDismissRequest, modifier = Modifier.heightIn(min = 56.dp)) { Text("Fechar") } },
+        )
+        return
+    }
+    // Saveable inputs alone are not validated against a restored registry.
+    // Put the editor under its identity so a different patient cannot inherit its draft.
+    key(currentProfile.id, currentProfile.patientId) {
+        ProfileEditor(currentProfile, onDismissRequest, onSaveProfile, saveState, readAvailable, readFailed, onRetryRead)
+    }
+}
 
-    var fullName by remember { mutableStateOf(initial.fullName) }
-    var patientId by remember { mutableStateOf(initial.patientId) }
-    var ageStr by remember { mutableStateOf(initial.age.toString()) }
-    var gender by remember { mutableStateOf(initial.gender) }
-    var heightStr by remember { mutableStateOf(initial.heightCm.toInt().toString()) }
-    var weightStr by remember { mutableStateOf(initial.weightKg.toInt().toString()) }
-    var stepGoalStr by remember { mutableStateOf(initial.dailyStepGoal.toString()) }
-    var waterGoalStr by remember { mutableStateOf(initial.targetWaterMl.toString()) }
-    var emergencyContact by remember { mutableStateOf(initial.emergencyContact) }
-    var medicalNotes by remember { mutableStateOf(initial.medicalNotes) }
+@Composable
+private fun ProfileEditor(
+    currentProfile: UserProfileEntity,
+    onDismissRequest: () -> Unit,
+    onSaveProfile: (String, UserProfileEntity) -> Unit,
+    saveState: ProfileSaveState?,
+    readAvailable: Boolean,
+    readFailed: Boolean,
+    onRetryRead: () -> Unit,
+) {
+    val initial = currentProfile
+    var name by rememberSaveable(initial.id, initial.patientId) { mutableStateOf(initial.fullName) }
+    var age by rememberSaveable(initial.id, initial.patientId) { mutableStateOf(initial.age.toString()) }
+    var gender by rememberSaveable(initial.id, initial.patientId) { mutableStateOf(initial.gender) }
+    var height by rememberSaveable(initial.id, initial.patientId) { mutableStateOf(initial.heightCm.toString().replace('.', ',')) }
+    var weight by rememberSaveable(initial.id, initial.patientId) { mutableStateOf(initial.weightKg.toString().replace('.', ',')) }
+    var steps by rememberSaveable(initial.id, initial.patientId) { mutableStateOf(initial.dailyStepGoal.toString()) }
+    var water by rememberSaveable(initial.id, initial.patientId) { mutableStateOf(initial.targetWaterMl.toString()) }
+    var contact by rememberSaveable(initial.id, initial.patientId) { mutableStateOf(initial.emergencyContact) }
+    var notes by rememberSaveable(initial.id, initial.patientId) { mutableStateOf(initial.medicalNotes) }
+    var confirmDiscard by rememberSaveable(initial.id, initial.patientId) { mutableStateOf(false) }
+    var goalsExpanded by rememberSaveable(initial.id, initial.patientId) { mutableStateOf(false) }
+    var identityExpanded by rememberSaveable(initial.id, initial.patientId) { mutableStateOf(false) }
+    val editorScroll = rememberSaveable(initial.id, initial.patientId, saver = ScrollState.Saver) { ScrollState(0) }
+    var requestToken by rememberSaveable(initial.id, initial.patientId) { mutableStateOf<String?>(null) }
+    // A live callback can be pending before collection observes the controller receipt.
+    // After restoration, a missing receipt is uncertain, never replayed automatically.
+    var submissionPending by remember(initial.id, initial.patientId) { mutableStateOf(false) }
+    val receipt = saveState?.takeIf {
+        it.token == requestToken && it.profileId == initial.id && it.patientId == initial.patientId
+    }
+    val anySaving = saveState?.status == ProfileSaveStatus.SAVING
+    val pending = submissionPending || anySaving
+    val editingEnabled = readAvailable && !pending && receipt?.status != ProfileSaveStatus.SAVED
+    val canClose = !pending && receipt?.status != ProfileSaveStatus.SAVED
+    val uncertain = requestToken != null && !pending && receipt?.status != ProfileSaveStatus.SAVED
+    LaunchedEffect(receipt) {
+        if (receipt != null && receipt.status != ProfileSaveStatus.SAVING) {
+            submissionPending = false
+            if (receipt.status == ProfileSaveStatus.SAVED) onDismissRequest()
+        }
+    }
+    LaunchedEffect(requestToken, receipt?.status) {
+        if (requestToken != null) editorScroll.scrollTo(0)
+    }
+    val hasChanges = name != initial.fullName || age != initial.age.toString() ||
+        gender != initial.gender || height != initial.heightCm.toString().replace('.', ',') ||
+        weight != initial.weightKg.toString().replace('.', ',') ||
+        steps != initial.dailyStepGoal.toString() || water != initial.targetWaterMl.toString() ||
+        contact != initial.emergencyContact || notes != initial.medicalNotes
+    val focusManager = LocalFocusManager.current
+    val requestClose: () -> Unit = {
+        if (submissionPending || anySaving || receipt?.status == ProfileSaveStatus.SAVED) {
+            // Back/outside taps cannot discard a write whose result is still pending.
+        } else if (hasChanges || requestToken != null) {
+            focusManager.clearFocus()
+            confirmDiscard = true
+        } else {
+            onDismissRequest()
+        }
+    }
+    val parsedAge = age.trim().toIntOrNull()?.takeIf { it >= 0 }
+    val parsedHeight = profileDecimal(height)
+    val parsedWeight = profileDecimal(weight)
+    val parsedSteps = steps.trim().toIntOrNull()?.takeIf { it >= 0 }
+    val parsedWater = water.trim().toIntOrNull()?.takeIf { it >= 0 }
+    val valid = name.isNotBlank() && parsedAge != null && parsedHeight != null &&
+        parsedWeight != null && parsedSteps != null && parsedWater != null
 
-    AlertDialog(
-        onDismissRequest = onDismissRequest,
-        shape = RoundedCornerShape(24.dp),
-        containerColor = Color.White,
-        title = {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.AccountCircle,
-                    contentDescription = null,
-                    tint = Color(0xFF00639B),
-                    modifier = Modifier.size(28.dp)
-                )
-                Text(
-                    text = "Perfil do Paciente / Usuário",
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                    color = Color(0xFF001D31)
-                )
-            }
-        },
-        text = {
+    ProfileEditorDialog(
+        onDismissRequest = requestClose,
+        scrollState = editorScroll,
+        content = {
             Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
-                Text(
-                    text = "Configure seus dados biométricos e metas para sincronização HBand & GCP Cloud Run:",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Color(0xFF44474E)
+                Text(if (readAvailable) "Este é o perfil salvo neste aparelho. Confira seus dados antes de salvar."
+                    else "O rascunho abaixo foi mantido. Aguarde uma nova leitura do perfil antes de salvar.", style = MaterialTheme.typography.bodyLarge)
+                if (readFailed) LocalReadNotice("seu perfil", onRetryRead)
+                else if (!readAvailable) Text("Consultando perfil novamente. Suas alterações nesta tela foram mantidas.")
+                if (requestToken != null) Text(
+                    text = if (pending) "Salvando perfil neste celular…" else
+                        "Gravação não confirmada. Suas alterações foram mantidas nesta tela. Confira os dados antes de salvar novamente; a tentativa anterior pode já ter sido gravada.",
+                    modifier = Modifier.testTag("profile_save_feedback"),
+                    style = MaterialTheme.typography.bodyLarge,
                 )
-
-                OutlinedTextField(
-                    value = fullName,
-                    onValueChange = { fullName = it },
-                    label = { Text("Nome Completo") },
-                    singleLine = true,
-                    colors = profileTextFieldColors(),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("input_profile_name")
-                )
-
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(
-                        value = patientId,
-                        onValueChange = { patientId = it },
-                        label = { Text("ID Paciente GCP") },
-                        singleLine = true,
-                        colors = profileTextFieldColors(),
-                        modifier = Modifier
-                            .weight(1.2f)
-                            .testTag("input_patient_id")
-                    )
-                    OutlinedTextField(
-                        value = ageStr,
-                        onValueChange = { ageStr = it },
-                        label = { Text("Idade") },
-                        singleLine = true,
-                        colors = profileTextFieldColors(),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        modifier = Modifier
-                            .weight(0.8f)
-                            .testTag("input_age")
-                    )
-                }
-
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(
-                        value = gender,
-                        onValueChange = { gender = it },
-                        label = { Text("Gênero") },
-                        singleLine = true,
-                        colors = profileTextFieldColors(),
-                        modifier = Modifier.weight(1f)
-                    )
-                    OutlinedTextField(
-                        value = heightStr,
-                        onValueChange = { heightStr = it },
-                        label = { Text("Altura (cm)") },
-                        singleLine = true,
-                        colors = profileTextFieldColors(),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        modifier = Modifier.weight(1f)
-                    )
-                    OutlinedTextField(
-                        value = weightStr,
-                        onValueChange = { weightStr = it },
-                        label = { Text("Peso (kg)") },
-                        singleLine = true,
-                        colors = profileTextFieldColors(),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(
-                        value = stepGoalStr,
-                        onValueChange = { stepGoalStr = it },
-                        label = { Text("Meta Passos/Dia") },
-                        singleLine = true,
-                        colors = profileTextFieldColors(),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        modifier = Modifier.weight(1f)
-                    )
-                    OutlinedTextField(
-                        value = waterGoalStr,
-                        onValueChange = { waterGoalStr = it },
-                        label = { Text("Meta Água (ml)") },
-                        singleLine = true,
-                        colors = profileTextFieldColors(),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-
-                OutlinedTextField(
-                    value = emergencyContact,
-                    onValueChange = { emergencyContact = it },
-                    label = { Text("Contato de Emergência") },
-                    singleLine = true,
-                    colors = profileTextFieldColors(),
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                OutlinedTextField(
-                    value = medicalNotes,
-                    onValueChange = { medicalNotes = it },
-                    label = { Text("Notas Médicas / Observações") },
-                    maxLines = 3,
-                    colors = profileTextFieldColors(),
-                    modifier = Modifier.fillMaxWidth()
-                )
+                PatientSummaryLayout(first = {
+                    ProfileField(name, { name = it }, "Nome completo", "input_profile_name", error = name.isBlank(), enabled = editingEnabled)
+                    ProfileField(age, { age = it }, "Idade em anos", "input_age", KeyboardType.Number, parsedAge == null, enabled = editingEnabled)
+                    ProfileField(gender, { gender = it }, "Gênero", "input_gender", enabled = editingEnabled)
+                    ProfileField(height, { height = it }, "Altura em centímetros", "input_height", KeyboardType.Decimal, parsedHeight == null, enabled = editingEnabled)
+                    ProfileField(weight, { weight = it }, "Peso em quilos", "input_weight", KeyboardType.Decimal, parsedWeight == null, ImeAction.Done, enabled = editingEnabled)
+                }, second = {
+                    PatientSection("Metas e contato", goalsExpanded, { goalsExpanded = it }) {
+                        Text("Metas cadastradas", style = MaterialTheme.typography.titleMedium)
+                        ProfileField(steps, { steps = it }, "Meta de passos por dia", "input_step_goal", KeyboardType.Number, parsedSteps == null, enabled = editingEnabled)
+                        ProfileField(water, { water = it }, "Meta de água em mL por dia", "input_water_goal", KeyboardType.Number, parsedWater == null, enabled = editingEnabled)
+                        ProfileField(contact, { contact = it }, "Contato de emergência", "input_emergency_contact", KeyboardType.Phone, enabled = editingEnabled)
+                        OutlinedTextField(
+                            value = notes, onValueChange = { notes = it }, enabled = editingEnabled, label = { Text("Observações") },
+                            modifier = Modifier.fillMaxWidth().testTag("input_medical_notes"), minLines = 2,
+                        )
+                    }
+                    PatientSection("Identificação do cadastro", identityExpanded, { identityExpanded = it }) {
+                        OutlinedTextField(
+                            value = initial.patientId, onValueChange = {}, readOnly = true,
+                            label = { Text("Identificação do paciente") },
+                            modifier = Modifier.fillMaxWidth().testTag("input_patient_id"),
+                        )
+                        Text("Esta identificação vincula os registros ao cadastro. Se precisar corrigi-la, fale com a equipe responsável.", style = MaterialTheme.typography.bodyMedium)
+                    }
+                })
+                if (!valid) Text("Confira os campos marcados antes de salvar.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyLarge)
             }
         },
         confirmButton = {
             Button(
                 onClick = {
-                    val updated = initial.copy(
-                        fullName = fullName.ifBlank { "Alex Rivera" },
-                        patientId = patientId.ifBlank { "PAT-HBAND-001" },
-                        age = ageStr.toIntOrNull() ?: 32,
-                        gender = gender.ifBlank { "Masculino" },
-                        heightCm = heightStr.toFloatOrNull() ?: 178f,
-                        weightKg = weightStr.toFloatOrNull() ?: 74f,
-                        dailyStepGoal = stepGoalStr.toIntOrNull() ?: 8000,
-                        targetWaterMl = waterGoalStr.toIntOrNull() ?: 2500,
-                        emergencyContact = emergencyContact,
-                        medicalNotes = medicalNotes
-                    )
-                    onSaveProfile(updated)
-                    onDismissRequest()
+                    if (valid && readAvailable && !submissionPending && !anySaving && receipt?.status != ProfileSaveStatus.SAVED) {
+                        focusManager.clearFocus()
+                        val token = UUID.randomUUID().toString()
+                        requestToken = token
+                        submissionPending = true
+                        onSaveProfile(token, initial.copy(
+                            fullName = name.trim(), age = parsedAge!!, gender = gender,
+                            heightCm = parsedHeight!!, weightKg = parsedWeight!!,
+                            dailyStepGoal = parsedSteps!!, targetWaterMl = parsedWater!!,
+                            emergencyContact = contact, medicalNotes = notes,
+                        ))
+                    }
                 },
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00639B)),
-                shape = RoundedCornerShape(16.dp),
-                modifier = Modifier.testTag("btn_save_profile")
-            ) {
-                Icon(imageVector = Icons.Default.Save, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(modifier = Modifier.width(6.dp))
-                Text("Salvar Perfil")
-            }
+                enabled = valid && editingEnabled,
+                modifier = Modifier.heightIn(min = 56.dp).testTag("btn_save_profile"),
+            ) { Text(if (pending) "Salvando…" else "Salvar perfil") }
         },
         dismissButton = {
-            TextButton(onClick = onDismissRequest) {
-                Text("Cancelar", color = Color(0xFF44474E))
+            TextButton(onClick = requestClose, enabled = canClose, modifier = Modifier.heightIn(min = 56.dp)) { Text("Cancelar") }
+        },
+    )
+
+    if (confirmDiscard && canClose) {
+        ProfileDiscardConfirmation(
+            onContinueEditing = { confirmDiscard = false },
+            onDiscard = onDismissRequest,
+            uncertainSave = uncertain,
+        )
+    }
+}
+
+/** Keep the form scrollable while both exit choices remain in the dialog footer. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ProfileEditorDialog(
+    onDismissRequest: () -> Unit,
+    scrollState: ScrollState,
+    content: @Composable () -> Unit,
+    confirmButton: @Composable () -> Unit,
+    dismissButton: @Composable () -> Unit,
+) {
+    Dialog(onDismissRequest, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Surface(
+            modifier = Modifier.widthIn(max = 960.dp).fillMaxWidth().padding(16.dp).testTag("profile_editor"),
+            shape = RoundedCornerShape(28.dp),
+            color = MaterialTheme.colorScheme.surface,
+        ) {
+            Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                Text("Meu perfil", style = MaterialTheme.typography.titleLarge,
+                    modifier = Modifier.semantics { heading() })
+                Column(Modifier.weight(1f, fill = false).verticalScroll(scrollState).testTag("profile_editor_scroll")) { content() }
+                FlowRow(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp, androidx.compose.ui.Alignment.End),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    dismissButton()
+                    confirmButton()
+                }
             }
         }
+    }
+}
+
+@Composable
+internal fun ProfileDiscardConfirmation(onContinueEditing: () -> Unit, onDiscard: () -> Unit, uncertainSave: Boolean = false) {
+    Dialog(onDismissRequest = onContinueEditing, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Surface(
+            modifier = Modifier.widthIn(max = 560.dp).fillMaxWidth().padding(16.dp).testTag("profile_discard_dialog"),
+            shape = RoundedCornerShape(28.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        ) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(
+                    Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()).testTag("profile_discard_scroll"),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Text(if (uncertainSave) "Fechar sem salvar novamente?" else "Sair sem salvar?",
+                        style = MaterialTheme.typography.headlineSmall, modifier = Modifier.semantics { heading() })
+                    Text(if (uncertainSave)
+                        "A gravação anterior não foi confirmada. Fechar descarta somente as alterações desta tela; um perfil já salvo no celular será mantido."
+                        else "Você alterou seu perfil. Se sair agora, essas alterações serão perdidas.",
+                        style = MaterialTheme.typography.bodyLarge,
+                        modifier = Modifier.testTag("profile_discard_explanation"))
+                }
+                Button(
+                    onClick = onContinueEditing,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag("profile_continue_editing"),
+                ) { Text("Continuar editando") }
+                OutlinedButton(
+                    onClick = onDiscard,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag("profile_discard_changes"),
+                ) { Text(if (uncertainSave) "Fechar edição" else "Sair sem salvar") }
+            }
+        }
+    }
+}
+
+internal fun profileDecimal(value: String): Float? =
+    value.trim().replace(',', '.').toFloatOrNull()?.takeIf { it.isFinite() && it >= 0f }
+
+@Composable
+private fun ProfileField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    label: String,
+    tag: String,
+    keyboardType: KeyboardType = KeyboardType.Text,
+    error: Boolean = false,
+    imeAction: ImeAction = ImeAction.Next,
+    enabled: Boolean = true,
+) {
+    val focusManager = LocalFocusManager.current
+    OutlinedTextField(
+        value = value, onValueChange = onValueChange, enabled = enabled,
+        label = { Text(label) },
+        isError = error,
+        supportingText = if (error) ({ Text(when (keyboardType) {
+            KeyboardType.Text -> "Preencha este campo."
+            KeyboardType.Number -> "Digite só números, sem vírgula ou sinal de menos."
+            else -> "Digite um número sem sinal de menos. Você pode usar vírgula."
+        }) }) else null,
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(keyboardType = keyboardType, imeAction = imeAction),
+        keyboardActions = KeyboardActions(
+            onNext = { focusManager.moveFocus(FocusDirection.Next) },
+            onDone = { focusManager.clearFocus() },
+        ),
+        modifier = Modifier.fillMaxWidth().testTag(tag),
     )
 }

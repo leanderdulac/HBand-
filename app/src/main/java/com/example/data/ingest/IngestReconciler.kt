@@ -1,359 +1,141 @@
 package com.example.data.ingest
 
+import com.example.data.local.IngestQueueEntity
+import com.example.data.model.IngestResponse
 import org.json.JSONArray
 import org.json.JSONObject
 import java.security.MessageDigest
+import java.text.ParsePosition
 import java.text.SimpleDateFormat
-import java.util.Date
 import java.util.Locale
-import java.util.TimeZone
 
-enum class IngestItemOutcome {
-    ACCEPTED,
-    DUPLICATE,
-    REJECTED,
-    AUTH_INVALID,
-    AUTH_FORBIDDEN,
-    CLIENT_ERROR,
-    TRANSIENT,
-    CONFIG_ERROR,
+enum class IngestItemOutcome { ACCEPTED, DUPLICATE, REJECTED, AUTH, CLIENT_ERROR, TRANSIENT }
+
+data class IngestItemDecision(val outcome: IngestItemOutcome, val message: String? = null) {
+    val confirmed get() = outcome == IngestItemOutcome.ACCEPTED || outcome == IngestItemOutcome.DUPLICATE
 }
 
-data class IngestItemDecision(
-    val clientReadingId: String,
-    val outcome: IngestItemOutcome,
-    val markSynced: Boolean,
-    val keepQueued: Boolean,
-    val errorMessage: String? = null,
-    val httpStatus: Int? = null,
-)
-
-data class AuthBackoffState(
-    val lastAuthHttp: Int? = null,
-    val lastAuthAtMs: Long = 0L,
-    val keyFingerprint: String? = null,
-)
+data class PreparedReading(val item: IngestQueueEntity, val patientId: String, val json: String)
 
 /**
- * Pure sync reconciliation for HealthTech wearable ingest.
- *
- * Contract: docs/contracts/WEARABLE_INGEST_IDEMPOTENCY.md (Core PR #14)
- * - 200 + accepted|duplicate = synced
- * - rejected stays local with reason
- * - 5xx / network stays queued
- * - 401 / 403 stop the retry storm (caller must not keep POSTing)
+ * Selective reconciliation of HBand PR5 against Core PR14 (90c3a1d...).
+ * Never infer receipt from HTTP alone, counters, array position or another item's ID.
+ * Transport and backend deployment are verified separately from this pure policy.
  */
 object IngestReconciler {
-    const val AUTH_INVALID_MESSAGE = "chave de ingestão inválida ou ausente"
-    const val AUTH_FORBIDDEN_MESSAGE = "chave sem permissão de escrita"
-    const val AUTH_BACKOFF_MS = 15 * 60 * 1000L
     const val BATCH_MAX_ITEMS = 50
-    const val CLIENT_READING_ID_MAX = 128
+    const val UNCONFIRMED = "Resposta sem confirmação válida deste registro. Leitura mantida na fila."
+    const val INVALID_LOCAL = "Identidade ou instante da leitura não confirmado. Registro preservado para revisão."
 
-    private val CLIENT_READING_ID_PATTERN = Regex("^[A-Za-z0-9._:-]{1,$CLIENT_READING_ID_MAX}$")
+    private fun string(obj: JSONObject, name: String): String? =
+        (obj.opt(name) as? String)?.takeIf { it.isNotBlank() && it == it.trim() }
 
-    fun isValidClientReadingId(id: String): Boolean = CLIENT_READING_ID_PATTERN.matches(id)
-
-    fun authMessage(httpCode: Int): String = when (httpCode) {
-        403 -> AUTH_FORBIDDEN_MESSAGE
-        else -> AUTH_INVALID_MESSAGE
+    private fun validMeasurementTime(value: String): Boolean {
+        if (!Regex("^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,9})?(?:Z|[+-]\\d{2}:\\d{2})$").matches(value)) return false
+        // Validate calendar/offset independently of fractional precision; never rewrite the time.
+        val seconds = value.replace(Regex("\\.\\d+(?=Z|[+-])"), "")
+        val position = ParsePosition(0)
+        val parsed = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX", Locale.US).apply { isLenient = false }
+            .parse(seconds, position)
+        return parsed != null && position.index == seconds.length
     }
 
-    fun keyFingerprint(key: String): String {
-        val digest = MessageDigest.getInstance("SHA-256").digest(key.toByteArray(Charsets.UTF_8))
-        return digest.joinToString("") { "%02x".format(it) }.take(12)
+    fun prepare(item: IngestQueueEntity): PreparedReading {
+        val original = JSONObject(item.payloadJson)
+        val patient = requireNotNull(string(original, "patient_id")) { INVALID_LOCAL }
+        require(string(original, "timestamp")?.let(::validMeasurementTime) == true) { INVALID_LOCAL }
+        val device = requireNotNull(if (original.has("device_id")) string(original, "device_id")
+            else string(original, "deviceId")) { INVALID_LOCAL }
+        if (original.has("deviceId")) require(string(original, "deviceId") == device) { INVALID_LOCAL }
+        require(IngestReadingIdentity.isValid(item.clientReadingId)) { INVALID_LOCAL }
+        if (original.has("client_reading_id")) {
+            require(string(original, "client_reading_id") == item.clientReadingId) { INVALID_LOCAL }
+        }
+        val normalized = JSONObject(IngestPayloadMapper.normalizeQueuePayload(item.payloadJson))
+        // These fields are sourced from durable data, never the clock or an inferred patient.
+        normalized.put("patient_id", patient)
+        normalized.put("device_id", device)
+        normalized.put("timestamp", original.getString("timestamp"))
+        normalized.put("client_reading_id", item.clientReadingId)
+        return PreparedReading(item, patient, normalized.toString())
     }
 
-    fun shouldSkipServerCall(
-        nowMs: Long,
-        keyFingerprint: String?,
-        backoff: AuthBackoffState?,
-        backoffMs: Long = AUTH_BACKOFF_MS,
-    ): Boolean {
-        if (backoff == null) return false
-        val code = backoff.lastAuthHttp ?: return false
-        if (code != 401 && code != 403) return false
-        if (!keyFingerprint.isNullOrBlank() &&
-            !backoff.keyFingerprint.isNullOrBlank() &&
-            keyFingerprint != backoff.keyFingerprint
-        ) {
-            return false
-        }
-        return nowMs - backoff.lastAuthAtMs < backoffMs
+    fun chunks(readings: List<PreparedReading>, maxItems: Int = BATCH_MAX_ITEMS): List<List<PreparedReading>> {
+        require(maxItems in 1..BATCH_MAX_ITEMS)
+        return readings.groupBy { it.patientId }.values.flatMap { it.chunked(maxItems) }
     }
 
-    fun flushIdempotencyKey(clientReadingIds: List<String>): String {
-        val material = clientReadingIds.sorted().joinToString(",")
-        val digest = MessageDigest.getInstance("SHA-256").digest(material.toByteArray(Charsets.UTF_8))
-        return digest.joinToString("") { "%02x".format(it) }.take(64)
+    fun batchBody(readings: List<PreparedReading>): String {
+        require(readings.isNotEmpty())
+        val patient = readings.first().patientId
+        require(readings.all { it.patientId == patient })
+        require(readings.map { it.item.clientReadingId }.distinct().size == readings.size)
+        return JSONObject().put("patient_id", patient)
+            .put("readings", JSONArray().apply { readings.forEach { put(JSONObject(it.json)) } }).toString()
     }
 
-    fun utcNowIso(nowMs: Long = System.currentTimeMillis()): String {
-        val format = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US)
-        format.timeZone = TimeZone.getTimeZone("UTC")
-        return format.format(Date(nowMs))
+    fun flushIdempotencyKey(readings: List<PreparedReading>): String {
+        // Order matters because the server caches results with request-relative indices.
+        val material = JSONArray().put(readings.first().patientId)
+        readings.forEach { material.put(it.item.clientReadingId) }
+        return MessageDigest.getInstance("SHA-256").digest(material.toString().toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it) }
     }
 
-    /**
-     * Guarantees `client_reading_id`, UTC `timestamp` and `device_id` on the
-     * JSON that will be POSTed. Existing values are never replaced on retry.
-     */
-    fun ensureReadingPayload(
-        rawJson: String,
-        clientReadingId: String,
-        fallbackDeviceId: String? = null,
-        nowMs: Long = System.currentTimeMillis(),
-    ): String {
-        val json = try {
-            JSONObject(rawJson)
-        } catch (_: Exception) {
-            JSONObject()
-        }
-        val existingId = json.optString("client_reading_id", "").trim()
-        if (!isValidClientReadingId(existingId)) {
-            json.put("client_reading_id", clientReadingId)
-        }
-        val timestamp = json.optString("timestamp", "").trim()
-        if (timestamp.isEmpty()) {
-            json.put("timestamp", utcNowIso(nowMs))
-        }
-        val deviceId = IngestPayloadMapper.resolveDeviceId(
-            json.optString("device_id", "").ifBlank { json.optString("deviceId", "") },
-            fallbackDeviceId,
-        )
-        if (deviceId.isNotBlank()) {
-            json.put("device_id", deviceId)
-        }
-        if (!json.has("service")) {
-            json.put("service", IngestPayloadMapper.SERVICE_NAME)
-        }
-        return json.toString(2)
+    fun httpFailure(code: Int): IngestItemDecision = when (code) {
+        401, 403 -> IngestItemDecision(IngestItemOutcome.AUTH, IngestPayloadMapper.authErrorMessage(code, null))
+        in 400..499 -> IngestItemDecision(IngestItemOutcome.CLIENT_ERROR, "HTTP $code. Registro preservado para revisão.")
+        else -> IngestItemDecision(IngestItemOutcome.TRANSIENT, "Envio não confirmado (HTTP $code). Leitura mantida na fila.")
     }
 
-    fun buildBatchBody(patientId: String, readingJsons: List<String>): String {
-        val envelope = JSONObject()
-        envelope.put("patient_id", IngestPayloadMapper.resolvePatientId(patientId))
-        val readings = JSONArray()
-        readingJsons.forEach { raw ->
-            readings.put(JSONObject(raw))
-        }
-        envelope.put("readings", readings)
-        return envelope.toString(2)
-    }
+    fun unconfirmed() = IngestItemDecision(IngestItemOutcome.TRANSIENT, UNCONFIRMED)
 
-    fun patientIdFrom(readingJson: String): String {
-        return try {
-            IngestPayloadMapper.resolvePatientId(JSONObject(readingJson).optString("patient_id", ""))
-        } catch (_: Exception) {
-            IngestPayloadMapper.DEFAULT_PATIENT_ID
+    fun single(reading: PreparedReading, code: Int, body: IngestResponse?): IngestItemDecision {
+        if (code != 200) return httpFailure(code)
+        if (body == null || !body.success || body.client_reading_id != reading.item.clientReadingId ||
+            body.patient_id != reading.patientId || body.reading_id.isNullOrBlank()) return unconfirmed()
+        if (body.duplicate != null && body.duplicate != (body.ingest_status == "duplicate")) return unconfirmed()
+        return when (body.ingest_status) {
+            "accepted" -> IngestItemDecision(IngestItemOutcome.ACCEPTED)
+            "duplicate" -> IngestItemDecision(IngestItemOutcome.DUPLICATE)
+            else -> unconfirmed()
         }
     }
 
-    fun decisionsForHttp(
-        clientReadingIds: List<String>,
-        httpCode: Int,
-        responseBody: String?,
-        networkError: Boolean = false,
-    ): List<IngestItemDecision> {
-        if (networkError) {
-            return clientReadingIds.map { id ->
-                IngestItemDecision(
-                    clientReadingId = id,
-                    outcome = IngestItemOutcome.TRANSIENT,
-                    markSynced = false,
-                    keepQueued = true,
-                    errorMessage = "Falha de rede. Leitura mantida na fila.",
-                    httpStatus = null,
-                )
-            }
-        }
-
-        return when (IngestPayloadMapper.classifyHttp(httpCode)) {
-            IngestHttpKind.AUTH -> {
-                val outcome = if (httpCode == 403) {
-                    IngestItemOutcome.AUTH_FORBIDDEN
-                } else {
-                    IngestItemOutcome.AUTH_INVALID
+    fun batch(readings: List<PreparedReading>, code: Int, body: String?): List<IngestItemDecision> {
+        if (code != 200) return readings.map { httpFailure(code) }
+        val unknown = readings.map { unconfirmed() }
+        val root = runCatching { JSONObject(body ?: "") }.getOrNull() ?: return unknown
+        if (string(root, "patient_id") != readings.first().patientId) return unknown
+        val results = root.optJSONArray("results") ?: return unknown
+        val decisions = unknown.toMutableList()
+        val seen = mutableSetOf<Int>()
+        for (position in 0 until results.length()) {
+            val entry = results.optJSONObject(position) ?: return unknown
+            val rawIndex = entry.opt("index")
+            if (rawIndex !is Int && rawIndex !is Long) return unknown
+            val index = (rawIndex as Number).toLong()
+            if (index < 0 || index >= readings.size || !seen.add(index.toInt())) return unknown
+            val expected = readings[index.toInt()]
+            if (string(entry, "client_reading_id") != expected.item.clientReadingId) return unknown
+            decisions[index.toInt()] = when (entry.opt("status")) {
+                "accepted", "duplicate" -> {
+                    val result = entry.optJSONObject("result") ?: return unknown
+                    if (string(result, "patient_id") != expected.patientId ||
+                        result.opt("ingest_status") != entry.opt("status") ||
+                        string(result, "reading_id") == null) return unknown
+                    // Optional for compatibility; when present, Core defines this as a
+                    // boolean equivalent to ingest_status == duplicate, never a second truth.
+                    if (result.has("duplicate") &&
+                        result.opt("duplicate") != (entry.opt("status") == "duplicate")) return unknown
+                    IngestItemDecision(if (entry.getString("status") == "duplicate")
+                        IngestItemOutcome.DUPLICATE else IngestItemOutcome.ACCEPTED)
                 }
-                val message = authMessage(httpCode)
-                clientReadingIds.map { id ->
-                    IngestItemDecision(
-                        clientReadingId = id,
-                        outcome = outcome,
-                        markSynced = false,
-                        keepQueued = true,
-                        errorMessage = message,
-                        httpStatus = httpCode,
-                    )
-                }
-            }
-            IngestHttpKind.SERVER -> clientReadingIds.map { id ->
-                IngestItemDecision(
-                    clientReadingId = id,
-                    outcome = IngestItemOutcome.TRANSIENT,
-                    markSynced = false,
-                    keepQueued = true,
-                    errorMessage = "Servidor indisponível (HTTP $httpCode). Leitura mantida na fila.",
-                    httpStatus = httpCode,
-                )
-            }
-            IngestHttpKind.CLIENT -> clientReadingIds.map { id ->
-                IngestItemDecision(
-                    clientReadingId = id,
-                    outcome = IngestItemOutcome.CLIENT_ERROR,
-                    markSynced = false,
-                    keepQueued = false,
-                    errorMessage = "HTTP $httpCode: ${safeErrorDetail(responseBody)}",
-                    httpStatus = httpCode,
-                )
-            }
-            IngestHttpKind.SUCCESS -> reconcileSuccess(clientReadingIds, httpCode, responseBody)
-            IngestHttpKind.NETWORK -> clientReadingIds.map { id ->
-                IngestItemDecision(
-                    clientReadingId = id,
-                    outcome = IngestItemOutcome.TRANSIENT,
-                    markSynced = false,
-                    keepQueued = true,
-                    errorMessage = "Falha de rede. Leitura mantida na fila.",
-                    httpStatus = httpCode,
-                )
+                "rejected" -> IngestItemDecision(IngestItemOutcome.REJECTED,
+                    "Registro rejeitado pelo servidor. Dados preservados para revisão.")
+                else -> unconfirmed()
             }
         }
-    }
-
-    fun decisionsForConfigError(clientReadingIds: List<String>): List<IngestItemDecision> {
-        return clientReadingIds.map { id ->
-            IngestItemDecision(
-                clientReadingId = id,
-                outcome = IngestItemOutcome.CONFIG_ERROR,
-                markSynced = false,
-                keepQueued = true,
-                errorMessage = AUTH_INVALID_MESSAGE,
-                httpStatus = null,
-            )
-        }
-    }
-
-    private fun reconcileSuccess(
-        clientReadingIds: List<String>,
-        httpCode: Int,
-        responseBody: String?,
-    ): List<IngestItemDecision> {
-        val root = parseObject(responseBody)
-        val results = root?.optJSONArray("results")
-        if (results != null && results.length() > 0) {
-            return reconcileResultsArray(clientReadingIds, httpCode, results)
-        }
-
-        val ingestStatus = root?.optString("ingest_status", "")?.trim()?.lowercase()
-        if (ingestStatus == "accepted" || ingestStatus == "duplicate") {
-            val outcome = if (ingestStatus == "duplicate") {
-                IngestItemOutcome.DUPLICATE
-            } else {
-                IngestItemOutcome.ACCEPTED
-            }
-            return clientReadingIds.map { id ->
-                syncedDecision(id, outcome, httpCode)
-            }
-        }
-
-        // Legacy 200 without per-item results: processed_count == accepted+duplicate.
-        val processed = root?.optInt("processed_count", -1) ?: -1
-        if (processed >= clientReadingIds.size && clientReadingIds.isNotEmpty()) {
-            return clientReadingIds.map { id -> syncedDecision(id, IngestItemOutcome.ACCEPTED, httpCode) }
-        }
-        if (root?.optBoolean("duplicate", false) == true) {
-            return clientReadingIds.map { id -> syncedDecision(id, IngestItemOutcome.DUPLICATE, httpCode) }
-        }
-
-        // HTTP 200 with no usable body — treat as accepted (old Core).
-        return clientReadingIds.map { id -> syncedDecision(id, IngestItemOutcome.ACCEPTED, httpCode) }
-    }
-
-    private fun reconcileResultsArray(
-        clientReadingIds: List<String>,
-        httpCode: Int,
-        results: JSONArray,
-    ): List<IngestItemDecision> {
-        val byId = LinkedHashMap<String, IngestItemDecision>()
-        val byIndex = ArrayList<IngestItemDecision>(results.length())
-
-        for (i in 0 until results.length()) {
-            val item = results.optJSONObject(i) ?: continue
-            val status = item.optString("status", "").trim().lowercase()
-            val echoedId = item.optString("client_reading_id", "").trim()
-            val error = item.optString("error", "").trim().ifBlank { null }
-            val decision = when (status) {
-                "accepted" -> syncedDecision(echoedId.ifBlank { indexId(clientReadingIds, i) }, IngestItemOutcome.ACCEPTED, httpCode)
-                "duplicate" -> syncedDecision(echoedId.ifBlank { indexId(clientReadingIds, i) }, IngestItemOutcome.DUPLICATE, httpCode)
-                "rejected" -> IngestItemDecision(
-                    clientReadingId = echoedId.ifBlank { indexId(clientReadingIds, i) },
-                    outcome = IngestItemOutcome.REJECTED,
-                    markSynced = false,
-                    keepQueued = false,
-                    errorMessage = error ?: "rejected",
-                    httpStatus = httpCode,
-                )
-                else -> IngestItemDecision(
-                    clientReadingId = echoedId.ifBlank { indexId(clientReadingIds, i) },
-                    outcome = IngestItemOutcome.TRANSIENT,
-                    markSynced = false,
-                    keepQueued = true,
-                    errorMessage = "status desconhecido: $status",
-                    httpStatus = httpCode,
-                )
-            }
-            byIndex += decision
-            if (decision.clientReadingId.isNotBlank()) {
-                byId[decision.clientReadingId] = decision
-            }
-        }
-
-        return clientReadingIds.mapIndexed { index, id ->
-            byId[id] ?: byIndex.getOrNull(index)?.copy(clientReadingId = id) ?: IngestItemDecision(
-                clientReadingId = id,
-                outcome = IngestItemOutcome.TRANSIENT,
-                markSynced = false,
-                keepQueued = true,
-                errorMessage = "Item ausente em results[]",
-                httpStatus = httpCode,
-            )
-        }
-    }
-
-    private fun syncedDecision(
-        id: String,
-        outcome: IngestItemOutcome,
-        httpCode: Int,
-    ) = IngestItemDecision(
-        clientReadingId = id,
-        outcome = outcome,
-        markSynced = true,
-        keepQueued = false,
-        errorMessage = null,
-        httpStatus = httpCode,
-    )
-
-    private fun indexId(ids: List<String>, index: Int): String =
-        ids.getOrNull(index).orEmpty()
-
-    private fun parseObject(body: String?): JSONObject? {
-        if (body.isNullOrBlank()) return null
-        return try {
-            JSONObject(body)
-        } catch (_: Exception) {
-            null
-        }
-    }
-
-    /** Never echo a value that could be the API key. */
-    private fun safeErrorDetail(body: String?): String {
-        val trimmed = body?.trim().orEmpty()
-        if (trimmed.isEmpty()) return "erro do cliente"
-        if (trimmed.length > 240) return trimmed.take(240)
-        if (IngestApiKey.isUsable(trimmed) && trimmed.length >= 24 && !trimmed.contains(' ')) {
-            return "erro do cliente"
-        }
-        return trimmed
+        return decisions
     }
 }

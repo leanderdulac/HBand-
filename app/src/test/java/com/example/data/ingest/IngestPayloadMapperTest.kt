@@ -3,6 +3,7 @@ package com.example.data.ingest
 import com.example.data.model.BloodPressure
 import com.example.data.model.HBandTelemetry
 import com.example.data.model.SleepSummary
+import com.example.data.local.IngestQueueEntity
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -10,6 +11,65 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class IngestPayloadMapperTest {
+
+    @Test fun `normalization preserves explicitly stored source without reclassification`() {
+        for (value in listOf("companion_manual", "ble_sim", "ble_hband", "http", "", "unknown-source", JSONObject.NULL)) {
+            for (legacy in listOf(false, true)) {
+                val raw = JSONObject().put("patient_id", "SYNTHETIC")
+                    .put("ingest_source", value)
+                if (legacy) raw.put("metrics", JSONObject().put("heartRate", 72))
+                else raw.put("heart_rate", 72)
+                val normalized = JSONObject(IngestPayloadMapper.normalizeQueuePayload(raw.toString()))
+                assertTrue(normalized.has("ingest_source"))
+                assertEquals(value, normalized.get("ingest_source"))
+            }
+        }
+    }
+
+    @Test fun `normalization never infers an absent source from real sensor marker`() {
+        for (legacy in listOf(false, true)) {
+            for (isReal in listOf(false, true)) {
+                val raw = JSONObject().put("patient_id", "SYNTHETIC").put("is_real_sensor_data", isReal)
+                if (legacy) raw.put("metrics", JSONObject().put("heartRate", 72))
+                else raw.put("heart_rate", 72)
+                val normalized = JSONObject(IngestPayloadMapper.normalizeQueuePayload(raw.toString()))
+                assertFalse(normalized.has("ingest_source"))
+                assertEquals(isReal, normalized.getBoolean("is_real_sensor_data"))
+            }
+        }
+    }
+
+    @Test fun `queued heart rate obeys inclusive Core bounds without integer truncation`() {
+        for (value in listOf(20.0, 72.5, 250.0)) {
+            assertTrue(IngestPayloadMapper.isIngestibleJson(JSONObject().put("heart_rate", value).toString()))
+        }
+        for (value in listOf(19.9, 250.1, 999.0)) {
+            assertFalse(IngestPayloadMapper.isIngestibleJson(JSONObject().put("heart_rate", value).toString()))
+        }
+        for (raw in listOf("{}", "{\"heart_rate\":null}", "{\"heart_rate\":\"NaN\"}", "{\"heart_rate\":\"Infinity\"}")) {
+            assertFalse(IngestPayloadMapper.isIngestibleJson(raw))
+        }
+    }
+
+    @Test fun `out of contract reading remains eligible for durable local capture`() = kotlinx.coroutines.runBlocking {
+        val reading = telemetry(heartRate = 999)
+        val saved = mutableListOf<HBandTelemetry>()
+        IngestDeduper().saveIfNeeded(reading) { saved += it }
+        assertEquals(listOf(reading), saved)
+        val payload = IngestPayloadMapper.telemetryToJson(reading, "SYNTHETIC")
+        assertEquals(999, JSONObject(payload).getInt("heart_rate"))
+        assertFalse(IngestPayloadMapper.isIngestibleJson(payload))
+    }
+
+    @Test fun `legacy heart rate preserves numeric fractions before transport validation`() {
+        for (value in listOf(72.5, 250.1)) {
+            val raw = JSONObject().put("patient_id", "SYNTHETIC")
+                .put("metrics", JSONObject().put("heartRate", value)).toString()
+            val normalized = IngestPayloadMapper.normalizeQueuePayload(raw)
+            assertEquals(value, JSONObject(normalized).getDouble("heart_rate"), 0.0)
+            assertEquals(value <= 250.0, IngestPayloadMapper.isIngestibleJson(normalized))
+        }
+    }
 
     private fun telemetry(
         heartRate: Int = 76,
@@ -123,30 +183,121 @@ class IngestPayloadMapperTest {
         assertEquals(IngestHttpKind.AUTH, IngestPayloadMapper.classifyHttp(403))
         assertEquals(IngestHttpKind.CLIENT, IngestPayloadMapper.classifyHttp(422))
         assertEquals(IngestHttpKind.SERVER, IngestPayloadMapper.classifyHttp(503))
-        val message401 = IngestPayloadMapper.authErrorMessage(401, "invalid api key")
-        assertTrue(message401.contains("401"))
-        assertTrue(message401.contains(IngestReconciler.AUTH_INVALID_MESSAGE))
-        assertFalse(message401.contains("invalid api key"))
-        val message403 = IngestPayloadMapper.authErrorMessage(403, null)
-        assertTrue(message403.contains(IngestReconciler.AUTH_FORBIDDEN_MESSAGE))
+        val message = IngestPayloadMapper.authErrorMessage(401, "invalid api key")
+        assertTrue(message.contains("401"))
+        assertTrue(message.contains("Ajustes"))
+        assertFalse(message.contains("invalid api key"))
+        val message403 = IngestPayloadMapper.authErrorMessage(403, "private server detail")
+        assertTrue(message403.contains("403"))
+        assertTrue(message403.contains("Ajustes"))
+        assertFalse(message403.contains("private server detail"))
     }
 
     @Test
-    fun `telemetry JSON includes client_reading_id when provided`() {
-        val json = JSONObject(
-            IngestPayloadMapper.telemetryToJson(
-                telemetry(heartRate = 80),
-                "PAT-1",
-                clientReadingId = "8f3a2c1e-4b0d-4a11-9c22-111111111111",
-            )
+    fun `queued telemetry JSON includes durable client_reading_id on every attempt`() {
+        val row = IngestQueueEntity(
+            payloadJson = IngestPayloadMapper.telemetryToJson(telemetry(heartRate = 80), "PAT-1"),
+            clientReadingId = "8f3a2c1e-4b0d-4a11-9c22-111111111111",
         )
+        val first = IngestReconciler.prepare(row).json
+        val json = JSONObject(first)
         assertEquals("8f3a2c1e-4b0d-4a11-9c22-111111111111", json.getString("client_reading_id"))
         assertEquals("2026-09-14T12:00:00Z", json.getString("timestamp"))
         assertEquals("C4:E3:42:AA:30:A4", json.getString("device_id"))
+        assertEquals(first, IngestReconciler.prepare(row.copy(retries = 3, lastAttemptAt = 99)).json)
     }
 }
 
 class IngestDeduperTest {
+
+    @Test fun optional_measurement_changes_are_not_duplicates_within_the_interval() {
+        val original = sample(72)
+        val changes = listOf(
+            original.copy(temperatureCelsius = 36.5f), original.copy(hrvScore = 42),
+            original.copy(calories = 3.5f), original.copy(distanceMeters = 12.5f),
+            original.copy(sleepSummary = SleepSummary(20, 0, 0)),
+            original.copy(sleepSummary = SleepSummary(0, 30, 0)),
+            original.copy(sleepSummary = SleepSummary(0, 0, 5)),
+        )
+        for (changed in changes) {
+            val deduper = IngestDeduper()
+            assertTrue(deduper.shouldEnqueue(original, nowMs = 1_000L))
+            assertTrue("Changed measurement was dropped: $changed", deduper.shouldEnqueue(changed, nowMs = 1_001L))
+            assertFalse(deduper.shouldEnqueue(changed.copy(timestamp = "2026-09-14T12:00:01Z"), nowMs = 1_002L))
+            assertFalse(deduper.shouldEnqueue(changed.copy(deviceModel = "Renamed watch"), nowMs = 1_003L))
+            assertTrue(deduper.shouldEnqueue(changed, nowMs = 31_001L))
+        }
+    }
+
+    @Test fun failed_optional_measurement_save_does_not_suppress_its_retry() = kotlinx.coroutines.runBlocking {
+        val original = sample(72)
+        val changed = original.copy(temperatureCelsius = 36.5f)
+        val deduper = IngestDeduper(elapsedMs = { 1_000L })
+        val saved = mutableListOf<HBandTelemetry>()
+        deduper.saveIfNeeded(original) { saved += it }
+        val failure = IllegalStateException("Synthetic write failure")
+        var observed: Exception? = null
+        try { deduper.saveIfNeeded(changed) { throw failure } } catch (error: Exception) { observed = error }
+        assertTrue(observed === failure)
+        deduper.saveIfNeeded(original) { saved += it }
+        deduper.saveIfNeeded(changed) { saved += it }
+        deduper.saveIfNeeded(changed) { saved += it }
+        assertEquals(listOf(original, changed), saved)
+    }
+
+    @Test
+    fun `measurement date changes do not change the elapsed recording interval`() {
+        var elapsed = 1_000L
+        val deduper = IngestDeduper(elapsedMs = { elapsed })
+        val original = sample(72)
+        assertTrue(deduper.shouldEnqueue(original))
+        elapsed = 2_000L
+        assertFalse(deduper.shouldEnqueue(original.copy(timestamp = "2026-09-15T12:00:00Z")))
+        elapsed = 30_999L
+        assertFalse(deduper.shouldEnqueue(original.copy(timestamp = "2026-09-13T12:00:00Z")))
+        elapsed = 31_000L
+        val corrected = original.copy(timestamp = "2026-09-13T12:00:30Z")
+        assertTrue(deduper.shouldEnqueue(corrected))
+        assertEquals("2026-09-13T12:00:30Z", corrected.timestamp)
+    }
+
+    @Test
+    fun `changed measurements bypass the interval but invalid data do not reset it`() {
+        var elapsed = 100L
+        val deduper = IngestDeduper(elapsedMs = { elapsed })
+        assertTrue(deduper.shouldEnqueue(sample(72)))
+        elapsed = 200L
+        assertTrue(deduper.shouldEnqueue(sample(75)))
+        elapsed = 10_000L
+        assertFalse(deduper.shouldEnqueue(sample(0)))
+        assertFalse(deduper.shouldEnqueue(sample(80, real = false)))
+        elapsed = 30_199L
+        assertFalse(deduper.shouldEnqueue(sample(75)))
+        elapsed = 30_200L
+        assertTrue(deduper.shouldEnqueue(sample(75)))
+    }
+
+    @Test
+    fun `monotonic clock may have a negative origin and repeated callbacks do not postpone acceptance`() {
+        var elapsed = -90_000L
+        val deduper = IngestDeduper(elapsedMs = { elapsed })
+        assertTrue(deduper.shouldEnqueue(sample(72)))
+        for (at in listOf(-90_000L, -80_000L, -70_000L, -60_001L)) {
+            elapsed = at
+            assertFalse(deduper.shouldEnqueue(sample(72)))
+        }
+        elapsed = -60_000L
+        assertTrue(deduper.shouldEnqueue(sample(72)))
+    }
+
+    @Test
+    fun `backwards interval clock does not suppress repeated readings indefinitely`() {
+        val deduper = IngestDeduper()
+        assertTrue(deduper.shouldEnqueue(sample(72), nowMs = 1_000_000L))
+        assertTrue(deduper.shouldEnqueue(sample(72), nowMs = 10_000L))
+        assertFalse(deduper.shouldEnqueue(sample(72), nowMs = 39_999L))
+        assertTrue(deduper.shouldEnqueue(sample(72), nowMs = 40_000L))
+    }
 
     private fun sample(hr: Int, steps: Int = 100, real: Boolean = true) = HBandTelemetry(
         deviceId = "AA:BB:CC:DD:EE:FF",

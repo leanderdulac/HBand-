@@ -3,8 +3,9 @@ package com.example.data.hband
 /**
  * Official Veepoo/HBand SDK argument tuples for history reads.
  *
- * Source (not guessed): HBandSDK/Android_Ble_SDK demo `OperaterActivity` and wiki
- * "VeepooSDK Android API Document":
+ * Ported from HBand PR #5, e9a80ef386d207a1bc6fe66bef3969eafa84aae5.
+ * SDK reference: HBandSDK/Android_Ble_SDK `OperaterActivity`,
+ * add57a049a916c210c5463a66b097ad94265e481.
  *
  * - `ReadOriginSetting(day, position, onlyReadOneDay, watchday)`
  *   - day: 0 = today, 1 = yesterday, …
@@ -15,9 +16,8 @@ package com.example.data.hband
  * - `readOriginDataFromDay(..., day, position, watchday)`
  * - `readSleepDataFromDay(..., day, watchday)` with day=0 (today) and watchday=capacity
  *
- * The previous HealthSync calls used `(watchDay, 0, false, 1)` / FromDay `(watchDay, 0, 1)`,
- * which asks for **one day at index = historyDays** with an illegal position of 0 — that
- * matches the field-test "history query returned no samples".
+ * The previous calls put history capacity in the day argument and started at position 0.
+ * Correct argument order does not prove that a particular watch has retained samples.
  */
 object VeepooHistoryReadSettings {
     const val DAY_TODAY = 0
