@@ -16,7 +16,11 @@ import androidx.core.content.ContextCompat
 import com.example.ui.HomeScreen
 import com.example.ui.MainViewModel
 import com.example.ui.theme.MyApplicationTheme
-import com.example.worker.HBandWorkScheduler
+import androidx.compose.runtime.getValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.ui.components.StorageStartupScreen
+import com.example.ui.components.RequestPermissionsWhenStorageReady
+import com.example.ui.components.BleLabFrame
 
 class MainActivity : ComponentActivity() {
 
@@ -25,9 +29,9 @@ class MainActivity : ComponentActivity() {
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
-        val allGranted = permissions.entries.all { it.value }
-        if (allGranted) {
-            mainViewModel.showNotification("Permissões Bluetooth concedidas com sucesso!")
+        val allGranted = allRequestedPermissionsGranted(permissions)
+        if (allGranted && (application as? HBandHealthSyncApp)?.storageStartup?.isReady == true) {
+            mainViewModel.showNotification("Permissões solicitadas concedidas.")
         }
     }
 
@@ -35,19 +39,20 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        // Initialize Retrofit configuration with saved settings
-        com.example.data.remote.RetrofitClient.initialize(this)
-
-        // Check & request Bluetooth & Location permissions
-        checkAndRequestBlePermissions()
-
-        // Schedule WorkManager periodic check for queued Room database metrics
-        HBandWorkScheduler.schedulePeriodicIngest(applicationContext)
-
         setContent {
+            val startup = (application as HBandHealthSyncApp).storageStartup
+            val state by startup.state.collectAsStateWithLifecycle()
+            RequestPermissionsWhenStorageReady(state, onRequestFailure = {
+                mainViewModel.showNotification(
+                    "Não foi possível solicitar permissões. Tente conectar pela aba Relógio; notificações ficam em Ajustes.",
+                    isError = true,
+                )
+            }) { checkAndRequestBlePermissions() }
             MyApplicationTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
-                    HomeScreen(viewModel = mainViewModel)
+                    BleLabFrame(enabled = BuildConfig.BLE_LAB) {
+                        StorageStartupScreen(state) { HomeScreen(viewModel = mainViewModel) }
+                    }
                 }
             }
         }
@@ -76,9 +81,17 @@ class MainActivity : ComponentActivity() {
             permissionsToRequest.add(Manifest.permission.ACCESS_FINE_LOCATION)
         }
 
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                permissionsToRequest.add(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
+
         if (permissionsToRequest.isNotEmpty()) {
             requestPermissionLauncher.launch(permissionsToRequest.toTypedArray())
         }
     }
 }
 
+internal fun allRequestedPermissionsGranted(permissions: Map<String, Boolean>): Boolean =
+    permissions.isNotEmpty() && permissions.entries.all { it.value }

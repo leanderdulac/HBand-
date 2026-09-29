@@ -14,7 +14,7 @@ import org.robolectric.annotation.GraphicsMode
 
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
-@Config(qualifiers = RobolectricDeviceQualifiers.Pixel8, sdk = [36])
+@Config(qualifiers = RobolectricDeviceQualifiers.Pixel8, sdk = [36], application = android.app.Application::class)
 class GreetingScreenshotTest {
 
   @get:Rule val composeTestRule = createComposeRule()
@@ -27,6 +27,7 @@ class GreetingScreenshotTest {
           apiHealth = com.example.data.repository.ApiHealthState(
             isOnline = true,
             latencyMs = 45,
+            lastCheckTime = 1790506800000,
             message = "OK"
           ),
           onRefreshHealth = {}

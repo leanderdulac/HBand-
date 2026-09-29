@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Only merged by -PstorageLab=true. No application runtime, network or BLE. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <uses-permission android:name="android.permission.INTERNET" tools:node="remove" />
+    <application android:name="android.app.Application" android:allowBackup="false"
+        tools:replace="android:name,android:allowBackup">
+        <activity android:name="com.example.MainActivity" android:enabled="false" />
+        <receiver android:name="com.example.data.hband.HBandBootReceiver" android:enabled="false" />
+        <service android:name="com.example.data.hband.HBandBleService" android:enabled="false" />
+        <service android:name="com.inuker.bluetooth.library.BluetoothService" android:enabled="false" />
+        <provider android:name="androidx.startup.InitializationProvider" tools:node="remove" />
+        <provider android:name="com.google.firebase.provider.FirebaseInitProvider" tools:node="remove" />
+    </application>
+</manifest>

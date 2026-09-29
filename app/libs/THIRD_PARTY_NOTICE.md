@@ -22,3 +22,34 @@ https://github.com/HBandSDK/Android_Ble_SDK/blob/master/LICENSE
 
 No changes were made to these binaries. See `companion-android/VE30_INTEGRATION_GUIDE.md`
 for how they're wired into the app.
+
+## Native ECG JNI (`libnative-lib.so`)
+
+`vpprotocol` calls `com.vp.cso.hrvreport.JNIChange`, whose static initializer
+does `System.loadLibrary("native-lib")`. That `.so` is **not** packaged inside
+`vpprotocol-*.aar`. Vendor copies live at:
+
+```
+app/src/main/jniLibs/arm64-v8a/libnative-lib.so
+app/src/main/jniLibs/armeabi-v7a/libnative-lib.so
+```
+
+Taken unmodified from the official Apache-2.0 SDK drop (same source as the AARs):
+
+https://github.com/HBandSDK/Android_Ble_SDK/tree/master/android_sdk_source/jniLibs
+
+(`JNIChange` does not `dlopen` `libluoentz.so`. The consumer H Band APK also
+ships `libluoentz.so`, but it is not a `NEEDED` of this SDK `native-lib`.)
+
+To refresh from the SDK tree:
+
+```
+curl -L -o app/src/main/jniLibs/arm64-v8a/libnative-lib.so \
+  https://raw.githubusercontent.com/HBandSDK/Android_Ble_SDK/master/android_sdk_source/jniLibs/arm64-v8a/libnative-lib.so
+curl -L -o app/src/main/jniLibs/armeabi-v7a/libnative-lib.so \
+  https://raw.githubusercontent.com/HBandSDK/Android_Ble_SDK/master/android_sdk_source/jniLibs/armeabi-v7a/libnative-lib.so
+```
+
+Fallback if that tree is missing: unzip `lib/arm64-v8a/libnative-lib.so` from
+`references/official-apk/` (protocol reference APK), do not reverse-engineer
+Java/smali.

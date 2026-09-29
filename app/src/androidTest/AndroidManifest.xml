@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Probe exists only in the instrumentation APK, never in the patient APK. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <queries>
+        <package android:name="com.aistudio.hbandhealthtech.pxq97m.storagelab" />
+    </queries>
+    <application>
+        <activity android:name="com.example.util.ShareReceiverLabActivity"
+            android:label="Next2U Lab Receiver" android:exported="true"
+            android:process=":provider_probe">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="image/png" />
+            </intent-filter>
+        </activity>
+        <service android:name="com.example.util.ProviderProbeService"
+            android:exported="true" android:process=":provider_probe" />
+    </application>
+</manifest>
