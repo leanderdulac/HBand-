@@ -68,7 +68,7 @@ class PatientTabContinuityTest {
             MyApplicationTheme {
                 Surface(Modifier.fillMaxSize()) {
                     PatientTabContent(tab.intValue) {
-                        if (tab.intValue == 1) RechartsSensorDashboard(emptyList(), {}) else Text("Outra aba")
+                        if (tab.intValue == 1) RechartsSensorDashboard(emptyList()) else Text("Outra aba")
                     }
                 }
             }
@@ -89,7 +89,7 @@ class PatientTabContinuityTest {
             MyApplicationTheme {
                 Surface(Modifier.fillMaxSize()) {
                     PatientTabContent(tab.intValue) {
-                        if (tab.intValue == 1) RechartsSensorDashboard(emptyList(), {}) else Text("Outra aba")
+                        if (tab.intValue == 1) RechartsSensorDashboard(emptyList()) else Text("Outra aba")
                     }
                 }
             }

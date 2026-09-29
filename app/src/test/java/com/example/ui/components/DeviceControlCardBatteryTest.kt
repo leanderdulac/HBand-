@@ -121,4 +121,14 @@ class DeviceControlCardBatteryTest {
             }
         }
     }
+
+    @Test
+    fun simulated_low_battery_does_not_issue_charging_advice() {
+        composeTestRule.setContent {
+            MyApplicationTheme {
+                LowBatteryWarningCard(HBandDevice(batteryLevel = 14, batteryIsSimulated = true))
+            }
+        }
+        composeTestRule.onNodeWithTag("low_battery_warning_card").assertDoesNotExist()
+    }
 }
