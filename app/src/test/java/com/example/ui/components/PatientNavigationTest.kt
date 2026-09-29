@@ -45,7 +45,7 @@ class PatientNavigationTest {
                     Column(Modifier.fillMaxSize().padding(padding)) {
                         HomeWelcomeHeader("Nome de teste", "patient-fixture", { profileOpened = true })
                         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp)) {
-                            DeviceControlCard(null, true, {}, {}, {}, {}, {})
+                            DeviceControlCard(null, true, {}, {}, {}, {})
                         }
                     }
                 }
@@ -77,7 +77,7 @@ class PatientNavigationTest {
                         Column(Modifier.fillMaxSize().padding(padding)) {
                             HomeWelcomeHeader("", "patient-fixture", {})
                             Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp)) {
-                                DeviceControlCard(null, true, {}, {}, {}, {}, {})
+                                DeviceControlCard(null, true, {}, {}, {}, {})
                             }
                         }
                     }
