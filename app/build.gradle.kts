@@ -1,4 +1,5 @@
 import com.google.gms.googleservices.GoogleServicesPlugin.MissingGoogleServicesStrategy
+import java.util.Properties
 
 plugins {
   alias(libs.plugins.android.application)
@@ -15,7 +16,7 @@ val bleLab = providers.gradleProperty("bleLab").orNull == "true"
 require(!(storageLab && bleLab)) { "Choose either storageLab or bleLab, never both." }
 if (bleLab) {
   // Refuse private configuration, rather than copying credentials into a lab APK.
-  val labConfig = java.util.Properties().apply {
+  val labConfig = Properties().apply {
     val configFile = rootProject.file(if (rootProject.file(".env").exists()) ".env" else ".env.example")
     configFile.inputStream().use { load(it) }
   }
@@ -96,7 +97,7 @@ android {
   if (bleLab) {
     sourceSets.getByName("debug").apply {
       manifest.srcFile("src/bleLab/AndroidManifest.xml")
-      res.srcDir("src/bleLab/res")
+      res.directories.add("src/bleLab/res")
     }
   }
   compileOptions {
