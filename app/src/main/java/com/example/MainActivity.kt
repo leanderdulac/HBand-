@@ -20,6 +20,7 @@ import androidx.compose.runtime.getValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.ui.components.StorageStartupScreen
 import com.example.ui.components.RequestPermissionsWhenStorageReady
+import com.example.ui.components.BleLabFrame
 
 class MainActivity : ComponentActivity() {
 
@@ -49,7 +50,9 @@ class MainActivity : ComponentActivity() {
             }) { checkAndRequestBlePermissions() }
             MyApplicationTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
-                    StorageStartupScreen(state) { HomeScreen(viewModel = mainViewModel) }
+                    BleLabFrame(enabled = BuildConfig.BLE_LAB) {
+                        StorageStartupScreen(state) { HomeScreen(viewModel = mainViewModel) }
+                    }
                 }
             }
         }

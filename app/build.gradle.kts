@@ -11,6 +11,25 @@ plugins {
 
 // Explicit test-only build. Never use this package as a pilot update.
 val storageLab = providers.gradleProperty("storageLab").orNull == "true"
+val bleLab = providers.gradleProperty("bleLab").orNull == "true"
+require(!(storageLab && bleLab)) { "Choose either storageLab or bleLab, never both." }
+if (bleLab) {
+  // Refuse private configuration, rather than copying credentials into a lab APK.
+  val labConfig = java.util.Properties().apply {
+    val configFile = rootProject.file(if (rootProject.file(".env").exists()) ".env" else ".env.example")
+    configFile.inputStream().use { load(it) }
+  }
+  val allowedKeys = mapOf(
+    "HEALTHTECH_INGEST_API_KEY" to setOf("", "YOUR_HEALTHTECH_API_KEY_HERE"),
+    "GEMINI_API_KEY" to setOf("", "YOUR_GEMINI_API_KEY", "YOUR_GEMINI_API_KEY_HERE"),
+  )
+  require(allowedKeys.all { (key, placeholders) -> labConfig.getProperty(key, "") in placeholders }) {
+    "BLE lab requires placeholder keys only. Preserve private configuration and use an isolated checkout."
+  }
+  require(fileTree(projectDir) { include("**/google-services.json"); exclude("build/**") }.isEmpty) {
+    "BLE lab must not include google-services.json."
+  }
+}
 
 android {
   namespace = "com.example"
@@ -24,6 +43,7 @@ android {
     versionName = "1.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    buildConfigField("boolean", "BLE_LAB", "false")
 
     // sqlcipher-android AAR ships libsqlcipher.so for these ABIs; arm64-v8a is
     // required on current VE30 companion phones. Do not drop it from the APK.
@@ -64,10 +84,20 @@ android {
     debug {
       signingConfig = signingConfigs.getByName("debugConfig")
       if (storageLab) applicationIdSuffix = ".storagelab"
+      if (bleLab) {
+        applicationIdSuffix = ".blelab"
+        buildConfigField("boolean", "BLE_LAB", "true")
+      }
     }
   }
   if (storageLab) {
     sourceSets.getByName("debug").manifest.srcFile("src/storageLab/AndroidManifest.xml")
+  }
+  if (bleLab) {
+    sourceSets.getByName("debug").apply {
+      manifest.srcFile("src/bleLab/AndroidManifest.xml")
+      res.srcDir("src/bleLab/res")
+    }
   }
   compileOptions {
     sourceCompatibility = JavaVersion.VERSION_11
@@ -116,6 +146,9 @@ if (ingestKeyIsPlaceholder) {
 }
 
 gradle.taskGraph.whenReady {
+  if (bleLab && allTasks.any { it.name.contains("Release", ignoreCase = true) }) {
+    throw GradleException("BLE lab is debug-only; release tasks are forbidden with -PbleLab=true.")
+  }
   val runningRelease = allTasks.any { task ->
     val name = task.name
     name.contains("Release", ignoreCase = true) &&
