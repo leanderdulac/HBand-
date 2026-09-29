@@ -24,7 +24,7 @@ class PatientAutomaticSummaryTest {
         compose.setContent {
             MyApplicationTheme {
                 Column(Modifier.verticalScroll(rememberScrollState())) {
-                    GeminiHealthInsightCard("Saída de teste não validada", false, { requests++ })
+                    GeminiHealthInsightCard("Saída de teste não validada", false, { requests++ }, showInsight = false)
                 }
             }
         }
@@ -34,6 +34,24 @@ class PatientAutomaticSummaryTest {
         compose.runOnIdle { assertEquals(0, requests) }
         compose.onNodeWithText("Resumo para revisão técnica").performScrollTo().performClick()
         compose.onNodeWithTag("gemini_insight_text").assertTextEquals("Saída de teste não validada")
+        compose.onNodeWithTag("refresh_gemini_insight_button").performScrollTo().performClick()
+        compose.runOnIdle { assertEquals(1, requests) }
+    }
+
+    @Test fun enabled_flag_shows_summary_with_review_label_and_manual_refresh() {
+        var requests = 0
+        compose.setContent {
+            MyApplicationTheme {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    GeminiHealthInsightCard("Resumo sintético de teste", false, { requests++ }, showInsight = true)
+                }
+            }
+        }
+        compose.onNodeWithText("Resumo automático em validação").assertDoesNotExist()
+        compose.onNodeWithTag("ai_insight_review_label").assertExists()
+        compose.onNodeWithText("Não é diagnóstico", substring = true).assertExists()
+        compose.onNodeWithTag("gemini_insight_text").assertTextEquals("Resumo sintético de teste")
+        compose.runOnIdle { assertEquals(0, requests) }
         compose.onNodeWithTag("refresh_gemini_insight_button").performScrollTo().performClick()
         compose.runOnIdle { assertEquals(1, requests) }
     }

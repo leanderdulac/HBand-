@@ -40,6 +40,18 @@ if (bleLab) {
   }
 }
 
+// Optional automatic AI summary, default off. Read like the Secrets plugin (.env, then
+// .env.example) but exposed as a boolean; the BLE lab has no network and never enables it.
+fun readEnvFlag(name: String): Boolean = listOf(".env", ".env.example")
+  .map { rootProject.file(it) }
+  .filter { it.exists() }
+  .firstNotNullOfOrNull { file ->
+    file.readLines().map { it.trim() }.firstOrNull { it.startsWith("$name=") }
+      ?.substringAfter("=")?.trim()?.removeSurrounding("\"")
+  }
+  .equals("true", ignoreCase = true)
+val aiInsightEnabled = !bleLab && readEnvFlag("AI_INSIGHT_ENABLED")
+
 android {
   namespace = "com.example"
   compileSdk { version = release(36) { minorApiLevel = 1 } }
@@ -53,6 +65,7 @@ android {
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     buildConfigField("boolean", "BLE_LAB", "false")
+    buildConfigField("boolean", "AI_INSIGHT_ENABLED", aiInsightEnabled.toString())
 
     // sqlcipher-android AAR ships libsqlcipher.so for these ABIs; arm64-v8a is
     // required on current VE30 companion phones. Do not drop it from the APK.
@@ -129,6 +142,8 @@ secrets {
   propertiesFileName = ".env"
   defaultPropertiesFileName = ".env.example"
   ignoreList.add("FIREBASE_APPCHECK_DEBUG_TOKEN")
+  // Exposed as a boolean BuildConfig field above, not as the plugin's String field.
+  ignoreList.add("AI_INSIGHT_ENABLED")
 }
 
 val healthtechIngestKeyPlaceholder = "YOUR_HEALTHTECH_API_KEY_HERE"

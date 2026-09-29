@@ -209,7 +209,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private var lastAlertTimeMs: Long? = null
 
-    private val insightReview = PatientInsightReview(viewModelScope, com.example.BuildConfig.DEBUG, repository.allSensorMetrics) { metrics ->
+    private val insightPolicy = insightPolicy(com.example.BuildConfig.DEBUG, com.example.BuildConfig.AI_INSIGHT_ENABLED)
+    private val insightReview = PatientInsightReview(
+        viewModelScope, insightPolicy.manualRequests, repository.allSensorMetrics, automatic = insightPolicy.automatic,
+    ) { metrics ->
         com.example.data.remote.GeminiHealthAnalyzer.generateSevenDayInsight(metrics)
     }
     val geminiInsightText = insightReview.state.map { it.text }
