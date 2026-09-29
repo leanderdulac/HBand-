@@ -51,6 +51,9 @@ data class DeviceCapabilities(
             isSupportFindDeviceByPhone
 }
 
+/** Local presentation of an SDK setting result; no physical readback or server receipt implied. */
+enum class WatchSettingConfirmation { UNKNOWN, PENDING, CONFIRMED, UNCONFIRMED }
+
 data class AutoMeasureUiState(
     val supported: Boolean = false,
     val heartRateEnabled: Boolean = false,
@@ -58,6 +61,8 @@ data class AutoMeasureUiState(
     val spo2AutoSupported: Boolean = false,
     val lastReadAtMs: Long? = null,
     val summary: String = "",
+    val heartRateConfirmation: WatchSettingConfirmation = WatchSettingConfirmation.UNKNOWN,
+    val spo2Confirmation: WatchSettingConfirmation = WatchSettingConfirmation.UNKNOWN,
 )
 
 data class WearDetectUiState(
@@ -65,6 +70,7 @@ data class WearDetectUiState(
     val enabled: Boolean = false,
     val lastResult: String = "",
     val lastWorn: Boolean? = null,
+    val confirmation: WatchSettingConfirmation = WatchSettingConfirmation.UNKNOWN,
 )
 
 data class HistorySyncUiState(

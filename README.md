@@ -4,6 +4,12 @@ O app do paciente é o de tela branca, next2u SAÚDE.
 
 ## App principal
 
+**Artefato histórico:** o APK abaixo pertence à entrega da branch
+`feature/next2u-patient-ui` registrada em `c1a5a993fe73ade0e374747700a884555cbb1f7d`.
+Ele não representa a composição atual com as correções do PR #6. Não usar esse
+arquivo para atualizar o aparelho do piloto. A composição de fonte, preservações
+e limites estão em [Integração da fonte](docs/PATIENT_SOURCE_INTEGRATION_2026-09-29.md).
+
 O APK instalável está na pasta **[App principal](App%20principal/)**.
 
 | | |
@@ -13,4 +19,6 @@ O APK instalável está na pasta **[App principal](App%20principal/)**.
 | Versão | 1.0 |
 | Branch | `feature/next2u-patient-ui` |
 
-Esse build não gera medição, bateria nem alerta fictícios. O que aparece na tela veio da pulseira ou ficou sem valor (`--`).
+A descrição histórica dessa entrega informa remoção dos geradores de simulação.
+Isso não comprova a origem de todo dado persistido, aceite físico ou integração
+com o backend. Os resultados aplicáveis ao candidato precisam identificar seu SHA.

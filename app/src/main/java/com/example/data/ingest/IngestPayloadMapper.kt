@@ -16,7 +16,8 @@ enum class IngestHttpKind {
  *
  * Contract (from the HealthTech smoke test and observed 422s):
  * - `patient_id`, `device_id`, `timestamp`, `heart_rate` are required
- * - `heart_rate` must be >= [MIN_HEART_RATE] or the API returns HTTP 422
+ * - queued `heart_rate` must be in [MIN_HEART_RATE]..[MAX_HEART_RATE] or the
+ *   confirmed Core schema rejects the entire batch with HTTP 422
  * - optional vitals (BP, SpO2, temperature, HRV) are sent only when a real
  *   reading exists — never filled with demo defaults
  */
@@ -24,13 +25,71 @@ object IngestPayloadMapper {
     const val DEFAULT_PATIENT_ID = "PAT-HBAND-001"
     const val SERVICE_NAME = "healthtech-secure-api"
     const val MIN_HEART_RATE = 20
+    const val MAX_HEART_RATE = 250
 
     /** Placeholder MAC from the old [com.example.data.model.HBandDevice] defaults. */
     const val PLACEHOLDER_DEVICE_ID = "HBAND-B57-89A4"
     const val PLACEHOLDER_MAC = "E4:A8:B6:12:89:A4"
 
     const val MISSING_HR_ERROR =
-        "FC ausente ou inválida (heart_rate < $MIN_HEART_RATE). Amostra não enviada — nenhum valor foi inventado."
+        "FC ausente ou fora do intervalo aceito pela API ($MIN_HEART_RATE a $MAX_HEART_RATE). Registro preservado para revisão, sem envio ou alteração do valor."
+
+    const val INVALID_SOURCE_ERROR =
+        "Origem da leitura incompatível com a API. Registro preservado para revisão, sem envio ou alteração da origem."
+
+    const val INVALID_FILTER_ERROR =
+        "Filtro da leitura incompatível com a API. Registro preservado para revisão, sem envio ou alteração do filtro."
+
+    const val INVALID_SPO2_ERROR =
+        "SpO₂ fora do intervalo aceito pela API (50 a 100) ou inválida. Registro preservado para revisão, sem envio ou alteração do valor."
+
+    // Core schemas.py at 75e5e02c839f381069212bb7c7d3a2befa491b83; not a full ingest validator.
+    private val ingestSources = setOf("companion_manual", "ble_sim", "ble_hband", "http")
+    private val filterTypes = setOf("BMO", "Wavelet", "Butterworth", "Raw", "Adaptive")
+    private val coreFloatDecimal = Regex("[+-]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?")
+
+    private fun coreFloatNumber(value: Any?): Double? {
+        if (value is Number) return value.toDouble()
+        if (value !is String) return null
+        // Core's float parser accepts decimal strings, not Java suffixes or hexadecimal floats.
+        // Its underscore fallback does not trim whitespace and rejects edge/repeated underscores.
+        val decimal = if ('_' in value) {
+            if (value.startsWith('_') || value.endsWith('_') || "__" in value) return null
+            value.replace("_", "")
+        } else value.trim { it !in '\u001c'..'\u001f' && (it.isWhitespace() || it == '\u0085') }
+        return decimal.takeIf { coreFloatDecimal.matches(it) }?.toDoubleOrNull()
+    }
+
+    fun isCompatibleSpo2Json(json: String): Boolean = try {
+        val payload = JSONObject(json)
+        // Optional in Core: retain absence/null; inspect the transport value without rewriting it.
+        if (!payload.has("spo2") || payload.isNull("spo2")) true else {
+            val value = coreFloatNumber(payload.opt("spo2"))
+            value != null && value.isFinite() && value in 50.0..100.0
+        }
+    } catch (_: Exception) {
+        false
+    }
+
+    fun isCompatibleFilterTypeJson(json: String): Boolean = try {
+        val payload = JSONObject(json)
+        val filter = payload.opt("filter_type")
+        // Unlike ingest_source, Core retains null/empty. Absence alone defaults to BMO there.
+        !payload.has("filter_type") || filter == JSONObject.NULL ||
+            (filter is String && (filter.isEmpty() || filter in filterTypes))
+    } catch (_: Exception) {
+        false
+    }
+
+    fun isCompatibleIngestSourceJson(json: String): Boolean = try {
+        val payload = JSONObject(json)
+        val source = payload.opt("ingest_source")
+        // Core accepts absent/null/empty; leave each representation untouched on the wire.
+        !payload.has("ingest_source") || source == JSONObject.NULL ||
+            (source is String && (source.isEmpty() || source in ingestSources))
+    } catch (_: Exception) {
+        false
+    }
 
     fun resolvePatientId(raw: String?): String {
         val trimmed = raw?.trim().orEmpty()
@@ -51,13 +110,16 @@ object IngestPayloadMapper {
             value.equals(PLACEHOLDER_MAC, ignoreCase = true)
     }
 
+    // Existing local capture eligibility: do not discard an out-of-contract reading before saving it.
     fun isIngestibleHeartRate(heartRate: Int): Boolean = heartRate >= MIN_HEART_RATE
 
     fun isIngestible(telemetry: HBandTelemetry): Boolean = isIngestibleHeartRate(telemetry.heartRate)
 
     fun isIngestibleJson(json: String): Boolean {
         return try {
-            isIngestibleHeartRate(JSONObject(json).optInt("heart_rate", 0))
+            // Validate the transport value without truncating fractions or rewriting the durable payload.
+            val heartRate = coreFloatNumber(JSONObject(json).opt("heart_rate"))
+            heartRate != null && heartRate.isFinite() && heartRate in MIN_HEART_RATE.toDouble()..MAX_HEART_RATE.toDouble()
         } catch (_: Exception) {
             false
         }
@@ -116,17 +178,17 @@ object IngestPayloadMapper {
         val timestamp = jsonObj.optString("timestamp", "")
         val metrics = jsonObj.optJSONObject("metrics")
 
-        val hr = firstPresentInt(metrics, "heartRate")
-            ?: firstPresentInt(jsonObj, "heart_rate")
-            ?: firstPresentInt(jsonObj, "heartRate")
+        val hr = firstPresentHeartRate(metrics, "heartRate")
+            ?: firstPresentHeartRate(jsonObj, "heart_rate")
+            ?: firstPresentHeartRate(jsonObj, "heartRate")
 
         val sys = metrics?.optJSONObject("bloodPressure")?.takeIf { it.has("systolic") }?.optInt("systolic")
             ?: jsonObj.optJSONObject("blood_pressure")?.takeIf { it.has("systolic") }?.optInt("systolic")
         val dia = metrics?.optJSONObject("bloodPressure")?.takeIf { it.has("diastolic") }?.optInt("diastolic")
             ?: jsonObj.optJSONObject("blood_pressure")?.takeIf { it.has("diastolic") }?.optInt("diastolic")
 
-        val spo2 = firstPresentInt(metrics, "spO2")
-            ?: firstPresentInt(jsonObj, "spo2")
+        val spo2 = metrics?.opt("spO2")?.takeUnless { it == JSONObject.NULL }
+            ?: jsonObj.opt("spo2").takeUnless { it == JSONObject.NULL }
         val temp = firstPresentDouble(metrics, "temperatureCelsius")
             ?: firstPresentDouble(jsonObj, "temperature")
         val steps = firstPresentInt(metrics, "steps")
@@ -155,12 +217,16 @@ object IngestPayloadMapper {
                 }
             )
         }
-        if (spo2 != null && spo2 > 0) normalized.put("spo2", spo2)
+        // Preserve explicit malformed values for local review; retain the legacy <=0 sentinel rule.
+        if (spo2 != null && coreFloatNumber(spo2)?.let { it <= 0 } != true) normalized.put("spo2", spo2)
         if (temp != null && temp > 0.0) normalized.put("temperature", temp)
         if (steps != null) normalized.put("steps", steps)
         if (calories != null) normalized.put("calories", calories)
         if (hrv != null && hrv > 0) normalized.put("hrv_score", hrv)
         if (isReal != null) normalized.put("is_real_sensor_data", isReal)
+        // Preserve declared provenance exactly; absence is not evidence of any source.
+        if (jsonObj.has("ingest_source")) normalized.put("ingest_source", jsonObj.get("ingest_source"))
+        if (jsonObj.has("filter_type")) normalized.put("filter_type", jsonObj.get("filter_type"))
         normalized.put("service", SERVICE_NAME)
         return normalized.toString(2)
     }
@@ -174,9 +240,17 @@ object IngestPayloadMapper {
         }
     }
 
-    fun authErrorMessage(httpCode: Int, errorBody: String?): String {
-        val detail = errorBody?.takeIf { it.isNotBlank() }?.let { ": $it" } ?: ""
-        return "Falha de autenticação na API HealthTech (HTTP $httpCode)$detail. Verifique a chave em Ajustes."
+    fun authErrorMessage(httpCode: Int, @Suppress("UNUSED_PARAMETER") errorBody: String?): String {
+        // Keep the persisted pause prefix; never store a server body that may echo a credential.
+        return "Falha de autenticação na API HealthTech (HTTP $httpCode). Verifique a chave em Ajustes."
+    }
+
+    private fun firstPresentHeartRate(obj: JSONObject?, key: String): Any? {
+        if (obj == null || !obj.has(key) || obj.isNull(key)) return null
+        val value = obj.get(key)
+        // Keep existing numeric normalization for compatible legacy values. Preserve an
+        // explicit incompatible value so the guard refuses it rather than inventing a number.
+        return coreFloatNumber(value) ?: value
     }
 
     private fun firstPresentInt(obj: JSONObject?, key: String): Int? {
@@ -191,23 +265,50 @@ object IngestPayloadMapper {
 }
 
 class IngestDeduper(
-    private val minIntervalMs: Long = 30_000L
+    private val minIntervalMs: Long = 30_000L,
+    // Process-local interval clock; never a measurement timestamp or persisted value.
+    private val elapsedMs: () -> Long = { System.nanoTime() / 1_000_000L },
 ) {
     private var lastSignature: String? = null
     private var lastAt: Long = 0L
 
-    fun shouldEnqueue(telemetry: HBandTelemetry, nowMs: Long = System.currentTimeMillis()): Boolean {
+    /** Serial collector only: a failed local save must not consume its deduplication slot. */
+    suspend fun saveIfNeeded(telemetry: HBandTelemetry, save: suspend (HBandTelemetry) -> Unit) {
+        val previousSignature = lastSignature
+        val previousAt = lastAt
+        if (!shouldEnqueue(telemetry)) return
+        try {
+            save(telemetry)
+        } catch (error: Throwable) {
+            lastSignature = previousSignature
+            lastAt = previousAt
+            throw error
+        }
+    }
+
+    fun shouldEnqueue(telemetry: HBandTelemetry, nowMs: Long = elapsedMs()): Boolean {
         if (!telemetry.isRealSensorData) return false
         if (!IngestPayloadMapper.isIngestible(telemetry)) return false
+        // Compare every measurement persisted by the live recorder, not just the core vitals.
+        // Timestamp/model metadata alone still do not bypass the existing elapsed interval.
         val signature = listOf(
             telemetry.deviceId,
             telemetry.heartRate,
             telemetry.spO2,
             telemetry.bloodPressure.systolic,
             telemetry.bloodPressure.diastolic,
-            telemetry.steps
+            telemetry.steps,
+            telemetry.temperatureCelsius,
+            telemetry.hrvScore,
+            telemetry.calories,
+            telemetry.distanceMeters,
+            telemetry.sleepSummary.deepSleepMinutes,
+            telemetry.sleepSummary.lightSleepMinutes,
+            telemetry.sleepSummary.awakeMinutes
         ).joinToString("|")
-        if (signature == lastSignature && nowMs - lastAt < minIntervalMs) return false
+        val elapsed = nowMs - lastAt
+        // A reset of an injected clock must not leave the recorder stuck behind lastAt.
+        if (signature == lastSignature && elapsed >= 0L && elapsed < minIntervalMs) return false
         lastSignature = signature
         lastAt = nowMs
         return true

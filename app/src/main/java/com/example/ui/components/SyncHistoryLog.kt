@@ -1,6 +1,5 @@
 package com.example.ui.components
 
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -10,6 +9,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -17,24 +17,17 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.CloudDone
-import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.HourglassTop
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Sync
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -51,9 +44,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ui.theme.MinimalBorder
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
 data class SyncLogEntry(
     val id: String,
@@ -93,10 +83,9 @@ fun SyncHistoryLog(
     ) {
         Column(modifier = Modifier.padding(20.dp)) {
             // Header Title
-            Row(
+            Column(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(
@@ -116,42 +105,36 @@ fun SyncHistoryLog(
                     Spacer(modifier = Modifier.width(12.dp))
                     Column {
                         Text(
-                            text = "Histórico de envio",
+                            text = "Tarefas de envio",
                             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                             color = Color(0xFF191C1E)
                         )
                         Text(
-                            text = "Registro dos envios feitos em segundo plano",
-                            style = MaterialTheme.typography.labelSmall,
+                            text = "Situação informada pelo aplicativo. Não é um comprovante de recebimento.",
+                            style = MaterialTheme.typography.bodyLarge,
                             color = Color(0xFF44474E)
                         )
                     }
                 }
 
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(
-                        onClick = onRefreshWorkManager,
-                        modifier = Modifier.testTag("refresh_history_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Refresh,
-                            contentDescription = "Atualizar WorkManager",
-                            tint = Color(0xFF00639B)
-                        )
-                    }
+                OutlinedButton(
+                    onClick = onRefreshWorkManager,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag("refresh_history_button")
+                ) {
+                    Text("Tentar enviar registros")
                 }
             }
 
             Spacer(modifier = Modifier.height(16.dp))
 
             // Filter Chips
-            Row(
+            Column(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 FilterPill("Todos (${syncLogs.size})", selectedFilter == "ALL") { selectedFilter = "ALL" }
-                FilterPill("Sucesso (${syncLogs.count { it.status == "SUCCEEDED" || it.status == "SYNCED" }})", selectedFilter == "SUCCESS") { selectedFilter = "SUCCESS" }
-                FilterPill("Falhou (${syncLogs.count { it.status == "FAILED" }})", selectedFilter == "FAILED") { selectedFilter = "FAILED" }
+                FilterPill("Concluídos no aplicativo (${syncLogs.count { it.status == "SUCCEEDED" || it.status == "SYNCED" }})", selectedFilter == "SUCCESS") { selectedFilter = "SUCCESS" }
+                FilterPill("Com falha (${syncLogs.count { it.status == "FAILED" }})", selectedFilter == "FAILED") { selectedFilter = "FAILED" }
             }
 
             Spacer(modifier = Modifier.height(16.dp))
@@ -192,7 +175,8 @@ private fun FilterPill(
     FilterChip(
         selected = selected,
         onClick = onClick,
-        label = { Text(label, style = MaterialTheme.typography.labelSmall) },
+        label = { Text(label, style = MaterialTheme.typography.bodyMedium) },
+        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
         shape = RoundedCornerShape(16.dp),
         colors = FilterChipDefaults.filterChipColors(
             selectedContainerColor = Color(0xFF00639B),
@@ -205,14 +189,15 @@ private fun FilterPill(
 
 @Composable
 private fun SyncLogEntryCard(log: SyncLogEntry) {
-    val dateFormat = SimpleDateFormat("dd/MM, HH:mm:ss", Locale.forLanguageTag("pt-BR"))
-    val formattedTime = dateFormat.format(Date(log.timestampMillis))
-
+    // The ViewModel assigns display timestamps to work snapshots; they are not execution times.
     val (badgeColor, statusLabel, icon) = when (log.status) {
-        "SUCCEEDED", "SYNCED" -> Triple(Color(0xFF2E7D32), "SUCESSO", Icons.Default.CheckCircle)
+        "SUCCEEDED", "SYNCED" -> Triple(Color(0xFF2E7D32), "CONCLUÍDO", Icons.Default.CheckCircle)
         "RUNNING" -> Triple(Color(0xFF00639B), "EXECUTANDO", Icons.Default.Sync)
         "ENQUEUED", "PENDING" -> Triple(Color(0xFFE65100), "EM FILA", Icons.Default.HourglassTop)
-        else -> Triple(Color(0xFFC62828), "FALHOU", Icons.Default.Error)
+        "FAILED" -> Triple(Color(0xFFC62828), "FALHOU", Icons.Default.Error)
+        "BLOCKED" -> Triple(Color(0xFF44474E), "AGUARDANDO OUTRA TAREFA", Icons.Default.HourglassTop)
+        "CANCELLED" -> Triple(Color(0xFF44474E), "CANCELADO", Icons.Default.History)
+        else -> Triple(Color(0xFF44474E), "SITUAÇÃO NÃO RECONHECIDA", Icons.Default.History)
     }
 
     Card(
@@ -222,45 +207,29 @@ private fun SyncLogEntryCard(log: SyncLogEntry) {
         colors = CardDefaults.cardColors(containerColor = Color(0xFFFAFAFE))
     ) {
         Column(modifier = Modifier.padding(14.dp)) {
-            Row(
+            Column(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = log.source,
+                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                    color = Color(0xFF191C1E),
+                )
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Icon(
                         imageVector = icon,
                         contentDescription = null,
                         tint = badgeColor,
                         modifier = Modifier.size(18.dp)
                     )
-                    Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = log.source,
-                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                        color = Color(0xFF191C1E)
+                        text = statusLabel,
+                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                        color = badgeColor,
+                        modifier = Modifier.weight(1f),
                     )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = badgeColor.copy(alpha = 0.12f)
-                    ) {
-                        Text(
-                            text = statusLabel,
-                            style = MaterialTheme.typography.labelSmall.copy(
-                                fontWeight = FontWeight.Bold,
-                                color = badgeColor
-                            ),
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                        )
-                    }
                 }
-
-                Text(
-                    text = formattedTime,
-                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
-                    color = Color(0xFF64748B)
-                )
             }
 
             Spacer(modifier = Modifier.height(6.dp))

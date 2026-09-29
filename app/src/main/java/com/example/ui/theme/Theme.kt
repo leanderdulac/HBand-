@@ -17,7 +17,9 @@ private val LightColorScheme = lightColorScheme(
     onBackground = MinimalTextPrimary,
     onSurface = MinimalTextPrimary,
     onSurfaceVariant = MinimalTextSecondary,
-    outline = MinimalBorder
+    // Controls need a visible boundary on white, distinct from decorative card borders.
+    outline = Color(0xFF687889),
+    outlineVariant = MinimalBorder,
 )
 
 @Composable

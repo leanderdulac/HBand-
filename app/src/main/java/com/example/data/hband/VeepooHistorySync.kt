@@ -27,7 +27,6 @@ import com.veepoo.protocol.model.datas.OriginData3
 import com.veepoo.protocol.model.datas.OriginHalfHourData
 import com.veepoo.protocol.model.datas.SleepData
 import com.veepoo.protocol.model.datas.Spo2hOriginData
-import com.veepoo.protocol.model.datas.SportData
 import com.veepoo.protocol.model.enums.EAllSetType
 import com.veepoo.protocol.model.enums.EAutoMeasureType
 import com.veepoo.protocol.model.enums.ECheckWear
@@ -36,6 +35,7 @@ import com.veepoo.protocol.model.settings.CheckWearSetting
 import com.veepoo.protocol.model.settings.ReadOriginSetting
 import com.veepoo.protocol.model.settings.ReadSleepSetting
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
 
@@ -55,9 +55,7 @@ class VeepooHistorySync(
 
     data class HandshakeExtras(
         val batteryPercent: Int? = null,
-        val steps: Int? = null,
-        val calories: Float? = null,
-        val distanceMeters: Float? = null,
+        val sport: VeepooSportReading? = null,
         val autoMeasure: List<AutoMeasureData> = emptyList(),
         val spo2Auto: AllSetData? = null,
         val wear: CheckWearData? = null,
@@ -93,9 +91,7 @@ class VeepooHistorySync(
         }
         return HandshakeExtras(
             batteryPercent = battery,
-            steps = sport?.step?.takeIf { it > 0 },
-            calories = sport?.kcal?.toFloat()?.takeIf { it > 0f },
-            distanceMeters = sport?.dis?.toFloat()?.takeIf { it > 0f },
+            sport = sport,
             autoMeasure = auto,
             spo2Auto = spo2Auto,
             wear = wear,
@@ -109,13 +105,17 @@ class VeepooHistorySync(
         onProgress: (HistorySyncUiState) -> Unit,
     ): HistoryPull {
         val collected = mutableListOf<VeepooHistoryMapper.MappedSample>()
+        if (cancelled || !caps.probed) {
+            val state = HistorySyncUiState(phase = if (cancelled) "cancelado" else "unavailable")
+            onProgress(state)
+            return HistoryPull(emptyList(), state)
+        }
         var state = HistorySyncUiState(isRunning = true, phase = "origin")
         onProgress(state)
-        if (cancelled) return HistoryPull(emptyList(), state.copy(isRunning = false, lastError = "cancelado"))
 
         val watchDay = caps.historyDays.coerceIn(1, 7)
 
-        if (caps.canReadMultiDayOrigin) {
+        if (!cancelled && caps.canReadMultiDayOrigin) {
             val origin = retrying(times = 3, timeoutMs = ORIGIN_TIMEOUT_MS) {
                 readOrigin(caps, watchDay, deviceId, deviceModel) { progress ->
                     onProgress(state.copy(progress = progress, phase = "origin"))
@@ -183,9 +183,9 @@ class VeepooHistorySync(
 
         val finished = state.copy(
             isRunning = false,
-            phase = "done",
-            progress = 1f,
-            lastCompletedAtMs = System.currentTimeMillis(),
+            phase = when { cancelled -> "cancelado"; state.lastError != null -> "incomplete"; else -> "done" },
+            progress = if (cancelled) state.progress else 1f,
+            lastCompletedAtMs = if (!cancelled && state.lastError == null) System.currentTimeMillis() else null,
         )
         onProgress(finished)
         return HistoryPull(collected, finished)
@@ -202,18 +202,29 @@ class VeepooHistorySync(
             }
             return writeAutoMeasure(pulse)
         }
-        val updated = current.map { item ->
-            if (item.funType == EAutoMeasureType.PULSE_RATE || item.funType == EAutoMeasureType.BLOOD_OXYGEN) {
-                item.apply { isSwitchOpen = enabled }
-            } else {
-                item
+        val received = linkedMapOf<EAutoMeasureType, AutoMeasureData>()
+        var incomplete = false
+        for (item in current) {
+            // SDK data is mutable. Build a separate request without changing the last observation.
+            val request = AutoMeasureData().apply {
+                protocolType = item.protocolType
+                funType = item.funType
+                isSwitchOpen = if (item.funType == EAutoMeasureType.PULSE_RATE || item.funType == EAutoMeasureType.BLOOD_OXYGEN) enabled else item.isSwitchOpen
+                stepUnit = item.stepUnit
+                isSlotModify = item.isSlotModify
+                isIntervalModify = item.isIntervalModify
+                supportStartMinute = item.supportStartMinute
+                supportEndMinute = item.supportEndMinute
+                measureInterval = item.measureInterval
+                currentStartMinute = item.currentStartMinute
+                currentEndMinute = item.currentEndMinute
             }
+            val response = writeAutoMeasure(request)
+            if (response == null) incomplete = true
+            else response.forEach { received[it.funType] = it }
         }
-        var last: List<AutoMeasureData>? = null
-        for (item in updated) {
-            last = writeAutoMeasure(item) ?: last
-        }
-        return last ?: updated
+        // Partial success does not establish the complete requested configuration or rollback.
+        return if (incomplete) null else received.values.toList()
     }
 
     suspend fun setSpo2AutoEnabled(enabled: Boolean, existing: AllSetData?): AllSetData? {
@@ -255,11 +266,24 @@ class VeepooHistorySync(
     }
 
     fun wearEnabledFrom(data: CheckWearData?, requested: Boolean): Boolean {
-        return when (data?.checkWearState) {
-            ECheckWear.OPEN_SUCCESS -> true
-            ECheckWear.CLOSE_SUCCESS -> false
-            ECheckWear.READ_SUCCESS -> requested
-            else -> requested
+        return confirmedWearEnabled(data) ?: requested
+    }
+
+    fun confirmedWearEnabled(data: CheckWearData?): Boolean? = when (data?.checkWearState) {
+        ECheckWear.OPEN_SUCCESS -> true
+        ECheckWear.CLOSE_SUCCESS -> false
+        else -> null // READ_SUCCESS carries no enabled bit; it cannot establish this value.
+    }
+
+    fun confirmedSpo2Enabled(data: AllSetData?): Boolean? {
+        if (data == null || data.type != EAllSetType.SPO2H_NIGHT_AUTO_DETECT) return null
+        return when (data.oprateResult) {
+            com.veepoo.protocol.model.enums.EAllSetStatus.OPEN_SUCCESS -> true
+            com.veepoo.protocol.model.enums.EAllSetStatus.CLOSE_SUCCESS -> false
+            com.veepoo.protocol.model.enums.EAllSetStatus.SETTING_SUCCESS,
+            com.veepoo.protocol.model.enums.EAllSetStatus.READ_SUCCESS ->
+                if (data.isOpen in 0..1 && data.openState in 0..1) data.isOpen == 1 || data.openState == 1 else null
+            else -> null
         }
     }
 
@@ -273,11 +297,13 @@ class VeepooHistorySync(
         )
     }
 
-    private suspend fun readSport(): SportData? = awaitResult(SETTINGS_TIMEOUT_MS) { done, fail ->
+    private suspend fun readSport(): VeepooSportReading? = awaitResult(SETTINGS_TIMEOUT_MS) { done, fail ->
         vpManager.readSportStep(
             ackLogger(),
             ISportDataListener { data ->
-                if (data == null) fail("empty sport") else done(data)
+                // Copy SDK values immediately; later settings/history work may cross midnight.
+                val reading = VeepooSportReading.fromSdk(data, System.currentTimeMillis())
+                if (reading == null) fail("empty or invalid sport") else done(reading)
             },
         )
     }
@@ -309,7 +335,8 @@ class VeepooHistorySync(
                 data,
                 object : IAutoMeasureSettingDataListener {
                     override fun onSettingDataChange(list: MutableList<AutoMeasureData>?) {
-                        done(list?.toList() ?: listOf(data))
+                        if (list.isNullOrEmpty() || list.none { it.funType == data.funType }) fail("empty or unrelated auto-measure result")
+                        else done(list.toList())
                     }
 
                     override fun onSettingDataChangeFail() {
@@ -340,7 +367,8 @@ class VeepooHistorySync(
         onProgress: (Float) -> Unit,
     ): List<VeepooHistoryMapper.MappedSample>? {
         val samples = mutableListOf<VeepooHistoryMapper.MappedSample>()
-        val setting = ReadOriginSetting(watchDay, 0, false, 1)
+        val args = VeepooHistoryReadSettings.originArgs(watchDay)
+        val setting = ReadOriginSetting(args.day, args.position, args.onlyReadOneDay, args.watchday)
         val completed = awaitComplete(ORIGIN_TIMEOUT_MS) { done, fail ->
             val listener = originListener(
                 protocolVersion = caps.originProtocolVersion,
@@ -357,7 +385,13 @@ class VeepooHistorySync(
             } catch (e: Exception) {
                 Log.w(TAG, "readOriginDataBySetting failed, falling back to FromDay: ${e.message}")
                 try {
-                    vpManager.readOriginDataFromDay(ackLogger(), listener, watchDay, 0, 1)
+                    vpManager.readOriginDataFromDay(
+                        ackLogger(),
+                        listener,
+                        args.day,
+                        args.position,
+                        args.watchday,
+                    )
                 } catch (inner: Exception) {
                     fail(inner.message ?: "origin start failed")
                 }
@@ -390,15 +424,16 @@ class VeepooHistorySync(
                     done()
                 }
             }
+            val args = VeepooHistoryReadSettings.sleepArgs(watchDay)
             try {
-                vpManager.readSleepDataFromDay(ackLogger(), listener, watchDay, 0)
+                vpManager.readSleepDataFromDay(ackLogger(), listener, args.day, args.watchday)
             } catch (e: Exception) {
                 Log.w(TAG, "readSleepDataFromDay failed, using BySetting: ${e.message}")
                 try {
                     vpManager.readSleepDataBySetting(
                         ackLogger(),
                         listener,
-                        ReadSleepSetting(watchDay, false, 0),
+                        ReadSleepSetting(args.day, args.onlyReadOneDay, args.watchday),
                     )
                 } catch (inner: Exception) {
                     fail(inner.message ?: "sleep start failed")
@@ -435,10 +470,11 @@ class VeepooHistorySync(
                 }
             }
             try {
+                val args = VeepooHistoryReadSettings.originArgs(watchDay)
                 vpManager.readHRVOriginBySetting(
                     ackLogger(),
                     listener,
-                    ReadOriginSetting(watchDay, 0, false, 1),
+                    ReadOriginSetting(args.day, args.position, args.onlyReadOneDay, args.watchday),
                 )
             } catch (e: Exception) {
                 Log.w(TAG, "readHRVOriginBySetting failed, using readHRVOrigin: ${e.message}")
@@ -477,10 +513,11 @@ class VeepooHistorySync(
                 }
             }
             try {
+                val args = VeepooHistoryReadSettings.originArgs(watchDay)
                 vpManager.readSpo2hOriginBySetting(
                     ackLogger(),
                     listener,
-                    ReadOriginSetting(watchDay, 0, false, 1),
+                    ReadOriginSetting(args.day, args.position, args.onlyReadOneDay, args.watchday),
                 )
             } catch (e: Exception) {
                 Log.w(TAG, "readSpo2hOriginBySetting failed, using readSpo2hOrigin: ${e.message}")
@@ -595,6 +632,8 @@ class VeepooHistorySync(
             if (cancelled) return null
             val result = try {
                 block()
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Log.w(TAG, "SDK call failed (attempt ${attempt + 1}): ${e.message}")
                 null

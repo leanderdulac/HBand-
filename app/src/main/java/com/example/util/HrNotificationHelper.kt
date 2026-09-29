@@ -5,12 +5,13 @@ import android.app.NotificationManager
 import android.content.Context
 import android.os.Build
 import androidx.core.app.NotificationCompat
+import kotlinx.coroutines.CancellationException
 
 object HrNotificationHelper {
 
     private const val CHANNEL_ID = "hr_threshold_alerts"
-    private const val CHANNEL_NAME = "Heart Rate Threshold Alerts"
-    private const val CHANNEL_DESC = "Triggers local alerts when heart rate exceeds or drops below target limits"
+    private const val CHANNEL_NAME = "Avisos de batimentos"
+    private const val CHANNEL_DESC = "Avisos no celular quando os batimentos ficam fora dos limites cadastrados"
     private const val NOTIFICATION_ID_HIGH = 1001
     private const val NOTIFICATION_ID_LOW = 1002
 
@@ -26,31 +27,42 @@ object HrNotificationHelper {
         }
     }
 
-    fun sendHighHrNotification(context: Context, currentHr: Int, threshold: Int) {
-        createNotificationChannel(context)
+    fun sendHighHrNotification(context: Context, currentHr: Int, threshold: Int, isTest: Boolean = false) {
+        postSafely {
+            createNotificationChannel(context)
 
-        val builder = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.stat_sys_warning)
-            .setContentTitle("⚠️ High Heart Rate Alert ($currentHr BPM)")
-            .setContentText("Your heart rate of $currentHr BPM exceeds your upper threshold limit ($threshold BPM).")
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setAutoCancel(true)
+            val builder = NotificationCompat.Builder(context, CHANNEL_ID)
+                .setSmallIcon(android.R.drawable.stat_sys_warning)
+                .setContentTitle(if (isTest) "Teste de aviso: batimentos acima do limite" else "Batimentos acima do limite cadastrado")
+                .setContentText(if (isTest) "Exemplo: $currentHr bpm. Limite: $threshold bpm. Não é uma leitura do relógio." else "Batimentos: $currentHr bpm. Limite cadastrado: $threshold bpm.")
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setAutoCancel(true)
 
-        val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        notificationManager.notify(NOTIFICATION_ID_HIGH, builder.build())
+            val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            notificationManager.notify(NOTIFICATION_ID_HIGH, builder.build())
+        }
     }
 
-    fun sendLowHrNotification(context: Context, currentHr: Int, threshold: Int) {
-        createNotificationChannel(context)
+    fun sendLowHrNotification(context: Context, currentHr: Int, threshold: Int, isTest: Boolean = false) {
+        postSafely {
+            createNotificationChannel(context)
 
-        val builder = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.stat_sys_warning)
-            .setContentTitle("⚠️ Low Heart Rate Alert ($currentHr BPM)")
-            .setContentText("Your heart rate of $currentHr BPM is below your lower threshold limit ($threshold BPM).")
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setAutoCancel(true)
+            val builder = NotificationCompat.Builder(context, CHANNEL_ID)
+                .setSmallIcon(android.R.drawable.stat_sys_warning)
+                .setContentTitle(if (isTest) "Teste de aviso: batimentos abaixo do limite" else "Batimentos abaixo do limite cadastrado")
+                .setContentText(if (isTest) "Exemplo: $currentHr bpm. Limite: $threshold bpm. Não é uma leitura do relógio." else "Batimentos: $currentHr bpm. Limite cadastrado: $threshold bpm.")
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setAutoCancel(true)
 
-        val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        notificationManager.notify(NOTIFICATION_ID_LOW, builder.build())
+            val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            notificationManager.notify(NOTIFICATION_ID_LOW, builder.build())
+        }
+    }
+
+    /** A completed Android call is not evidence of display or delivery. Keep local notices usable. */
+    private inline fun postSafely(action: () -> Unit) {
+        try { action() }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { /* Android notification failure must not terminate the telemetry collector. */ }
     }
 }

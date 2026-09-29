@@ -3,6 +3,8 @@ package com.example.ui.components
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -10,6 +12,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -17,13 +20,14 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CloudDownload
-import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.DeleteSweep
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.getValue
@@ -44,22 +48,27 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ui.theme.MinimalBorder
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
 @Composable
+@OptIn(ExperimentalLayoutApi::class)
 fun SettingsTab(
     userProfile: com.example.data.local.UserProfileEntity? = null,
+    profileReadFailed: Boolean = false,
+    onRetryProfileRead: () -> Unit = {},
     onEditProfileClick: () -> Unit = {},
     autoReconnectBle: Boolean = true,
     onAutoReconnectChange: (Boolean) -> Unit = {},
@@ -69,11 +78,7 @@ fun SettingsTab(
     onUpperThresholdChange: (Int) -> Unit,
     onLowerThresholdChange: (Int) -> Unit,
     onAlertsEnabledChange: (Boolean) -> Unit,
-    firestoreStatus: String = "Idle",
-    lastBackupTime: Long? = null,
-    lastBackupCount: Int = 0,
-    onTriggerBackup: () -> Unit = {},
-    onRestoreBackup: () -> Unit = {},
+    onTestApiSmoke: () -> Unit = {},
     onResetAllData: () -> Unit = {},
     capabilities: com.example.data.hband.DeviceCapabilities = com.example.data.hband.DeviceCapabilities(),
     autoMeasureState: com.example.data.hband.AutoMeasureUiState = com.example.data.hband.AutoMeasureUiState(),
@@ -99,11 +104,12 @@ fun SettingsTab(
     onStartFindByPhone: () -> Unit = {},
     onStopFindByPhone: () -> Unit = {},
     onHealthRemindChange: (Boolean) -> Unit = {},
+    ingestDiagnostics: com.example.data.ingest.IngestDiagnostics = com.example.data.ingest.IngestDiagnostics(),
     modifier: Modifier = Modifier
 ) {
     val scrollState = rememberScrollState()
     var showResetConfirmDialog by remember { mutableStateOf(false) }
-    val profile = userProfile ?: com.example.data.local.UserProfileEntity()
+    var showDevelopment by rememberSaveable { mutableStateOf(false) }
 
     Column(
         modifier = modifier
@@ -112,124 +118,21 @@ fun SettingsTab(
             .padding(bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // User & Patient Profile Card
+        Text("Ajustes", style = MaterialTheme.typography.headlineMedium)
         Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .testTag("user_profile_settings_card"),
-            shape = RoundedCornerShape(28.dp),
-            border = BorderStroke(1.dp, MinimalBorder),
-            colors = CardDefaults.cardColors(containerColor = Color.White)
+            modifier = Modifier.fillMaxWidth().testTag("user_profile_settings_card"),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         ) {
-            Column(modifier = Modifier.padding(20.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(42.dp)
-                                .clip(CircleShape)
-                                .background(Color(0xFFE0F2FE)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Settings,
-                                contentDescription = null,
-                                tint = Color(0xFF00639B),
-                                modifier = Modifier.size(24.dp)
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column {
-                            Text(
-                                text = profile.fullName,
-                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                                color = Color(0xFF191C1E)
-                            )
-                            Text(
-                                text = "ID Paciente: ${profile.patientId} • ${profile.age} anos",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = Color(0xFF00639B)
-                            )
-                        }
-                    }
-
-                    Button(
-                        onClick = onEditProfileClick,
-                        shape = RoundedCornerShape(16.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00639B)),
-                        modifier = Modifier.testTag("btn_edit_profile_settings")
-                    ) {
-                        Text("Editar Perfil", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold))
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(14.dp))
-
-                Surface(
-                    shape = RoundedCornerShape(14.dp),
-                    color = Color(0xFFF8FAFC),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(
-                        modifier = Modifier.padding(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text("Altura / Peso:", style = MaterialTheme.typography.bodySmall, color = Color(0xFF64748B))
-                            Text("${profile.heightCm.toInt()} cm / ${profile.weightKg.toInt()} kg", style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold), color = Color(0xFF0F172A))
-                        }
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text("Meta Diária:", style = MaterialTheme.typography.bodySmall, color = Color(0xFF64748B))
-                            Text("${profile.dailyStepGoal} passos • ${profile.targetWaterMl} mL", style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold), color = Color(0xFF0F172A))
-                        }
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text("Emergência:", style = MaterialTheme.typography.bodySmall, color = Color(0xFF64748B))
-                            Text(profile.emergencyContact, style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold), color = Color(0xFF0F172A))
-                        }
-                    }
-                }
+            Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("Meu perfil", style = MaterialTheme.typography.titleLarge)
+                if (profileReadFailed) LocalReadNotice("seu perfil", onRetryProfileRead)
+                Text(userProfile?.fullName ?: "Perfil indisponível no momento", style = MaterialTheme.typography.bodyLarge)
+                Button(
+                    onClick = onEditProfileClick,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag("btn_edit_profile_settings"),
+                ) { Text(if (userProfile != null) "Ver e editar meu perfil" else "Sobre meu perfil") }
             }
         }
-
-        BandSdkSettingsCard(
-            capabilities = capabilities,
-            autoMeasure = autoMeasureState,
-            wearDetect = wearDetectState,
-            historySync = historySyncState,
-            hardwareConnected = hardwareConnected,
-            actionsEnabled = actionsEnabled,
-            onAutoMeasureChange = onAutoMeasureChange,
-            onSpo2AutoChange = onSpo2AutoChange,
-            onWearDetectChange = onWearDetectChange,
-            onSyncHistory = onSyncHistory,
-            alarm = alarmState,
-            heartWarning = heartWarningState,
-            longSeat = longSeatState,
-            nightTurn = nightTurnState,
-            findDevice = findDeviceState,
-            healthRemind = healthRemindState,
-            onAlarmChange = onAlarmChange,
-            onHeartWarningChange = onHeartWarningChange,
-            onLongSeatChange = onLongSeatChange,
-            onNightTurnChange = onNightTurnChange,
-            onFindDeviceChange = onFindDeviceChange,
-            onStartFindByPhone = onStartFindByPhone,
-            onStopFindByPhone = onStopFindByPhone,
-            onHealthRemindChange = onHealthRemindChange,
-        )
 
         // BLE Auto-Reconnect Card
         Card(
@@ -241,403 +144,341 @@ fun SettingsTab(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .heightIn(min = 56.dp)
+                    .testTag("auto_reconnect_switch")
+                    .toggleable(
+                        value = autoReconnectBle,
+                        role = Role.Switch,
+                        onValueChange = onAutoReconnectChange,
+                    )
                     .padding(20.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "Reconexão Automática BLE",
+                        text = "Reconectar relógio",
+                        modifier = Modifier.fillMaxWidth(),
                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                         color = Color(0xFF191C1E)
                     )
                     Text(
-                        text = "Reconectar automaticamente com pulseiras VE30 / HBand se o sinal cair.",
+                        text = "Tentar conectar novamente quando o relógio perder a conexão.",
+                        modifier = Modifier.fillMaxWidth(),
                         style = MaterialTheme.typography.bodySmall,
                         color = Color(0xFF44474E)
                     )
                 }
                 Switch(
                     checked = autoReconnectBle,
-                    onCheckedChange = onAutoReconnectChange,
+                    onCheckedChange = null,
                     colors = SwitchDefaults.colors(
                         checkedThumbColor = Color.White,
                         checkedTrackColor = Color(0xFF00639B)
                     ),
-                    modifier = Modifier.testTag("auto_reconnect_switch")
                 )
             }
         }
-        // Firebase Firestore Cloud Backup Card
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .testTag("firestore_cloud_backup_card"),
-            shape = RoundedCornerShape(28.dp),
-            border = BorderStroke(1.dp, MinimalBorder),
-            colors = CardDefaults.cardColors(containerColor = Color.White)
-        ) {
-            Column(modifier = Modifier.padding(20.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(42.dp)
-                                .clip(CircleShape)
-                                .background(Color(0xFFE3F2FD)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.CloudUpload,
-                                contentDescription = null,
-                                tint = Color(0xFF0288D1),
-                                modifier = Modifier.size(24.dp)
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column {
-                            Text(
-                                text = "Backup Firebase Firestore",
-                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                                color = Color(0xFF191C1E)
-                            )
-                            Text(
-                                text = "Sincronização de Saúde na Nuvem",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = Color(0xFF44474E)
-                            )
-                        }
-                    }
 
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = when {
-                            firestoreStatus.contains("Synced") -> Color(0xFFE8F5E9)
-                            firestoreStatus.contains("Backing") -> Color(0xFFFFF3E0)
-                            else -> Color(0xFFF1F5F9)
-                        }
-                    ) {
-                        Text(
-                            text = when {
-                                firestoreStatus.contains("Synced") -> "Sincronizado"
-                                firestoreStatus.contains("Backing") -> "Salvando..."
-                                else -> firestoreStatus
-                            },
-                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                            color = when {
-                                firestoreStatus.contains("Synced") -> Color(0xFF2E7D32)
-                                firestoreStatus.contains("Backing") -> Color(0xFFE65100)
-                                else -> Color(0xFF475569)
-                            },
-                            modifier = Modifier
-                                .padding(horizontal = 10.dp, vertical = 4.dp)
-                                .testTag("firestore_sync_status_badge")
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(14.dp))
-
-                if (lastBackupTime != null) {
-                    val formattedTime = remember(lastBackupTime) {
-                        SimpleDateFormat("dd/MM, HH:mm:ss", Locale.forLanguageTag("pt-BR")).format(Date(lastBackupTime))
-                    }
-                    Text(
-                        text = "Último backup: $formattedTime ($lastBackupCount registros)",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = Color(0xFF00639B)
-                    )
-                    Spacer(modifier = Modifier.height(10.dp))
-                }
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Button(
-                        onClick = onTriggerBackup,
-                        shape = RoundedCornerShape(18.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00639B)),
-                        modifier = Modifier
-                            .weight(1f)
-                            .testTag("backup_to_firestore_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.CloudUpload,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Fazer Backup", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold))
-                    }
-
-                    OutlinedButton(
-                        onClick = onRestoreBackup,
-                        shape = RoundedCornerShape(18.dp),
-                        border = BorderStroke(1.dp, Color(0xFF00639B)),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF00639B)),
-                        modifier = Modifier
-                            .weight(1f)
-                            .testTag("restore_from_firestore_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.CloudDownload,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Restaurar Dados", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold))
-                    }
-                }
-            }
+        PatientSection(title = "Opções do relógio", forceExpanded = historySyncState.isRunning || findDeviceState.finding) {
+            BandSdkSettingsCard(
+                capabilities = capabilities,
+                autoMeasure = autoMeasureState,
+                wearDetect = wearDetectState,
+                historySync = historySyncState,
+                hardwareConnected = hardwareConnected,
+                actionsEnabled = actionsEnabled,
+                onAutoMeasureChange = onAutoMeasureChange,
+                onSpo2AutoChange = onSpo2AutoChange,
+                onWearDetectChange = onWearDetectChange,
+                onSyncHistory = onSyncHistory,
+                alarm = alarmState,
+                heartWarning = heartWarningState,
+                longSeat = longSeatState,
+                nightTurn = nightTurnState,
+                findDevice = findDeviceState,
+                healthRemind = healthRemindState,
+                onAlarmChange = onAlarmChange,
+                onHeartWarningChange = onHeartWarningChange,
+                onLongSeatChange = onLongSeatChange,
+                onNightTurnChange = onNightTurnChange,
+                onFindDeviceChange = onFindDeviceChange,
+                onStartFindByPhone = onStartFindByPhone,
+                onStopFindByPhone = onStopFindByPhone,
+                onHealthRemindChange = onHealthRemindChange,
+            )
         }
 
-        // Main Settings Header Card
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .testTag("hr_threshold_settings_card"),
-            shape = RoundedCornerShape(28.dp),
-            border = BorderStroke(1.dp, MinimalBorder),
-            colors = CardDefaults.cardColors(containerColor = Color.White)
-        ) {
-            Column(modifier = Modifier.padding(20.dp)) {
-                // Row 1: Header
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(42.dp)
-                                .clip(CircleShape)
-                                .background(Color(0xFFFFEBEE)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Favorite,
-                                contentDescription = null,
-                                tint = Color(0xFFD32F2F),
-                                modifier = Modifier.size(24.dp)
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column {
-                            Text(
-                                text = "Limites de Frequência Cardíaca",
-                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                                color = Color(0xFF191C1E)
-                            )
-                            Text(
-                                text = "Alertas do Sistema no Dispositivo Local",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = Color(0xFF44474E)
-                            )
-                        }
-                    }
-
-                    Switch(
-                        checked = alertsEnabled,
-                        onCheckedChange = onAlertsEnabledChange,
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = Color.White,
-                            checkedTrackColor = Color(0xFFD32F2F)
-                        ),
-                        modifier = Modifier.testTag("hr_alerts_toggle_switch")
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                // Safe Zone Banner
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
-                    color = if (alertsEnabled) Color(0xFFE8F5E9) else Color(0xFFF1F4F9),
-                    border = BorderStroke(1.dp, if (alertsEnabled) Color(0xFFA5D6A7) else Color(0xFFE2E8F0))
-                ) {
-                    Row(
-                        modifier = Modifier.padding(14.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.NotificationsActive,
-                            contentDescription = null,
-                            tint = if (alertsEnabled) Color(0xFF2E7D32) else Color(0xFF64748B),
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Column {
-                            Text(
-                                text = if (alertsEnabled) "Zona Segura: $lowerThreshold – $upperThreshold BPM" else "Alertas Desativados",
-                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                                color = if (alertsEnabled) Color(0xFF1B5E20) else Color(0xFF64748B)
-                            )
-                            Text(
-                                text = if (alertsEnabled)
-                                    "Notificação local gerada imediatamente se a frequência ultrapassar estes limites."
-                                else
-                                    "Ative o botão acima para monitorar os limites de frequência cardíaca.",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = if (alertsEnabled) Color(0xFF2E7D32) else Color(0xFF64748B)
-                            )
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(20.dp))
-
-                // Upper Threshold Setting Section
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    Row(
+        PatientSection(title = "Avisos de batimentos", forceExpanded = false) {
+            // Main Settings Header Card
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("hr_threshold_settings_card"),
+                shape = RoundedCornerShape(28.dp),
+                border = BorderStroke(1.dp, MinimalBorder),
+                colors = CardDefaults.cardColors(containerColor = Color.White)
+            ) {
+                Column(modifier = Modifier.padding(20.dp)) {
+                    // Keep the named switch separate from the heading at large font scales.
+                    Column(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(42.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFFFFEBEE)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Favorite,
+                                    contentDescription = null,
+                                    tint = Color(0xFFD32F2F),
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column {
+                                Text(
+                                    text = "Limites dos avisos",
+                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                    color = Color(0xFF191C1E)
+                                )
+                                Text(
+                                    text = "Avisos de batimentos neste aparelho",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = Color(0xFF44474E)
+                                )
+                            }
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .testTag("hr_alerts_toggle_switch")
+                                .toggleable(
+                                    value = alertsEnabled,
+                                    role = Role.Switch,
+                                    onValueChange = onAlertsEnabledChange,
+                                )
+                                .padding(horizontal = 8.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
                             Text(
-                                text = "Limite Superior (BPM Máx):",
+                                "Ativar avisos neste aparelho",
+                                modifier = Modifier.weight(1f),
+                                style = MaterialTheme.typography.bodyLarge,
+                            )
+                            Switch(
+                                checked = alertsEnabled,
+                                onCheckedChange = null,
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = Color.White,
+                                    checkedTrackColor = Color(0xFFD32F2F)
+                                ),
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Local configuration does not establish delivery or a clinical safe range.
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(16.dp),
+                        color = if (alertsEnabled) Color(0xFFE8F5E9) else Color(0xFFF1F4F9),
+                        border = BorderStroke(1.dp, if (alertsEnabled) Color(0xFFA5D6A7) else Color(0xFFE2E8F0))
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(14.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.NotificationsActive,
+                                contentDescription = null,
+                                tint = if (alertsEnabled) Color(0xFF2E7D32) else Color(0xFF64748B),
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column {
+                                Text(
+                                    text = if (alertsEnabled) "Limites de aviso: $lowerThreshold – $upperThreshold bpm" else "Avisos desativados no aplicativo",
+                                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                    color = if (alertsEnabled) Color(0xFF1B5E20) else Color(0xFF64748B)
+                                )
+                                Text(
+                                    text = if (alertsEnabled)
+                                        "Os avisos dependem das leituras recebidas e da permissão de notificação deste aparelho."
+                                    else
+                                        "Use a opção acima para ativar os avisos neste aparelho.",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = if (alertsEnabled) Color(0xFF2E7D32) else Color(0xFF64748B)
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(20.dp))
+
+                    if (alertsEnabled) {
+                        PatientNotificationSettings()
+                        Spacer(modifier = Modifier.height(20.dp))
+                    }
+
+                    // Upper Threshold Setting Section
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = "Avisar acima de",
+                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                                    color = Color(0xFF191C1E)
+                                )
+                            }
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = Color(0xFFFFEBEE)
+                            ) {
+                                Text(
+                                    text = "$upperThreshold bpm",
+                                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                                    color = Color(0xFFD32F2F),
+                                    modifier = Modifier
+                                        .padding(horizontal = 10.dp, vertical = 4.dp)
+                                        .testTag("upper_threshold_display")
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        Slider(
+                            value = upperThreshold.toFloat(),
+                            onValueChange = { onUpperThresholdChange(it.toInt()) },
+                            valueRange = 80f..180f,
+                            steps = 99,
+                            colors = SliderDefaults.colors(
+                                thumbColor = Color(0xFFD32F2F),
+                                activeTrackColor = Color(0xFFD32F2F),
+                                inactiveTrackColor = Color(0xFFFFCDD2)
+                            ),
+                            enabled = alertsEnabled,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("upper_threshold_slider")
+                                .semantics { contentDescription = "Limite superior de batimentos por minuto" }
+                        )
+
+                        // Preset buttons for upper threshold
+                        FlowRow(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            listOf(90, 100, 120, 140, 160).forEach { preset ->
+                                OutlinedButton(
+                                    onClick = { onUpperThresholdChange(preset) },
+                                    enabled = alertsEnabled,
+                                    shape = RoundedCornerShape(12.dp),
+                                    border = BorderStroke(
+                                        1.dp,
+                                        if (upperThreshold == preset) Color(0xFFD32F2F) else Color(0xFFE2E8F0)
+                                    ),
+                                    colors = ButtonDefaults.outlinedButtonColors(
+                                        containerColor = if (upperThreshold == preset) Color(0xFFFFEBEE) else Color.Transparent,
+                                        contentColor = if (upperThreshold == preset) Color(0xFFD32F2F) else Color(0xFF44474E)
+                                    ),
+                                    modifier = Modifier
+                                        .heightIn(min = 56.dp)
+                                        .testTag("preset_upper_$preset")
+                                        .semantics { selected = upperThreshold == preset }
+                                ) {
+                                    Text("$preset", style = MaterialTheme.typography.bodyLarge)
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(20.dp))
+
+                    // Lower Threshold Setting Section
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Text(
+                                text = "Avisar abaixo de",
                                 style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
                                 color = Color(0xFF191C1E)
                             )
-                        }
-                        Surface(
-                            shape = RoundedCornerShape(12.dp),
-                            color = Color(0xFFFFEBEE)
-                        ) {
-                            Text(
-                                text = "$upperThreshold BPM",
-                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                                color = Color(0xFFD32F2F),
-                                modifier = Modifier
-                                    .padding(horizontal = 10.dp, vertical = 4.dp)
-                                    .testTag("upper_threshold_display")
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(6.dp))
-
-                    Slider(
-                        value = upperThreshold.toFloat(),
-                        onValueChange = { onUpperThresholdChange(it.toInt()) },
-                        valueRange = 80f..180f,
-                        steps = 99,
-                        colors = SliderDefaults.colors(
-                            thumbColor = Color(0xFFD32F2F),
-                            activeTrackColor = Color(0xFFD32F2F),
-                            inactiveTrackColor = Color(0xFFFFCDD2)
-                        ),
-                        enabled = alertsEnabled,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("upper_threshold_slider")
-                    )
-
-                    // Preset buttons for upper threshold
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        listOf(90, 100, 120, 140, 160).forEach { preset ->
-                            OutlinedButton(
-                                onClick = { onUpperThresholdChange(preset) },
-                                enabled = alertsEnabled,
+                            Surface(
                                 shape = RoundedCornerShape(12.dp),
-                                border = BorderStroke(
-                                    1.dp,
-                                    if (upperThreshold == preset) Color(0xFFD32F2F) else Color(0xFFE2E8F0)
-                                ),
-                                colors = ButtonDefaults.outlinedButtonColors(
-                                    containerColor = if (upperThreshold == preset) Color(0xFFFFEBEE) else Color.Transparent,
-                                    contentColor = if (upperThreshold == preset) Color(0xFFD32F2F) else Color(0xFF44474E)
-                                ),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .testTag("preset_upper_$preset")
+                                color = Color(0xFFE3F2FD)
                             ) {
-                                Text("$preset", style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp))
+                                Text(
+                                    text = "$lowerThreshold bpm",
+                                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                                    color = Color(0xFF005EA6),
+                                    modifier = Modifier
+                                        .padding(horizontal = 10.dp, vertical = 4.dp)
+                                        .testTag("lower_threshold_display")
+                                )
                             }
                         }
-                    }
-                }
 
-                Spacer(modifier = Modifier.height(20.dp))
+                        Spacer(modifier = Modifier.height(6.dp))
 
-                // Lower Threshold Setting Section
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "Limite Inferior (BPM Mín):",
-                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
-                            color = Color(0xFF191C1E)
+                        Slider(
+                            value = lowerThreshold.toFloat(),
+                            onValueChange = { onLowerThresholdChange(it.toInt()) },
+                            valueRange = 35f..75f,
+                            steps = 39,
+                            colors = SliderDefaults.colors(
+                                thumbColor = Color(0xFF0288D1),
+                                activeTrackColor = Color(0xFF0288D1),
+                                inactiveTrackColor = Color(0xFFBBDEFB)
+                            ),
+                            enabled = alertsEnabled,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("lower_threshold_slider")
+                                .semantics { contentDescription = "Limite inferior de batimentos por minuto" }
                         )
-                        Surface(
-                            shape = RoundedCornerShape(12.dp),
-                            color = Color(0xFFE3F2FD)
+
+                        // Preset buttons for lower threshold
+                        FlowRow(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
-                            Text(
-                                text = "$lowerThreshold BPM",
-                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                                color = Color(0xFF0288D1),
-                                modifier = Modifier
-                                    .padding(horizontal = 10.dp, vertical = 4.dp)
-                                    .testTag("lower_threshold_display")
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(6.dp))
-
-                    Slider(
-                        value = lowerThreshold.toFloat(),
-                        onValueChange = { onLowerThresholdChange(it.toInt()) },
-                        valueRange = 35f..75f,
-                        steps = 39,
-                        colors = SliderDefaults.colors(
-                            thumbColor = Color(0xFF0288D1),
-                            activeTrackColor = Color(0xFF0288D1),
-                            inactiveTrackColor = Color(0xFFBBDEFB)
-                        ),
-                        enabled = alertsEnabled,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("lower_threshold_slider")
-                    )
-
-                    // Preset buttons for lower threshold
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        listOf(40, 45, 50, 55, 60).forEach { preset ->
-                            OutlinedButton(
-                                onClick = { onLowerThresholdChange(preset) },
-                                enabled = alertsEnabled,
-                                shape = RoundedCornerShape(12.dp),
-                                border = BorderStroke(
-                                    1.dp,
-                                    if (lowerThreshold == preset) Color(0xFF0288D1) else Color(0xFFE2E8F0)
-                                ),
-                                colors = ButtonDefaults.outlinedButtonColors(
-                                    containerColor = if (lowerThreshold == preset) Color(0xFFE3F2FD) else Color.Transparent,
-                                    contentColor = if (lowerThreshold == preset) Color(0xFF0288D1) else Color(0xFF44474E)
-                                ),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .testTag("preset_lower_$preset")
-                            ) {
-                                Text("$preset", style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp))
+                            listOf(40, 45, 50, 55, 60).forEach { preset ->
+                                OutlinedButton(
+                                    onClick = { onLowerThresholdChange(preset) },
+                                    enabled = alertsEnabled,
+                                    shape = RoundedCornerShape(12.dp),
+                                    border = BorderStroke(
+                                        1.dp,
+                                        if (lowerThreshold == preset) Color(0xFF0288D1) else Color(0xFFE2E8F0)
+                                    ),
+                                    colors = ButtonDefaults.outlinedButtonColors(
+                                        containerColor = if (lowerThreshold == preset) Color(0xFFE3F2FD) else Color.Transparent,
+                                        contentColor = if (lowerThreshold == preset) Color(0xFF005EA6) else Color(0xFF44474E)
+                                    ),
+                                    modifier = Modifier
+                                        .heightIn(min = 56.dp)
+                                        .testTag("preset_lower_$preset")
+                                        .semantics { selected = lowerThreshold == preset }
+                                ) {
+                                    Text("$preset", style = MaterialTheme.typography.bodyLarge)
+                                }
                             }
                         }
                     }
@@ -645,74 +486,162 @@ fun SettingsTab(
             }
         }
 
-        // Factory Reset / Clear Data Card for New Installation
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .testTag("factory_reset_clean_data_card"),
-            shape = RoundedCornerShape(28.dp),
-            border = BorderStroke(1.dp, Color(0xFFFFCDD2)),
-            colors = CardDefaults.cardColors(containerColor = Color.White)
-        ) {
-            Column(modifier = Modifier.padding(20.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        modifier = Modifier
-                            .size(38.dp)
-                            .clip(CircleShape)
-                            .background(Color(0xFFFFEBEE)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.DeleteSweep,
-                            contentDescription = null,
-                            tint = Color(0xFFC62828),
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Column {
-                        Text(
-                            text = "Zerar Dados para Nova Instalação",
-                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                            color = Color(0xFFC62828)
-                        )
-                        Text(
-                            text = "Limpa histórico local, métricas, logs de fila e biometria",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = Color(0xFF74777F)
-                        )
-                    }
-                }
+        if (com.example.BuildConfig.DEBUG) {
+            OutlinedButton(
+                onClick = { showDevelopment = !showDevelopment },
+                modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp),
+            ) { Text(if (showDevelopment) "Fechar ferramentas de desenvolvimento" else "Ferramentas de desenvolvimento") }
+        }
 
-                Spacer(modifier = Modifier.height(14.dp))
-
-                Text(
-                    text = "Use esta opção para preparar o app para um novo dispositivo VE30 ou paciente, garantindo que toda a telemetria inicie limpa do zero.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Color(0xFF44474E)
-                )
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                Button(
-                    onClick = { showResetConfirmDialog = true },
-                    shape = RoundedCornerShape(18.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFC62828)),
+        if (com.example.BuildConfig.DEBUG && showDevelopment) {
+            PatientSection(title = "Cópia dos dados para suporte", forceExpanded = false) {
+                CloudBackupUnavailableCard()
+            }
+        }
+        if (com.example.BuildConfig.DEBUG && showDevelopment) {
+            PatientSection(title = "Teste do serviço", forceExpanded = false) {
+                // API Credentials & Smoke Test Card
+                Card(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .testTag("reset_all_data_button")
+                        .testTag("api_credentials_smoke_test_card"),
+                    shape = RoundedCornerShape(28.dp),
+                    border = BorderStroke(1.dp, MinimalBorder),
+                    colors = CardDefaults.cardColors(containerColor = Color.White)
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.DeleteSweep,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "Zerar Todos os Dados Agora",
-                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
-                    )
+                    Column(modifier = Modifier.padding(20.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFFE0F2FE)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Settings,
+                                    contentDescription = null,
+                                    tint = Color(0xFF0284C7),
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column {
+                                Text(
+                                    text = "Conexão com o serviço",
+                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                    color = Color(0xFF191C1E)
+                                )
+                                Text(
+                                    text = "Verificação de disponibilidade, sem criar leituras.",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = Color(0xFF0284C7)
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(14.dp))
+
+                        IngestDiagnosticsCard(ingestDiagnostics)
+
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        Button(
+                            onClick = onTestApiSmoke,
+                            shape = RoundedCornerShape(18.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7)),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("run_smoke_heart_test_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.CloudDownload,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Verificar conexão",
+                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        if (com.example.BuildConfig.DEBUG && showDevelopment) {
+            PatientSection(title = "Limpeza para testes", forceExpanded = false) {
+                // Factory Reset / Clear Data Card for New Installation
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("factory_reset_clean_data_card"),
+                    shape = RoundedCornerShape(28.dp),
+                    border = BorderStroke(1.dp, Color(0xFFFFCDD2)),
+                    colors = CardDefaults.cardColors(containerColor = Color.White)
+                ) {
+                    Column(modifier = Modifier.padding(20.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFFFFEBEE)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.DeleteSweep,
+                                    contentDescription = null,
+                                    tint = Color(0xFFC62828),
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column {
+                                Text(
+                                    text = "Apagar registros locais de teste",
+                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                    color = Color(0xFFC62828)
+                                )
+                                Text(
+                                    text = "Limpa histórico local, métricas, logs de fila e biometria",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = Color(0xFF74777F)
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(14.dp))
+
+                        Text(
+                            text = "Esta limpeza é uma ferramenta de desenvolvimento. Ela não troca o paciente, não altera sua identificação e não confirma exclusão de dados enviados a outros serviços.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFF44474E)
+                        )
+
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        Button(
+                            onClick = { showResetConfirmDialog = true },
+                            shape = RoundedCornerShape(18.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFC62828)),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("reset_all_data_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.DeleteSweep,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Revisar limpeza dos registros",
+                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -730,7 +659,7 @@ fun SettingsTab(
             },
             text = {
                 Text(
-                    text = "Esta ação apagará todas as métricas biométricas salvas no banco de dados Room, esvaziará a fila de ingestão e zerará os contadores para iniciar a coleta limpa dos VE30.",
+                    text = "Esta ação apaga as medições, a fila de envio, os registros de água e os exercícios de respiração deste celular. Registros que ainda não foram enviados também serão apagados.",
                     style = MaterialTheme.typography.bodyMedium
                 )
             },
