@@ -579,6 +579,7 @@ private fun DashboardTab(
         com.example.ui.components.PatientSection(
             title = "Resumo com inteligência artificial",
             forceExpanded = false,
+            initiallyExpanded = BuildConfig.AI_INSIGHT_ENABLED,
         ) {
             com.example.ui.components.GeminiHealthInsightCard(
                 insightText = geminiInsightText,

@@ -23,8 +23,13 @@ import androidx.compose.ui.unit.dp
 
 /** Keeps active work expanded so its controls remain reachable. */
 @Composable
-internal fun PatientSection(title: String, forceExpanded: Boolean = false, content: @Composable () -> Unit) {
-    var expanded by rememberSaveable { mutableStateOf(forceExpanded) }
+internal fun PatientSection(
+    title: String,
+    forceExpanded: Boolean = false,
+    initiallyExpanded: Boolean = false,
+    content: @Composable () -> Unit,
+) {
+    var expanded by rememberSaveable { mutableStateOf(forceExpanded || initiallyExpanded) }
     PatientSection(title, expanded, { expanded = it }, forceExpanded, content)
 }
 
