@@ -27,6 +27,14 @@ if (bleLab) {
   require(allowedKeys.all { (key, placeholders) -> labConfig.getProperty(key, "") in placeholders }) {
     "BLE lab requires placeholder keys only. Preserve private configuration and use an isolated checkout."
   }
+  // Secrets Plugin also reads ".properties" when the variant has no flavor.
+  // Refuse every root overlay, including unnamed and future variant overlays.
+  val buildInfrastructure = setOf("gradle.properties", "local.properties")
+  require(rootProject.projectDir.listFiles().orEmpty().none {
+    it.isFile && it.name.endsWith(".properties") && it.name !in buildInfrastructure
+  }) {
+    "BLE lab forbids root secret overlays. Use an isolated checkout."
+  }
   require(fileTree(projectDir) { include("**/google-services.json"); exclude("build/**") }.isEmpty) {
     "BLE lab must not include google-services.json."
   }
@@ -76,14 +84,6 @@ android {
   }
 
   buildTypes {
-    configureEach {
-      if (bleLab) {
-        // Secrets Plugin loads root <buildType>.properties after the base .env.
-        require(!rootProject.file("$name.properties").exists()) {
-          "BLE lab forbids build-type secret overlays. Use an isolated checkout."
-        }
-      }
-    }
     release {
       isCrunchPngs = false
       isMinifyEnabled = false
@@ -101,13 +101,6 @@ android {
   }
   if (storageLab) {
     sourceSets.getByName("debug").manifest.srcFile("src/storageLab/AndroidManifest.xml")
-  }
-  productFlavors.configureEach {
-    if (bleLab) {
-      require(!rootProject.file("$name.properties").exists()) {
-        "BLE lab forbids flavor secret overlays. Use an isolated checkout."
-      }
-    }
   }
   if (bleLab) {
     sourceSets.getByName("debug").apply {
