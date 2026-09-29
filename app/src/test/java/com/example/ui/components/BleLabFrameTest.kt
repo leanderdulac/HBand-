@@ -1,9 +1,7 @@
 package com.example.ui.components
 
 import androidx.compose.material3.Text
-import androidx.compose.ui.test.assertExists
-import androidx.compose.ui.test.assertDoesNotExist
-import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
 import com.example.ui.theme.MyApplicationTheme
 import org.junit.Rule
