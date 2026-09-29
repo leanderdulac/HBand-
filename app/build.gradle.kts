@@ -31,7 +31,7 @@ if (bleLab) {
   // Refuse every root overlay, including unnamed and future variant overlays.
   val buildInfrastructure = setOf("gradle.properties", "local.properties")
   require(rootProject.projectDir.listFiles().orEmpty().none {
-    it.isFile && it.name.endsWith(".properties") && it.name !in buildInfrastructure
+    it.isFile && it.name.endsWith(".properties", ignoreCase = true) && it.name !in buildInfrastructure
   }) {
     "BLE lab forbids root secret overlays. Use an isolated checkout."
   }
