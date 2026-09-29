@@ -32,6 +32,7 @@ object GeminiHealthAnalyzer {
     private const val RATE_LIMIT_COOLDOWN_MS = 60_000L // 60s cooldown on 429
 
     private val httpClient = OkHttpClient.Builder()
+        .addInterceptor(BleLabNetworkInterceptor())
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
         .writeTimeout(30, TimeUnit.SECONDS)
