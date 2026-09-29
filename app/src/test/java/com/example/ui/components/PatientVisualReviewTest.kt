@@ -184,8 +184,7 @@ class PatientVisualReviewTest {
                 userProfile = UserProfileEntity(fullName = "Pessoa de teste"),
                 upperThreshold = 120, lowerThreshold = 50, alertsEnabled = false,
                 onUpperThresholdChange = {}, onLowerThresholdChange = {}, onAlertsEnabledChange = {},
-                onTestHighAlert = {}, onTestLowAlert = {},
-            )
+                )
         }
     }
 

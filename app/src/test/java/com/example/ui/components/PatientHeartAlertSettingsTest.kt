@@ -54,8 +54,7 @@ class PatientHeartAlertSettingsTest {
                         upperThreshold = 120, lowerThreshold = 50, alertsEnabled = enabled.value,
                         onUpperThresholdChange = { otherActions++ }, onLowerThresholdChange = { otherActions++ },
                         onAlertsEnabledChange = { enabled.value = it; changes += it },
-                        onTestHighAlert = { otherActions++ }, onTestLowAlert = { otherActions++ },
-                    )
+                        )
                 }
             }
         }
@@ -97,8 +96,7 @@ class PatientHeartAlertSettingsTest {
                     SettingsTab(
                         upperThreshold = upper.intValue, lowerThreshold = lower.intValue, alertsEnabled = enabled.value,
                         onUpperThresholdChange = { upper.intValue = it }, onLowerThresholdChange = { lower.intValue = it },
-                        onAlertsEnabledChange = { enabled.value = it }, onTestHighAlert = {}, onTestLowAlert = {},
-                    )
+                        onAlertsEnabledChange = { enabled.value = it }, )
                 } } }
             }
         }

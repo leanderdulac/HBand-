@@ -71,12 +71,15 @@ class PatientHrAlertRecoveryTest {
         assertEquals(1001, Notifications.sent.single().first)
     }
 
-    @Test fun failed_manual_test_does_not_escape_or_remove_its_simulation_label() {
+    @Test fun failed_high_and_low_posts_preserve_the_observed_values_locally() {
         Notifications.failure = "post"
-        vm.testHighHrAlert()
-        assertTrue(notices.notification.value!!.message.contains("Não é uma leitura do relógio"))
-        vm.testLowHrAlert()
-        assertTrue(notices.notification.value!!.message.startsWith("Teste de aviso:"))
+        evaluate(130)
+        assertTrue(notices.notification.value!!.message.contains("130 bpm"))
+        ShadowSystemClock.advanceBy(Duration.ofSeconds(8))
+        evaluate(40)
+        assertTrue(notices.notification.value!!.message.contains("40 bpm"))
+        assertEquals(2, Notifications.attempts)
+        assertTrue(Notifications.sent.isEmpty())
     }
 
     @Test fun high_and_low_share_the_existing_eight_second_window() {
@@ -105,13 +108,13 @@ class PatientHrAlertRecoveryTest {
 
     @Test fun cancellation_is_not_converted_into_an_ordinary_notification_failure() {
         Notifications.failure = "cancel"
-        assertThrows(CancellationException::class.java) { vm.testHighHrAlert() }
+        assertThrows(CancellationException::class.java) { evaluate(130) }
         assertNull(notices.notification.value)
     }
 
     @Test fun fatal_errors_are_not_suppressed() {
         Notifications.failure = "fatal"
-        assertThrows(AssertionError::class.java) { vm.testLowHrAlert() }
+        assertThrows(AssertionError::class.java) { evaluate(40) }
         assertNull(notices.notification.value)
     }
 
@@ -123,14 +126,16 @@ class PatientHrAlertRecoveryTest {
         assertEquals(1, Notifications.sent.size)
     }
 
-    @Test fun manual_tests_keep_their_labels_and_do_not_consume_the_automatic_window() {
-        vm.testHighHrAlert(); vm.testLowHrAlert(); evaluate(130)
-        assertEquals(3, Notifications.sent.size)
-        Notifications.sent.take(2).forEach { (_, n) ->
-            assertTrue(n.extras.getString(Notification.EXTRA_TITLE)!!.startsWith("Teste de aviso:"))
-            assertTrue(n.extras.getString(Notification.EXTRA_TEXT)!!.contains("Não é uma leitura do relógio"))
+    @Test fun automatic_notices_keep_the_observed_value_without_a_simulation_label() {
+        evaluate(130)
+        ShadowSystemClock.advanceBy(Duration.ofSeconds(8))
+        evaluate(40)
+        assertEquals(listOf(1001, 1002), Notifications.sent.map { it.first })
+        Notifications.sent.zip(listOf(130, 40)).forEach { (sent, value) ->
+            val n = sent.second
+            assertFalse(n.extras.getString(Notification.EXTRA_TITLE)!!.startsWith("Teste"))
+            assertTrue(n.extras.getString(Notification.EXTRA_TEXT)!!.contains(value.toString()))
         }
-        assertFalse(Notifications.sent.last().second.extras.getString(Notification.EXTRA_TITLE)!!.startsWith("Teste"))
     }
 
     @Implements(NotificationManager::class)

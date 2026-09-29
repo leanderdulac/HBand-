@@ -78,8 +78,6 @@ fun SettingsTab(
     onUpperThresholdChange: (Int) -> Unit,
     onLowerThresholdChange: (Int) -> Unit,
     onAlertsEnabledChange: (Boolean) -> Unit,
-    onTestHighAlert: () -> Unit,
-    onTestLowAlert: () -> Unit,
     onTestApiSmoke: () -> Unit = {},
     onResetAllData: () -> Unit = {},
     capabilities: com.example.data.hband.DeviceCapabilities = com.example.data.hband.DeviceCapabilities(),
@@ -500,94 +498,6 @@ fun SettingsTab(
                 CloudBackupUnavailableCard()
             }
         }
-        if (com.example.BuildConfig.DEBUG && showDevelopment) {
-            PatientSection(title = "Testar avisos", forceExpanded = false) {
-                // Alert Simulation Testing Card
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("hr_alert_testing_card"),
-                    shape = RoundedCornerShape(28.dp),
-                    border = BorderStroke(1.dp, MinimalBorder),
-                    colors = CardDefaults.cardColors(containerColor = Color.White)
-                ) {
-                    Column(modifier = Modifier.padding(20.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(
-                                modifier = Modifier
-                                    .size(38.dp)
-                                    .clip(CircleShape)
-                                    .background(Color(0xFFFFF3E0)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Warning,
-                                    contentDescription = null,
-                                    tint = Color(0xFFE65100),
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column {
-                                Text(
-                                    text = "Testar Notificações de Alerta",
-                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                                    color = Color(0xFF191C1E)
-                                )
-                                Text(
-                                    text = "Disparar alertas no canal de notificação do Android",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = Color(0xFF44474E)
-                                )
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(16.dp))
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            Button(
-                                onClick = onTestHighAlert,
-                                shape = RoundedCornerShape(18.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD32F2F)),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .testTag("test_high_hr_alert_button")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Favorite,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Testar FC Alta", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold))
-                            }
-
-                            OutlinedButton(
-                                onClick = onTestLowAlert,
-                                shape = RoundedCornerShape(18.dp),
-                                border = BorderStroke(1.dp, Color(0xFF0288D1)),
-                                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF0288D1)),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .testTag("test_low_hr_alert_button")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Favorite,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Testar FC Baixa", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold))
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
         if (com.example.BuildConfig.DEBUG && showDevelopment) {
             PatientSection(title = "Teste do serviço", forceExpanded = false) {
                 // API Credentials & Smoke Test Card

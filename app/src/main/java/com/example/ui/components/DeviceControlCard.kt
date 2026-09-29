@@ -35,7 +35,6 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.example.BuildConfig
 import com.example.data.hband.VeepooBatteryMapper
 import com.example.data.model.HBandDevice
 
@@ -45,17 +44,13 @@ fun DeviceControlCard(
     autoIngestLive: Boolean,
     onToggleAutoIngest: (Boolean) -> Unit,
     onSpotCheck: () -> Unit,
-    onSimulateBatch: (Int) -> Unit,
     onScanClick: () -> Unit,
     onDisconnect: () -> Unit,
     modifier: Modifier = Modifier,
-    onSimulateLowBattery: (() -> Unit)? = null,
-    onRechargeBattery: (() -> Unit)? = null
 ) {
     val connected = device?.isConnected == true
     val batteryLevel = visibleWatchBattery(device)
     var showDetails by remember { mutableStateOf(false) }
-    var showTests by remember { mutableStateOf(false) }
 
     Card(
         modifier = modifier.fillMaxWidth().testTag("device_control_card"),
@@ -128,29 +123,7 @@ fun DeviceControlCard(
                         modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("disconnect_watch_button")
                     ) { Text("Desconectar relógio") }
                 }
-                if (BuildConfig.DEBUG) {
-                    TextButton(
-                        onClick = { showTests = !showTests },
-                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("watch_test_tools_button")
-                    ) { Text(if (showTests) "Fechar ferramentas de teste" else "Ferramentas de teste") }
-                    if (showTests) {
-                        Text("Somente para desenvolvimento. Os valores gerados são simulações.", style = MaterialTheme.typography.bodyMedium)
-                        OutlinedButton(
-                            onClick = { onSimulateBatch(5) },
-                            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("simulate_batch_button")
-                        ) { Text("Gerar 5 registros de teste") }
-                        onSimulateLowBattery?.let { action ->
-                            OutlinedButton(onClick = action, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
-                                Text("Simular bateria fraca")
-                            }
-                        }
-                        onRechargeBattery?.let { action ->
-                            OutlinedButton(onClick = action, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
-                                Text("Simular bateria em 98%")
-                            }
-                        }
-                    }
-                }
+
             }
         }
     }

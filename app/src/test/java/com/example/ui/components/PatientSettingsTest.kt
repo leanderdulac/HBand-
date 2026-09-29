@@ -39,6 +39,14 @@ class PatientSettingsTest {
         cloudUnavailableLayout(1f)
     }
 
+    @Test fun development_settings_do_not_expose_fabricated_heart_rate_alerts() {
+        content()
+        compose.onNodeWithText("Ferramentas de desenvolvimento").performScrollTo().performClick()
+        compose.onNodeWithText("Testar avisos").assertDoesNotExist()
+        compose.onNodeWithTag("test_high_hr_alert_button").assertDoesNotExist()
+        compose.onNodeWithTag("test_low_hr_alert_button").assertDoesNotExist()
+    }
+
     @Test fun cloud_guidance_on_narrow_phone_with_large_type_is_readable() {
         cloudUnavailableLayout(2f)
     }
@@ -135,7 +143,7 @@ class PatientSettingsTest {
                         onAutoReconnectChange = { enabled.value = it; reconnect(it) },
                         upperThreshold = 120, lowerThreshold = 50, alertsEnabled = false,
                         onUpperThresholdChange = {}, onLowerThresholdChange = {}, onAlertsEnabledChange = {},
-                        onTestHighAlert = {}, onTestLowAlert = {}, onResetAllData = reset,
+                        onResetAllData = reset,
                     )
                 }
             }

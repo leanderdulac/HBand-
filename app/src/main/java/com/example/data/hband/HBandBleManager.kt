@@ -1723,7 +1723,7 @@ class HBandBleManager(
             // 3. STANDARD BATTERY LEVEL (00002a19)
             BATTERY_LEVEL_CHARACTERISTIC_UUID -> {
                 val battery = (data[0].toInt() and 0xFF).coerceIn(0, 100)
-                setBatteryLevel(battery, simulated = false)
+                setBatteryLevel(battery)
                 Log.i(TAG, "Parsed REAL Battery Level: $battery%")
             }
 
@@ -1913,21 +1913,13 @@ class HBandBleManager(
         currentPatientId = id
     }
 
-    fun setBatteryLevel(level: Int?, simulated: Boolean = false) {
+    fun setBatteryLevel(level: Int?) {
         val current = _connectedDevice.value ?: return
         val clamped = level?.takeIf { it in 0..100 }
         _connectedDevice.value = current.copy(
             batteryLevel = clamped,
-            batteryIsSimulated = simulated && clamped != null,
+            batteryIsSimulated = false,
         )
-    }
-
-    fun simulateLowBattery() {
-        setBatteryLevel(14, simulated = true)
-    }
-
-    fun rechargeBattery() {
-        setBatteryLevel(98, simulated = true)
     }
 
     @SuppressLint("MissingPermission")
@@ -1969,10 +1961,6 @@ class HBandBleManager(
         // The request is asynchronous. Only a received sample supplies measurement time;
         // preserve the last published sample (or its absence) until a callback replaces it.
         return _latestTelemetry.value
-    }
-
-    fun generateCurrentTelemetry(device: HBandDevice = _connectedDevice.value ?: HBandDevice()): HBandTelemetry {
-        return createTelemetrySnapshot(device)
     }
 
     fun resetBiometricsToZero() {
@@ -2348,11 +2336,11 @@ class HBandBleManager(
                     sync.readHandshakeExtras(
                         caps = caps,
                         wearEnabled = prefs.getBoolean(PREF_WEAR_DETECT, true),
-                        onBattery = { setBatteryLevel(it, simulated = false) },
+                        onBattery = { setBatteryLevel(it) },
                     )
                 }
                 if (historySync !== sync || sync.cancelled || !queryContext.isActive || userRequestedDisconnect) return@launch
-                extras.batteryPercent?.let { setBatteryLevel(it, simulated = false) }
+                extras.batteryPercent?.let { setBatteryLevel(it) }
                 extras.sport?.let { reading ->
                     // Do not republish cached HR/BP with this counter observation's time.
                     currentSteps = reading.steps ?: 0
@@ -2470,7 +2458,7 @@ class HBandBleManager(
             IBatteryDataListener { data ->
                 val percent = VeepooBatteryMapper.fromSdk(data)
                 if (percent != null) {
-                    setBatteryLevel(percent, simulated = false)
+                    setBatteryLevel(percent)
                     Log.i(TAG, "SDK battery: $percent%")
                 } else {
                     Log.w(TAG, "SDK battery unmapped: $data")

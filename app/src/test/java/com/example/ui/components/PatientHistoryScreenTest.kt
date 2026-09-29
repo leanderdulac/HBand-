@@ -78,7 +78,7 @@ class PatientHistoryScreenTest {
             CompositionLocalProvider(LocalDensity provides Density(density, 1.6f)) {
                 MyApplicationTheme {
                     Surface(Modifier.fillMaxSize()) {
-                        RechartsSensorDashboard(emptyList(), onSimulateBatch = { error("Patient history must not generate data") })
+                        RechartsSensorDashboard(emptyList())
                     }
                 }
             }
@@ -106,7 +106,7 @@ class PatientHistoryScreenTest {
         compose.setContent {
             MyApplicationTheme {
                 Surface(Modifier.fillMaxSize()) {
-                    RechartsSensorDashboard(emptyList(), onSimulateBatch = { error("Unexpected simulation") })
+                    RechartsSensorDashboard(emptyList())
                 }
             }
         }

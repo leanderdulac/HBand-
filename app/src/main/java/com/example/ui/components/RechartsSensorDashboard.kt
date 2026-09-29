@@ -49,7 +49,6 @@ enum class ChartMetricType(val label: String) {
 @Composable
 fun RechartsSensorDashboard(
     sensorMetrics: List<HBandSensorMetricEntity>?,
-    onSimulateBatch: (Int) -> Unit,
     modifier: Modifier = Modifier,
     isScrollable: Boolean = true,
     readFailed: Boolean = false,

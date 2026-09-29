@@ -1,6 +1,5 @@
 package com.example.data.repository
 
-import com.example.data.hband.HBandBleManager
 import com.example.data.hband.VeepooHistoryMapper
 import com.example.data.ingest.IngestReconciler
 import com.example.data.ingest.IngestItemOutcome
@@ -28,10 +27,6 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.RequestBody.Companion.toRequestBody
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
-import java.util.TimeZone
 
 data class ApiHealthState(
     val isOnline: Boolean = false,
@@ -295,71 +290,6 @@ class WearableRepository(
         } catch (_: Exception) {
         }
         id
-    }
-
-    suspend fun enqueueBatchSimulatedReadings(
-        bleManager: HBandBleManager,
-        count: Int
-    ) = withContext(Dispatchers.IO) {
-        val device = bleManager.connectedDevice.value
-        val now = System.currentTimeMillis()
-        val isoFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
-            timeZone = TimeZone.getTimeZone("UTC")
-        }
-
-        for (i in 0 until count) {
-            val backdatedTime = now - (count - i) * 60000L
-            val timestampStr = isoFormat.format(Date(backdatedTime))
-            val baseTelemetry = bleManager.generateCurrentTelemetry()
-            val baseHeartRate = if (baseTelemetry.heartRate > 0) baseTelemetry.heartRate else 72
-            val baseSteps = if (baseTelemetry.steps > 0) baseTelemetry.steps else 1000
-            val deviceId = IngestPayloadMapper.resolveDeviceId(
-                device?.macAddress ?: device?.deviceId,
-                baseTelemetry.deviceId
-            )
-            val telemetry = baseTelemetry.copy(
-                deviceId = if (IngestPayloadMapper.isPlaceholderDeviceId(deviceId)) "SIM-${backdatedTime}" else deviceId,
-                timestamp = timestampStr,
-                heartRate = (baseHeartRate + kotlin.random.Random.nextInt(-5, 6)).coerceIn(50, 160),
-                steps = baseSteps + i * 50,
-                isRealSensorData = false
-            )
-
-            val metricEntity = HBandSensorMetricEntity(
-                deviceId = telemetry.deviceId,
-                timestamp = timestampStr,
-                timestampMillis = backdatedTime,
-                heartRate = telemetry.heartRate,
-                systolicBp = telemetry.bloodPressure.systolic,
-                diastolicBp = telemetry.bloodPressure.diastolic,
-                spO2 = telemetry.spO2,
-                temperatureCelsius = telemetry.temperatureCelsius,
-                steps = telemetry.steps,
-                calories = telemetry.calories,
-                distanceMeters = telemetry.distanceMeters,
-                hrvScore = telemetry.hrvScore,
-                deepSleepMinutes = telemetry.sleepSummary.deepSleepMinutes,
-                lightSleepMinutes = telemetry.sleepSummary.lightSleepMinutes,
-                awakeMinutes = telemetry.sleepSummary.awakeMinutes
-            )
-            val json = IngestPayloadMapper.telemetryToJson(telemetry, IngestPayloadMapper.DEFAULT_PATIENT_ID)
-            localWriteTransaction.run {
-                sensorMetricDao.insertMetric(metricEntity)
-                queueDao.insertItem(
-                    IngestQueueEntity(
-                        payloadJson = json,
-                        status = QueueStatus.PENDING.name,
-                        createdAt = backdatedTime
-                    )
-                )
-            }
-        }
-        try {
-            processQueue()
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (_: Exception) {
-        }
     }
 
     suspend fun checkApiHealth(): ApiHealthState = withContext(Dispatchers.IO) {
