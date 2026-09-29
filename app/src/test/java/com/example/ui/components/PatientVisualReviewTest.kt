@@ -61,7 +61,7 @@ class PatientVisualReviewTest {
                 Column(Modifier.fillMaxSize().padding(padding)) {
                     HomeWelcomeHeader("Maria de Oliveira — exemplo", "patient-fixture", {})
                     Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp)) {
-                        DeviceControlCard(null, true, {}, {}, {}, {}, {})
+                        DeviceControlCard(null, true, {}, {}, {}, {})
                     }
                 }
             }
@@ -184,8 +184,7 @@ class PatientVisualReviewTest {
                 userProfile = UserProfileEntity(fullName = "Pessoa de teste"),
                 upperThreshold = 120, lowerThreshold = 50, alertsEnabled = false,
                 onUpperThresholdChange = {}, onLowerThresholdChange = {}, onAlertsEnabledChange = {},
-                onTestHighAlert = {}, onTestLowAlert = {},
-            )
+                )
         }
     }
 

@@ -104,7 +104,7 @@ class PatientAdaptiveLayoutTest {
                         header = { HomeWelcomeHeader("", "", {}) },
                     ) {
                         Column(Modifier.fillMaxSize().padding(horizontal = 16.dp).verticalScroll(rememberScrollState())) {
-                            PatientSummaryLayout(first = { DeviceControlCard(null, true, {}, {}, {}, {}, {}) }, second = {
+                            PatientSummaryLayout(first = { DeviceControlCard(null, true, {}, {}, {}, {}) }, second = {
                                 TelemetryGauges(null)
                                 DailyHealthSummaryCard(emptyList())
                             })

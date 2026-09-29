@@ -40,7 +40,7 @@ class PatientHistoryScreenTest {
     @Config(qualifiers = "w720dp-h900dp-mdpi")
     fun wide_history_places_day_controls_side_by_side_and_can_return_directly_to_today() {
         RuntimeEnvironment.setFontScale(1f)
-        compose.setContent { MyApplicationTheme { RechartsSensorDashboard(emptyList(), {}) } }
+        compose.setContent { MyApplicationTheme { RechartsSensorDashboard(emptyList()) } }
         val previous = compose.onNodeWithTag("history_previous_day").fetchSemanticsNode()
         val next = compose.onNodeWithTag("history_next_day").fetchSemanticsNode()
         assertEquals(previous.positionInRoot.y, next.positionInRoot.y, 1f)
@@ -59,7 +59,7 @@ class PatientHistoryScreenTest {
         RuntimeEnvironment.setFontScale(2.5f)
         compose.setContent {
             CompositionLocalProvider(LocalDensity provides Density(LocalDensity.current.density, 2.5f)) {
-                MyApplicationTheme { RechartsSensorDashboard(emptyList(), {}) }
+                MyApplicationTheme { RechartsSensorDashboard(emptyList()) }
             }
         }
         val previous = compose.onNodeWithTag("history_previous_day").fetchSemanticsNode()
@@ -78,7 +78,7 @@ class PatientHistoryScreenTest {
             CompositionLocalProvider(LocalDensity provides Density(density, 1.6f)) {
                 MyApplicationTheme {
                     Surface(Modifier.fillMaxSize()) {
-                        RechartsSensorDashboard(emptyList(), onSimulateBatch = { error("Patient history must not generate data") })
+                        RechartsSensorDashboard(emptyList())
                     }
                 }
             }
@@ -106,7 +106,7 @@ class PatientHistoryScreenTest {
         compose.setContent {
             MyApplicationTheme {
                 Surface(Modifier.fillMaxSize()) {
-                    RechartsSensorDashboard(emptyList(), onSimulateBatch = { error("Unexpected simulation") })
+                    RechartsSensorDashboard(emptyList())
                 }
             }
         }
@@ -126,7 +126,7 @@ class PatientHistoryScreenTest {
         )
         compose.setContent {
             MyApplicationTheme {
-                Surface(Modifier.fillMaxSize()) { RechartsSensorDashboard(listOf(record), {}) }
+                Surface(Modifier.fillMaxSize()) { RechartsSensorDashboard(listOf(record)) }
             }
         }
         compose.onNodeWithTag("history_metric_menu").performClick()
@@ -166,7 +166,7 @@ class PatientHistoryScreenTest {
             compose.setContent {
                 MyApplicationTheme {
                     Surface(Modifier.fillMaxSize()) {
-                        RechartsSensorDashboard(listOf(record), {}, Modifier.testTag("refresh_${refresh.intValue}"))
+                        RechartsSensorDashboard(listOf(record), Modifier.testTag("refresh_${refresh.intValue}"))
                     }
                 }
             }

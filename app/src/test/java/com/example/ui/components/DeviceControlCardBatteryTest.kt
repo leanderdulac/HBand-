@@ -36,7 +36,6 @@ class DeviceControlCardBatteryTest {
                     autoIngestLive = false,
                     onToggleAutoIngest = {},
                     onSpotCheck = { readings++ },
-                    onSimulateBatch = {},
                     onScanClick = { connections++ },
                     onDisconnect = {},
                 )
@@ -51,13 +50,12 @@ class DeviceControlCardBatteryTest {
     }
 
     @Test
-    fun simulation_requires_opening_watch_options_and_test_tools() {
+    fun watch_options_do_not_expose_simulation_tools_even_in_debug() {
         setCard(HBandDevice(isConnected = false, batteryLevel = null))
         composeTestRule.onNodeWithTag("simulate_batch_button").assertDoesNotExist()
         composeTestRule.onNodeWithTag("watch_details_button").performClick()
         composeTestRule.onNodeWithTag("simulate_batch_button").assertDoesNotExist()
-        composeTestRule.onNodeWithTag("watch_test_tools_button").performClick()
-        composeTestRule.onNodeWithTag("simulate_batch_button").assertExists()
+        composeTestRule.onNodeWithTag("watch_test_tools_button").assertDoesNotExist()
     }
 
     @Test
@@ -96,7 +94,7 @@ class DeviceControlCardBatteryTest {
     }
 
     @Test
-    fun simulated_low_battery_is_labeled_as_simulation() {
+    fun simulated_battery_flag_is_not_shown_as_a_percent() {
         setCard(
             HBandDevice(
                 name = "VE30",
@@ -106,10 +104,7 @@ class DeviceControlCardBatteryTest {
                 batteryIsSimulated = true,
             )
         )
-        composeTestRule.onNodeWithTag("device_battery_level").assertTextEquals("14% sim.")
-        composeTestRule.onRoot().captureRoboImage(
-            filePath = "src/test/screenshots/device_battery_simulated.png",
-        )
+        composeTestRule.onNodeWithTag("device_battery_level").assertTextEquals("--")
     }
 
     private fun setCard(device: HBandDevice) {
@@ -120,11 +115,20 @@ class DeviceControlCardBatteryTest {
                     autoIngestLive = false,
                     onToggleAutoIngest = {},
                     onSpotCheck = {},
-                    onSimulateBatch = {},
                     onScanClick = {},
                     onDisconnect = {},
                 )
             }
         }
+    }
+
+    @Test
+    fun simulated_low_battery_does_not_issue_charging_advice() {
+        composeTestRule.setContent {
+            MyApplicationTheme {
+                LowBatteryWarningCard(HBandDevice(batteryLevel = 14, batteryIsSimulated = true))
+            }
+        }
+        composeTestRule.onNodeWithTag("low_battery_warning_card").assertDoesNotExist()
     }
 }

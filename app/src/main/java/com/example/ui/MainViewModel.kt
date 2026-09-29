@@ -341,20 +341,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun testHighHrAlert() {
-        val upper = _upperHrThreshold.value
-        val testHr = (upper + 18).coerceAtLeast(125)
-        HrNotificationHelper.sendHighHrNotification(getApplication(), testHr, upper, isTest = true)
-        showNotification("Teste de aviso: $testHr bpm, acima do limite de $upper bpm. Não é uma leitura do relógio.", isError = true)
-    }
-
-    fun testLowHrAlert() {
-        val lower = _lowerHrThreshold.value
-        val testHr = (lower - 8).coerceAtMost(42)
-        HrNotificationHelper.sendLowHrNotification(getApplication(), testHr, lower, isTest = true)
-        showNotification("Teste de aviso: $testHr bpm, abaixo do limite de $lower bpm. Não é uma leitura do relógio.", isError = true)
-    }
-
     fun setAutoReconnectBle(enabled: Boolean) {
         _autoReconnectBle.value = enabled
         bleManager.isAutoReconnectEnabled = enabled
@@ -536,17 +522,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun enqueueBatchSimulated(count: Int) {
-        viewModelScope.launch {
-            repository.enqueueBatchSimulatedReadings(bleManager, count)
-            showNotification("Enqueued $count simulated HBand sensor batch readings to Room DB offline queue!")
-        }
-    }
-
-    fun quickConnectVE30() {
-        connectByMacAddress("C4:E3:42:VE:30:A4", "VE30 Smart Band")
-    }
-
     fun updateApiConfig(newBaseUrl: String, newApiKey: String) {
         viewModelScope.launch {
             try {
@@ -637,16 +612,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun restoreFromFirestoreBackup() = showNotification(
         com.example.data.remote.FirestoreBackupManager.UNAVAILABLE_MESSAGE, isError = true,
     )
-    fun simulateLowBattery() {
-        bleManager.simulateLowBattery()
-        showNotification("Simulação de teste: aviso de bateria fraca (14%) — não é leitura da pulseira", isError = true)
-    }
-
-    fun rechargeBattery() {
-        bleManager.rechargeBattery()
-        showNotification("Simulação de teste: 98% — não é leitura da pulseira")
-    }
-
     fun dismissNotification(displayed: UiNotification) {
         notificationState.dismiss(displayed)
     }

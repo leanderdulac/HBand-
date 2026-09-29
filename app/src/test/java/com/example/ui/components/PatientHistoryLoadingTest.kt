@@ -63,7 +63,7 @@ class PatientHistoryLoadingTest {
         compose.onNodeWithText("Sem registro de sono disponível nos últimos 7 dias.").assertDoesNotExist()
         compose.onNodeWithText("Carregando registros de sono…").assertExists()
     }
-    @Test fun pending_metric_query_does_not_assert_missing_readings() = pending({ RechartsSensorDashboard(it, {}, isScrollable = false) }) {
+    @Test fun pending_metric_query_does_not_assert_missing_readings() = pending({ RechartsSensorDashboard(it, isScrollable = false) }) {
         compose.onNodeWithTag("history_metric_menu").performScrollTo().performClick()
         compose.onNodeWithText("Batimentos").performClick()
         compose.onNodeWithText("Sem medições disponíveis").assertDoesNotExist()
@@ -122,7 +122,7 @@ class PatientHistoryLoadingTest {
     @Test fun metric_and_graph_choice_survive_loading_without_stale_readings() {
         val rows = listOf(row())
         val metrics = mutableStateOf<List<HBandSensorMetricEntity>?>(rows)
-        compose.setContent { MyApplicationTheme { RechartsSensorDashboard(metrics.value, {}) } }
+        compose.setContent { MyApplicationTheme { RechartsSensorDashboard(metrics.value) } }
         compose.onNodeWithTag("history_metric_menu").performClick()
         compose.onNodeWithText("Batimentos").performClick()
         compose.onNodeWithText("Ver gráfico").performScrollTo().performClick()
@@ -149,7 +149,7 @@ class PatientHistoryLoadingTest {
                 when (screen.intValue) {
                     0 -> DailyHealthSummaryCard(null)
                     1 -> SleepAnalysisCard(null)
-                    else -> RechartsSensorDashboard(null, {}, isScrollable = false)
+                    else -> RechartsSensorDashboard(null, isScrollable = false)
                 }
             }
         } }

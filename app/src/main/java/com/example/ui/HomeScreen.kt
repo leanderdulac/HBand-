@@ -221,10 +221,7 @@ fun HomeScreen(
                     onRetryAll = { viewModel.retryAllFailed() },
                     onToggleAutoIngest = { viewModel.setAutoIngestLiveReadings(it) },
                     onSpotCheck = { viewModel.triggerSpotCheck() },
-                    onSimulateBatch = { viewModel.enqueueBatchSimulated(it) },
                     onShowNotification = { viewModel.showNotification(it) },
-                    onSimulateLowBattery = if (BuildConfig.DEBUG) ({ viewModel.simulateLowBattery() }) else null,
-                    onRechargeBattery = if (BuildConfig.DEBUG) ({ viewModel.rechargeBattery() }) else null,
                     onScanClick = { selectedTab = 2 },
                     onDisconnect = { viewModel.disconnectDevice() },
                     geminiInsightText = geminiInsightText,
@@ -270,7 +267,6 @@ fun HomeScreen(
                     sensorMetrics = shareSensorMetrics,
                     readFailed = metricsRead == LocalReadState.Failed,
                     onRetryRead = viewModel::retryMetricsRead,
-                    onSimulateBatch = { viewModel.enqueueBatchSimulated(it) }
                 )
 
                 2 -> com.example.ui.components.PatientWatchScreen(
@@ -322,8 +318,6 @@ fun HomeScreen(
                     onUpperThresholdChange = { viewModel.setUpperHrThreshold(it) },
                     onLowerThresholdChange = { viewModel.setLowerHrThreshold(it) },
                     onAlertsEnabledChange = { viewModel.setHrAlertsEnabled(it) },
-                    onTestHighAlert = { viewModel.testHighHrAlert() },
-                    onTestLowAlert = { viewModel.testLowHrAlert() },
                     onTestApiSmoke = { viewModel.testServiceConnection() },
                     onResetAllData = { viewModel.resetAllDataToZero() },
                     capabilities = deviceCapabilities,
@@ -396,10 +390,7 @@ private fun DashboardTab(
     onRetryAll: () -> Unit = {},
     onToggleAutoIngest: (Boolean) -> Unit,
     onSpotCheck: () -> Unit,
-    onSimulateBatch: (Int) -> Unit,
     onShowNotification: (String) -> Unit,
-    onSimulateLowBattery: (() -> Unit)? = null,
-    onRechargeBattery: (() -> Unit)? = null,
     onScanClick: () -> Unit,
     onDisconnect: () -> Unit,
     geminiInsightText: String = "",
@@ -460,16 +451,12 @@ private fun DashboardTab(
                 autoIngestLive = autoIngestLive,
                 onToggleAutoIngest = onToggleAutoIngest,
                 onSpotCheck = onSpotCheck,
-                onSimulateBatch = onSimulateBatch,
                 onScanClick = onScanClick,
                 onDisconnect = onDisconnect,
-                onSimulateLowBattery = onSimulateLowBattery,
-                onRechargeBattery = onRechargeBattery
             )
 
             com.example.ui.components.LowBatteryWarningCard(
                 device = connectedDevice,
-                onRechargeBattery = onRechargeBattery,
                 modifier = Modifier.fillMaxWidth()
             )
         }, second = {

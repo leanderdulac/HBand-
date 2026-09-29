@@ -43,8 +43,8 @@ object VeepooBatteryMapper {
     }
 
     fun displayLabel(percent: Int?, simulated: Boolean = false): String {
-        if (percent == null) return UNKNOWN_LABEL
-        return if (simulated) "$percent% sim." else "$percent%"
+        if (percent == null || simulated) return UNKNOWN_LABEL
+        return "$percent%"
     }
 
     private const val COARSE_BAR_MAX = 4

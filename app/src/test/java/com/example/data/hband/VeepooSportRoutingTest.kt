@@ -74,7 +74,7 @@ class VeepooSportRoutingTest {
         assertEquals(25f, history.single().distanceMeters, 0f)
         assertEquals("00:11:22:33:44:55", history.single().deviceId)
         assertNull(manager.latestTelemetry.value)
-        val cache = manager.generateCurrentTelemetry()
+        val cache = manager.createTelemetrySnapshot(manager.connectedDevice.value!!)
         assertEquals(2400, cache.steps)
         assertEquals(0, cache.heartRate)
         assertEquals(0, cache.bloodPressure.systolic)
@@ -86,7 +86,7 @@ class VeepooSportRoutingTest {
         Sdk.steps = 0
         read()
         assertEquals(listOf(2400, 0), sport.map { it.second.steps })
-        assertEquals(0, manager.generateCurrentTelemetry().steps)
+        assertEquals(0, manager.createTelemetrySnapshot(manager.connectedDevice.value!!).steps)
         assertNull(manager.latestTelemetry.value)
     }
 

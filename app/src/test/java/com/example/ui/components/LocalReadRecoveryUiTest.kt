@@ -28,7 +28,7 @@ class LocalReadRecoveryUiTest {
     @Test fun failed_history_does_not_render_empty_charts_and_retry_only_calls_the_reader() {
         var reads = 0
         compose.setContent { MyApplicationTheme {
-            RechartsSensorDashboard(emptyList(), { error("Unexpected write") }, readFailed = true, onRetryRead = { reads++ })
+            RechartsSensorDashboard(emptyList(), readFailed = true, onRetryRead = { reads++ })
         } }
         compose.onNodeWithText("Não foi possível ler o histórico.").assertExists()
         compose.onNodeWithText("Sem medições disponíveis").assertDoesNotExist()

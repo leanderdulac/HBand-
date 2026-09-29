@@ -71,7 +71,7 @@ class VeepooBatteryMapperTest {
         assertEquals("--", VeepooBatteryMapper.displayLabel(null))
         assertEquals("--", VeepooBatteryMapper.displayLabel(null, simulated = true))
         assertEquals("18%", VeepooBatteryMapper.displayLabel(18))
-        assertEquals("14% sim.", VeepooBatteryMapper.displayLabel(14, simulated = true))
+        assertEquals("--", VeepooBatteryMapper.displayLabel(14, simulated = true))
         assertEquals("90%", VeepooBatteryMapper.displayLabel(90))
     }
 
