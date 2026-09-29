@@ -47,6 +47,7 @@ object RetrofitClient {
         .addConverterFactory(MoshiConverterFactory.create()).build().create(HealthTechApiService::class.java)
 
     internal fun createClient(key: String): OkHttpClient = OkHttpClient.Builder()
+        .addInterceptor(BleLabNetworkInterceptor())
         .addInterceptor { chain ->
             val request = chain.request().newBuilder().removeHeader("X-API-Key")
             if (key.isNotEmpty()) request.header("X-API-Key", key)

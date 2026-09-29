@@ -12,7 +12,9 @@ A faixa permanente informa **ENSAIO / SEM ENVIO**. Não há gerador de mediçõe
 O manifesto compilado remove INTERNET, desativa a retomada por boot e o
 inicializador Firebase, e exclui backup/transferência de dados. As autoridades
 FileProvider também usam o sufixo. Workers e controles de rede do aplicativo
-continuam existentes; o Android nega rede direta a esse UID mesmo com Wi-Fi ligado.
+continuam existentes; os dois clientes HTTP recusam as requisições antes de DNS,
+como IOException recuperável, evitando crash do dispatcher sem INTERNET.
+O Android também nega rede direta a esse UID mesmo com Wi-Fi ligado.
 Isso não impede um compartilhamento explícito por outro aplicativo: não usar
 exportação/compartilhamento no ensaio. Não preencher credenciais em Ajustes.
 
