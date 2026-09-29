@@ -19,6 +19,8 @@ Isso não impede um compartilhamento explícito por outro aplicativo: não usar
 exportação/compartilhamento no ensaio. Não preencher credenciais em Ajustes.
 
 Configuração com chaves reais ou google-services.json impede o build de laboratório.
+Arquivos de segredos por build type ou flavor (como `debug.properties`) também
+são recusados: o Secrets Plugin poderia sobrepor os placeholders após a validação.
 As opções storageLab/bleLab são mutuamente exclusivas. Qualquer tarefa Release
 com bleLab é recusada. O build normal continua separado, sem faixa de ensaio.
 

@@ -76,6 +76,14 @@ android {
   }
 
   buildTypes {
+    configureEach {
+      if (bleLab) {
+        // Secrets Plugin loads root <buildType>.properties after the base .env.
+        require(!rootProject.file("$name.properties").exists()) {
+          "BLE lab forbids build-type secret overlays. Use an isolated checkout."
+        }
+      }
+    }
     release {
       isCrunchPngs = false
       isMinifyEnabled = false
@@ -93,6 +101,13 @@ android {
   }
   if (storageLab) {
     sourceSets.getByName("debug").manifest.srcFile("src/storageLab/AndroidManifest.xml")
+  }
+  productFlavors.configureEach {
+    if (bleLab) {
+      require(!rootProject.file("$name.properties").exists()) {
+        "BLE lab forbids flavor secret overlays. Use an isolated checkout."
+      }
+    }
   }
   if (bleLab) {
     sourceSets.getByName("debug").apply {
