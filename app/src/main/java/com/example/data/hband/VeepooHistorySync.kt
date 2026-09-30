@@ -114,6 +114,10 @@ class VeepooHistorySync(
         onProgress(state)
 
         val watchDay = caps.historyDays.coerceIn(1, 7)
+        // SDK protocols 3/5 return HRV and SpO2 via IOriginData3Listener in the
+        // general history query. Repeating the legacy queries can time out and
+        // delay live sensors; an unsuccessful combined query stays incomplete.
+        val combinedOrigin = usesCombinedOrigin(caps.originProtocolVersion)
 
         if (!cancelled && caps.canReadMultiDayOrigin) {
             val origin = retrying(times = 3, timeoutMs = ORIGIN_TIMEOUT_MS) {
@@ -123,7 +127,9 @@ class VeepooHistorySync(
             }
             collected += origin.orEmpty()
             state = state.copy(
-                originSamples = origin?.size ?: 0,
+                originSamples = origin.orEmpty().count { it.kind == VeepooHistoryMapper.MappedSample.Kind.ORIGIN },
+                hrvSamples = origin.orEmpty().count { it.kind == VeepooHistoryMapper.MappedSample.Kind.HRV },
+                spo2Samples = origin.orEmpty().count { it.kind == VeepooHistoryMapper.MappedSample.Kind.SPO2 },
                 progress = 0.25f,
                 lastError = if (origin == null) "timeout Origin" else null,
             )
@@ -147,7 +153,7 @@ class VeepooHistorySync(
             onProgress(state)
         }
 
-        if (!cancelled && caps.canReadHrvOrigin) {
+        if (!cancelled && caps.canReadHrvOrigin && !combinedOrigin) {
             state = state.copy(phase = "hrv")
             onProgress(state)
             val hrv = retrying(times = 3, timeoutMs = HRV_TIMEOUT_MS) {
@@ -164,7 +170,7 @@ class VeepooHistorySync(
             onProgress(state)
         }
 
-        if (!cancelled && caps.canReadSpo2Origin) {
+        if (!cancelled && caps.canReadSpo2Origin && !combinedOrigin) {
             state = state.copy(phase = "spo2")
             onProgress(state)
             val spo2 = retrying(times = 3, timeoutMs = SPO2_TIMEOUT_MS) {
@@ -558,7 +564,7 @@ class VeepooHistorySync(
             }
         }
 
-        val listener: IOriginProgressListener = if (protocolVersion >= 3) {
+        val listener: IOriginProgressListener = if (usesCombinedOrigin(protocolVersion)) {
             object : IOriginData3Listener {
                 override fun onOriginFiveMinuteListDataChange(list: MutableList<OriginData3>?) {
                     list?.forEach { addOrigin(it) }
@@ -622,6 +628,9 @@ class VeepooHistorySync(
     }
 
     private var activeOriginListener: IOriginProgressListener? = null
+
+    // Official SDK API: 3/5 use IOriginData3Listener; other versions use IOriginDataListener.
+    private fun usesCombinedOrigin(protocolVersion: Int): Boolean = protocolVersion == 3 || protocolVersion == 5
 
     private suspend fun <T> retrying(
         times: Int,
