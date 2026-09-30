@@ -219,6 +219,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
     val isGeneratingGeminiInsight = insightReview.state.map { it.isLoading }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+    internal val geminiInsightMeta: StateFlow<InsightMeta> = insightReview.meta
 
     private val hydrationDao = db.hydrationDao()
     private val breathingDao = db.breathingDao()
