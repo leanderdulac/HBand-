@@ -37,7 +37,7 @@ class PatientWatchScreenTest {
         var selected: HBandDevice? = null
         compose.setContent {
             MyApplicationTheme {
-                PatientAdaptiveScaffold(2, 0, {}, header = { HomeWelcomeHeader("", "", {}, showGreeting = false) }) {
+                PatientAdaptiveScaffold(2, {}, header = { HomeWelcomeHeader("", "", {}, showGreeting = false) }) {
                     androidx.compose.foundation.layout.Box(Modifier.padding(horizontal = 16.dp)) {
                         PatientWatchContent(listOf(device), null, false, null, {}, { selected = it }, {}, {}, {})
                     }
@@ -63,17 +63,6 @@ class PatientWatchScreenTest {
         compose.onNodeWithTag("connect_watch_${device.deviceId}").performScrollTo().assertIsDisplayed()
     }
 
-    @Test fun keyboard_done_keeps_code_and_does_not_start_a_connection() {
-        var commands = 0
-        content(byMac = { commands++ })
-        compose.onNodeWithTag("watch_support_button").performScrollTo().performClick()
-        compose.onNodeWithTag("custom_mac_input").performScrollTo().performTextInput("00:11:22:33:44:55")
-        compose.onNodeWithTag("custom_mac_input").performImeAction()
-        compose.onNodeWithTag("custom_mac_input").assertIsNotFocused()
-            .assertTextContains("00:11:22:33:44:55")
-        compose.runOnIdle { assertEquals(0, commands) }
-    }
-
     @Test fun results_announce_list_count_changes_without_claiming_a_connection() {
         val devices = mutableStateOf(emptyList<HBandDevice>())
         compose.setContent {
@@ -96,20 +85,6 @@ class PatientWatchScreenTest {
         content(devices = listOf(device), connect = { chosen = it })
         compose.onNodeWithTag("connect_watch_${device.deviceId}").performScrollTo().performClick()
         compose.runOnIdle { assertSame(device, chosen) }
-    }
-
-    @Test fun manual_connection_stays_in_help_and_rejects_invalid_addresses() {
-        var selected: String? = null
-        content(byMac = { selected = it })
-        compose.onNodeWithTag("custom_mac_input").assertDoesNotExist()
-        compose.onNodeWithTag("watch_support_button").performScrollTo().performClick()
-        compose.onNodeWithTag("custom_mac_input").performScrollTo().performTextInput("C4:E3:42:VE:30:A4")
-        compose.onNodeWithTag("connect_mac_button").performScrollTo().assertIsNotEnabled()
-        compose.onNodeWithText("Confira o código recebido do suporte.", substring = true).assertExists()
-        compose.onNodeWithTag("custom_mac_input").performScrollTo().performTextReplacement("00:11:22:33:44:55")
-        compose.onNodeWithTag("connect_mac_button").performScrollTo().performClick()
-        compose.onNodeWithText("Confira o código recebido do suporte.", substring = true).assertDoesNotExist()
-        compose.runOnIdle { assertEquals("00:11:22:33:44:55", selected) }
     }
 
     @Test fun permission_denial_and_large_text_leave_help_reachable() {

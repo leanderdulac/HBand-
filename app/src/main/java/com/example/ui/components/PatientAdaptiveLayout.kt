@@ -14,11 +14,9 @@ import androidx.compose.ui.unit.dp
 @Composable
 internal fun PatientAdaptiveScaffold(
     selectedTab: Int,
-    pendingCount: Int?,
     onSelect: (Int) -> Unit,
     modifier: Modifier = Modifier,
     snackbarHost: @Composable () -> Unit = {},
-    queueReadFailed: Boolean = false,
     header: @Composable () -> Unit,
     content: @Composable () -> Unit,
 ) {
@@ -30,10 +28,10 @@ internal fun PatientAdaptiveScaffold(
             modifier = Modifier.fillMaxSize(),
             containerColor = Color(0xFFF8F9FF),
             snackbarHost = snackbarHost,
-            bottomBar = { if (!rail) PatientNavigationBar(selectedTab, pendingCount, onSelect, queueReadFailed) },
+            bottomBar = { if (!rail) PatientNavigationBar(selectedTab, onSelect) },
         ) { padding ->
             Row(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding)) {
-                if (rail) PatientNavigationRail(selectedTab, pendingCount, onSelect, queueReadFailed)
+                if (rail) PatientNavigationRail(selectedTab, onSelect)
                 Box(Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.TopCenter) {
                     Column(
                         Modifier.widthIn(max = if (selectedTab == 0) 1120.dp else 840.dp)

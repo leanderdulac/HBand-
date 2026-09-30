@@ -30,12 +30,10 @@ class DashboardAiInsightOrderTest {
         MyApplicationTheme {
             Box(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
                 DashboardTab(
-                    syncDisplayStatus = SyncDisplayStatus.FULLY_SYNCED,
-                    pendingCount = 0, syncedCount = 0, failedCount = 0,
-                    syncLogs = emptyList(), apiHealth = ApiHealthState(),
+
                     connectedDevice = null, latestTelemetry = null, sensorMetrics = emptyList(),
                     autoIngestLive = true,
-                    onTriggerSync = {}, onRefreshHealth = {}, onRetryQueueRead = {},
+
                     onToggleAutoIngest = {}, onSpotCheck = {}, onShowNotification = {},
                     onScanClick = {}, onDisconnect = {},
                     geminiInsightText = "Nos últimos 7 dias, sua frequência cardíaca média foi de 72 BPM, dentro da faixa esperada.",
