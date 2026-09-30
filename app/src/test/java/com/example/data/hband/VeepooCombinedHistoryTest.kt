@@ -60,7 +60,9 @@ class VeepooCombinedHistoryTest {
         pull.samples.forEach {
             assertEquals("fixture-device", it.telemetry.deviceId)
             assertEquals("fixture-model", it.telemetry.deviceModel)
-            assertEquals(VeepooHistoryMapper.epochMsOf(Boundary.time(), null), it.epochMs)
+            // SDK TimeData has second precision; toCalendar() retains the current
+            // millisecond field, so compare only the precision supplied by the watch.
+            assertEquals(VeepooHistoryMapper.epochMsOf(Boundary.time(), null) / 1000, it.epochMs / 1000)
             assertEquals(VeepooHistoryMapper.isoUtc(it.epochMs), it.telemetry.timestamp)
         }
         assertEquals(62, pull.samples.single { it.kind == VeepooHistoryMapper.MappedSample.Kind.HRV }.telemetry.hrvScore)
