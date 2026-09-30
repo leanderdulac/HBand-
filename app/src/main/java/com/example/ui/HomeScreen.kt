@@ -140,6 +140,7 @@ fun HomeScreen(
 
     val geminiInsightText by viewModel.geminiInsightText.collectAsStateWithLifecycle()
     val isGeneratingGeminiInsight by viewModel.isGeneratingGeminiInsight.collectAsStateWithLifecycle()
+    val geminiInsightMeta by viewModel.geminiInsightMeta.collectAsStateWithLifecycle()
 
     val hydrationRead by viewModel.todayHydrationMl.collectAsStateWithLifecycle()
     val todayHydrationMl = hydrationRead.valueOrNull()
@@ -227,6 +228,8 @@ fun HomeScreen(
                     geminiInsightText = geminiInsightText,
                     isGeneratingGeminiInsight = isGeneratingGeminiInsight,
                     onRefreshGeminiInsight = { viewModel.generateGeminiInsight() },
+                    geminiInsightGeneratedAtMillis = geminiInsightMeta.generatedAtMillis,
+                    geminiInsightFailed = geminiInsightMeta.failed,
                     todayHydrationMl = todayHydrationMl,
                     hydrationTargetMl = userProfile?.targetWaterMl,
                     onAddWater = { viewModel.addWaterIntake(it) },
@@ -372,7 +375,7 @@ fun HomeScreen(
 }
 
 @Composable
-private fun DashboardTab(
+internal fun DashboardTab(
     syncDisplayStatus: com.example.ui.components.SyncDisplayStatus,
     pendingCount: Int,
     syncedCount: Int,
@@ -396,6 +399,11 @@ private fun DashboardTab(
     geminiInsightText: String = "",
     isGeneratingGeminiInsight: Boolean = false,
     onRefreshGeminiInsight: () -> Unit = {},
+    geminiInsightGeneratedAtMillis: Long? = null,
+    geminiInsightFailed: Boolean = false,
+    // AI_INSIGHT_ENABLED=true highlights the summary right after "Meu relógio"; false keeps the
+    // collapsed section near the end of the screen, exactly as before.
+    aiInsightEnabled: Boolean = BuildConfig.AI_INSIGHT_ENABLED,
     todayHydrationMl: Int? = null,
     hydrationTargetMl: Int? = null,
     onAddWater: (Int) -> Unit = {},
@@ -459,6 +467,17 @@ private fun DashboardTab(
                 device = connectedDevice,
                 modifier = Modifier.fillMaxWidth()
             )
+
+            if (aiInsightEnabled) {
+                com.example.ui.components.AiInsightHighlightCard(
+                    insightText = geminiInsightText,
+                    isLoading = isGeneratingGeminiInsight,
+                    onRefreshInsight = onRefreshGeminiInsight,
+                    generatedAtMillis = geminiInsightGeneratedAtMillis,
+                    failed = geminiInsightFailed,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
         }, second = {
             TelemetryGauges(telemetry = latestTelemetry)
 
@@ -576,16 +595,16 @@ private fun DashboardTab(
             )
         }
 
-        com.example.ui.components.PatientSection(
+        if (!aiInsightEnabled) com.example.ui.components.PatientSection(
             title = "Resumo com inteligência artificial",
             forceExpanded = false,
-            initiallyExpanded = BuildConfig.AI_INSIGHT_ENABLED,
         ) {
             com.example.ui.components.GeminiHealthInsightCard(
                 insightText = geminiInsightText,
                 isLoading = isGeneratingGeminiInsight,
                 onRefreshInsight = onRefreshGeminiInsight,
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth(),
+                showInsight = false,
             )
         }
 

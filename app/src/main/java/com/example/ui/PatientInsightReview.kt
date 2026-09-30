@@ -18,6 +18,9 @@ import kotlinx.coroutines.launch
 
 internal data class InsightReviewState(val text: String = "", val isLoading: Boolean = false)
 
+/** When the shown text was generated, and whether the last request failed (for the highlight card). */
+internal data class InsightMeta(val generatedAtMillis: Long? = null, val failed: Boolean = false)
+
 /**
  * AI_INSIGHT_ENABLED=false keeps the pilot guard (PR #6): notice only, manual review in DEBUG,
  * never automatic. AI_INSIGHT_ENABLED=true shows the summary and generates it automatically
@@ -67,6 +70,8 @@ internal class PatientInsightReview(
     private var lastStartedAt: Long? = null
     private val current = MutableStateFlow(InsightReviewState())
     val state = current.asStateFlow()
+    private val currentMeta = MutableStateFlow(InsightMeta())
+    val meta = currentMeta.asStateFlow()
 
     init {
         if (enabled && automatic) scope.launch { observeAutomatically() }
@@ -81,14 +86,20 @@ internal class PatientInsightReview(
             try {
                 val text = generate(metrics.first())
                 synchronized(lock) {
-                    if (generation == requestedGeneration) current.value = InsightReviewState(text, true)
+                    if (generation == requestedGeneration) {
+                        current.value = InsightReviewState(text, true)
+                        currentMeta.value = InsightMeta(generatedAtMillis = now())
+                    }
                 }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
                 synchronized(lock) {
-                    if (generation == requestedGeneration) current.value = InsightReviewState(
-                        "Não foi possível gerar o texto para revisão. Tente novamente.", true)
+                    if (generation == requestedGeneration) {
+                        current.value = InsightReviewState(
+                            "Não foi possível gerar o texto para revisão. Tente novamente.", true)
+                        currentMeta.value = InsightMeta(failed = true)
+                    }
                 }
             }
         }.also { pending ->
@@ -105,6 +116,7 @@ internal class PatientInsightReview(
         job?.cancel()
         job = null
         current.value = InsightReviewState()
+        currentMeta.value = InsightMeta()
     }
 
     private suspend fun observeAutomatically() {
