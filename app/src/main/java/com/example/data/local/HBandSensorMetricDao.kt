@@ -15,6 +15,11 @@ interface HBandSensorMetricDao {
     @Query("SELECT * FROM hband_sensor_metrics ORDER BY timestampMillis DESC")
     suspend fun getAllMetricsList(): List<HBandSensorMetricEntity>
 
+    // Read inside the same write transaction as history admission. No schema or
+    // existing row changes; restrict materialization to this device/time window.
+    @Query("SELECT * FROM hband_sensor_metrics WHERE deviceId = :deviceId AND timestampMillis BETWEEN :fromMillis AND :toMillis")
+    suspend fun getHistoryWindow(deviceId: String, fromMillis: Long, toMillis: Long): List<HBandSensorMetricEntity>
+
     @Query("SELECT * FROM hband_sensor_metrics ORDER BY timestampMillis DESC LIMIT 1")
     fun getLatestMetric(): Flow<HBandSensorMetricEntity?>
 

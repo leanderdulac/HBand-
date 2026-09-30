@@ -253,6 +253,8 @@ class WearableQueueConcurrencyTest {
     private val metrics = object : HBandSensorMetricDao {
         override fun getAllMetrics() = flowOf(emptyList<HBandSensorMetricEntity>())
         override suspend fun getAllMetricsList() = emptyList<HBandSensorMetricEntity>()
+        override suspend fun getHistoryWindow(deviceId: String, fromMillis: Long, toMillis: Long) =
+            error("Unexpected history read")
         override fun getLatestMetric() = flowOf<HBandSensorMetricEntity?>(null)
         override fun getRecentMetrics(limit: Int) = getAllMetrics()
         override suspend fun insertMetric(metric: HBandSensorMetricEntity) = error("Unexpected metric write")
