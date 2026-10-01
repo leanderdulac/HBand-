@@ -10,24 +10,17 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalFocusManager
-import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
-import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.input.KeyboardCapitalization
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.core.net.toUri
@@ -140,10 +133,6 @@ internal fun PatientWatchContent(
     scanFailure: BleScanFailure? = null,
     onStopScan: (() -> Unit)? = null,
 ) {
-    var showSupport by rememberSaveable { mutableStateOf(false) }
-    var address by rememberSaveable { mutableStateOf("") }
-    val focusManager = LocalFocusManager.current
-    val keyboardController = LocalSoftwareKeyboardController.current
     val connected = connectedDevice?.isConnected == true
     val feedback = permissionMessage ?: if (isScanning) null else scanFailure?.patientMessage()
     Column(
@@ -223,43 +212,6 @@ internal fun PatientWatchContent(
                 }
             }
         })
-        OutlinedButton(
-            onClick = { showSupport = !showSupport },
-            modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag("watch_support_button"),
-        ) { Text(if (showSupport) "Fechar ajuda de conexão" else "Ajuda para conectar") }
-        if (showSupport) {
-            Text("Confira se o relógio está carregado e perto deste aparelho. Se houver mais de um, confirme a identificação antes de conectar.", style = MaterialTheme.typography.bodyLarge)
-            Text("Conexão por código", style = MaterialTheme.typography.titleMedium)
-            Text("Use esta opção se o suporte informou o endereço do seu relógio.", style = MaterialTheme.typography.bodyLarge)
-            OutlinedTextField(
-                value = address,
-                onValueChange = { address = it },
-                label = { Text("Endereço do relógio (MAC)") },
-                isError = address.isNotBlank() && !isValidWatchAddress(address),
-                supportingText = {
-                    Text(if (address.isNotBlank() && !isValidWatchAddress(address))
-                        "Confira o código recebido do suporte. Use 6 pares com números ou letras de A a F, separados por dois-pontos."
-                    else "Use o endereço informado pelo suporte: 6 pares separados por dois-pontos.")
-                },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(
-                    capitalization = KeyboardCapitalization.Characters,
-                    autoCorrectEnabled = false,
-                    keyboardType = KeyboardType.Ascii,
-                    imeAction = ImeAction.Done,
-                ),
-                keyboardActions = KeyboardActions(onDone = {
-                    focusManager.clearFocus()
-                    keyboardController?.hide()
-                }),
-                modifier = Modifier.fillMaxWidth().testTag("custom_mac_input"),
-            )
-            Button(
-                onClick = { onConnectByMac(address.trim()) },
-                enabled = isValidWatchAddress(address),
-                modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag("connect_mac_button"),
-            ) { Text("Conectar com este código") }
-        }
         Spacer(Modifier.height(16.dp))
     }
 }

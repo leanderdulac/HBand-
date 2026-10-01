@@ -102,7 +102,7 @@ class PatientTabContinuityTest {
         compose.onNodeWithText("Sem medições disponíveis").assertExists()
     }
 
-    @Test fun watch_help_keeps_draft_across_tabs_and_restoration_without_connecting() {
+    @Test fun watch_scanner_restores_without_starting_scan_or_connection() {
         val tab = mutableIntStateOf(2)
         val restoration = StateRestorationTester(compose)
         var commands = 0
@@ -118,12 +118,11 @@ class PatientTabContinuityTest {
                 }
             }
         }
-        compose.onNodeWithTag("watch_support_button").performScrollTo().performClick()
-        compose.onNodeWithTag("custom_mac_input").performScrollTo().performTextInput("00:11:22:33:44:55")
         compose.runOnIdle { tab.intValue = 0 }
         restoration.emulateSavedInstanceStateRestore()
         compose.runOnIdle { tab.intValue = 2 }
-        compose.onNodeWithTag("custom_mac_input").performScrollTo().assertTextContains("00:11:22:33:44:55")
+        compose.onNodeWithTag("scan_ble_button").assertIsDisplayed()
+        compose.onNodeWithTag("custom_mac_input").assertDoesNotExist()
         compose.runOnIdle { assertEquals(0, commands) }
     }
 }
