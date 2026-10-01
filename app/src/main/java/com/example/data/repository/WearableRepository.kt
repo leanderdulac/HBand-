@@ -180,9 +180,9 @@ class WearableRepository(
         patientId: String = IngestPayloadMapper.DEFAULT_PATIENT_ID,
     ): Int = withContext(Dispatchers.IO) {
         if (samples.isEmpty()) return@withContext 0
-        val entities = samples.map { telemetry ->
-            val epoch = VeepooHistoryMapper.parseIsoToMillis(telemetry.timestamp)
-                .takeIf { it > 0L } ?: System.currentTimeMillis()
+        val observedTimes = samples.map { VeepooHistoryMapper.parseIsoToMillis(it.timestamp) }
+        val entities = samples.mapIndexed { index, telemetry ->
+            val epoch = observedTimes[index].takeIf { it > 0L } ?: System.currentTimeMillis()
             HBandSensorMetricEntity(
                 deviceId = IngestPayloadMapper.resolveDeviceId(telemetry.deviceId),
                 timestamp = telemetry.timestamp,
@@ -201,18 +201,38 @@ class WearableRepository(
                 awakeMinutes = telemetry.sleepSummary.awakeMinutes,
             )
         }
-        val hourly = samples
-            .filter { IngestPayloadMapper.isIngestible(it) }
-            .groupBy { telemetry ->
+        val hourly = samples.indices
+            .filter { IngestPayloadMapper.isIngestible(samples[it]) }
+            .groupBy { index ->
+                val telemetry = samples[index]
                 val bucket = VeepooHistoryMapper.parseIsoToMillis(telemetry.timestamp) / 3_600_000L
                 telemetry.deviceId to bucket
             }
             .values
-            .mapNotNull { group -> group.maxByOrNull { it.heartRate } }
+            .mapNotNull { group -> group.maxByOrNull { samples[it].heartRate } }
 
+        var insertedCount = 0
         localWriteTransaction.run {
-            sensorMetricDao.insertMetrics(entities)
-            for (telemetry in hourly) {
+            // Only exact stored snapshots are coalesced. A different timestamp,
+            // device or value remains a separate row, including corrections.
+            // Ignore the generated local row ID, never delete/rewrite old rows.
+            val known = HashSet<HBandSensorMetricEntity>()
+            for ((deviceId, window) in entities.groupBy { it.deviceId }) {
+                sensorMetricDao.getHistoryWindow(deviceId,
+                    window.minOf { it.timestampMillis }, window.maxOf { it.timestampMillis })
+                    .mapTo(known) { it.copy(id = 0) }
+            }
+            // An invalid source timestamp has no stable observation time. Do not
+            // treat the insertion-time fallback as evidence of a replay.
+            val fresh = entities.filterIndexed { index, entity -> observedTimes[index] <= 0L || known.add(entity) }
+            sensorMetricDao.insertMetrics(fresh)
+            insertedCount = fresh.size
+            val admitted = fresh.toHashSet()
+            // Keep the existing per-hour selection over the complete pull. An
+            // already stored winner must not acquire another queue ID/receipt.
+            for (index in hourly) {
+                if (entities[index] !in admitted) continue
+                val telemetry = samples[index]
                 queueDao.insertItem(
                     IngestQueueEntity(
                         payloadJson = IngestPayloadMapper.telemetryToJson(telemetry, patientId),
@@ -227,7 +247,7 @@ class WearableRepository(
             throw cancelled
         } catch (_: Exception) {
         }
-        entities.size
+        insertedCount
     }
 
     /**
