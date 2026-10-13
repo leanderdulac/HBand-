@@ -136,9 +136,8 @@ fun SettingsTab(
             }
         }
 
-        ThemeSelectorCard(themeOption = themeOption, onThemeOptionChange = onThemeOptionChange)
-
-        // BLE Auto-Reconnect Card
+        // BLE Auto-Reconnect Card — keep above the theme picker so the
+        // reconnect control stays on-screen on a 320×740 settings viewport.
         Card(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(28.dp),
@@ -183,6 +182,8 @@ fun SettingsTab(
                 )
             }
         }
+
+        ThemeSelectorCard(themeOption = themeOption, onThemeOptionChange = onThemeOptionChange)
 
         PatientSection(title = "Opções do relógio", forceExpanded = historySyncState.isRunning || findDeviceState.finding) {
             BandSdkSettingsCard(
