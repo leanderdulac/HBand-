@@ -1,12 +1,10 @@
 package com.example.ui.components
 
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
@@ -26,13 +24,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.example.data.local.HBandSensorMetricEntity
+import com.example.ui.theme.ExpectedRangePlaceholders
+import com.example.ui.theme.LocalVitalSignalColors
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -53,6 +52,7 @@ fun RechartsSensorDashboard(
     isScrollable: Boolean = true,
     readFailed: Boolean = false,
     onRetryRead: () -> Unit = {},
+    initialMetric: ChartMetricType = ChartMetricType.SEVEN_DAY_SUMMARY,
 ) {
     if (readFailed) {
         Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -61,9 +61,10 @@ fun RechartsSensorDashboard(
         }
         return
     }
-    var selectedMetric by rememberSaveable { mutableStateOf(ChartMetricType.SEVEN_DAY_SUMMARY) }
+    var selectedMetric by rememberSaveable { mutableStateOf(initialMetric) }
     var menuOpen by remember { mutableStateOf(false) }
     var showGraph by rememberSaveable { mutableStateOf(false) }
+    var period by rememberSaveable { mutableStateOf(ChartPeriod.D7) }
     val now by rememberHistoryTime()
     val records = remember(sensorMetrics, selectedMetric, now) {
         sensorMetrics?.filter { it.timestampMillis > 0 && it.timestampMillis <= now }
@@ -116,12 +117,19 @@ fun RechartsSensorDashboard(
                             "Até 15 registros mais recentes neste celular. As datas seguem o horário do celular.",
                             style = MaterialTheme.typography.bodyLarge,
                         )
-                        if (selectedMetric in listOf(ChartMetricType.HEART_RATE, ChartMetricType.SPO2, ChartMetricType.TEMPERATURE)) {
+                        if (selectedMetric in listOf(
+                                ChartMetricType.HEART_RATE,
+                                ChartMetricType.SPO2,
+                                ChartMetricType.TEMPERATURE,
+                                ChartMetricType.BLOOD_PRESSURE,
+                            )
+                        ) {
+                            ChartPeriodRow(selected = period, onSelect = { period = it })
                             OutlinedButton(
                                 onClick = { showGraph = !showGraph },
                                 modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp),
                             ) { Text(if (showGraph) "Fechar gráfico" else "Ver gráfico") }
-                            if (showGraph) SavedReadingsPlot(records, selectedMetric)
+                            if (showGraph) SavedReadingsPlot(sensorMetrics, selectedMetric, period, now)
                         }
                         // Use the phone's current zone on refresh, not the zone from opening this view.
                         val dateFormat = SimpleDateFormat("dd/MM/yyyy 'às' HH:mm", Locale.forLanguageTag("pt-BR"))
@@ -163,37 +171,75 @@ internal fun savedMetricValue(record: HBandSensorMetricEntity, type: ChartMetric
     }
 }
 
-/** Dots use the stored timestamps and a data-derived range. Exact values remain readable below. */
+/** Line uses stored timestamps and real values only. Expected range is a configurable placeholder. */
 @Composable
-private fun SavedReadingsPlot(records: List<HBandSensorMetricEntity>, type: ChartMetricType) {
-    fun value(record: HBandSensorMetricEntity): Float = when (type) {
-        ChartMetricType.HEART_RATE -> record.heartRate.toFloat()
-        ChartMetricType.SPO2 -> record.spO2.toFloat()
-        else -> record.temperatureCelsius
+private fun SavedReadingsPlot(
+    metrics: List<HBandSensorMetricEntity>?,
+    type: ChartMetricType,
+    period: ChartPeriod,
+    nowMillis: Long,
+) {
+    val signals = LocalVitalSignalColors.current
+    val (range, color, valueOf) = when (type) {
+        ChartMetricType.HEART_RATE -> Triple(
+            ExpectedRangePlaceholders.heartRate,
+            signals.heartRate,
+            { record: HBandSensorMetricEntity -> record.heartRate.takeIf { it > 0 }?.toFloat() },
+        )
+        ChartMetricType.SPO2 -> Triple(
+            ExpectedRangePlaceholders.spo2,
+            signals.spo2,
+            { record: HBandSensorMetricEntity -> record.spO2.takeIf { it > 0 }?.toFloat() },
+        )
+        ChartMetricType.TEMPERATURE -> Triple(
+            ExpectedRangePlaceholders.temperature,
+            signals.temperature,
+            { record: HBandSensorMetricEntity -> record.temperatureCelsius.takeIf { it.isFinite() && it > 0f } },
+        )
+        ChartMetricType.BLOOD_PRESSURE -> Triple(
+            ExpectedRangePlaceholders.systolic,
+            signals.bloodPressure,
+            { record: HBandSensorMetricEntity ->
+                val sys = record.systolicBp.takeIf { it > 0 }
+                val dia = record.diastolicBp.takeIf { it > 0 }
+                if (sys != null && dia != null) sys.toFloat() else null
+            },
+        )
+        else -> return
     }
-    val low = records.minOf { value(it) }
-    val high = records.maxOf { value(it) }
-    val start = records.minOf { it.timestampMillis }
-    val end = records.maxOf { it.timestampMillis }
-    val ink = MaterialTheme.colorScheme.primary
-    val axis = MaterialTheme.colorScheme.outline
-    Text("Cada ponto é um registro. Veja os valores e horários na lista abaixo.", style = MaterialTheme.typography.bodyLarge)
-    Text("Maior valor: ${savedMetricValue(records.maxBy { value(it) }, type)}", style = MaterialTheme.typography.bodyMedium)
-    Canvas(
-        Modifier.fillMaxWidth().height(160.dp).semantics {
-            contentDescription = "Gráfico de ${type.label}. Valores e horários disponíveis na lista abaixo."
-        },
-    ) {
-        val inset = 12.dp.toPx()
-        val width = (size.width - 2 * inset).coerceAtLeast(1f)
-        val height = (size.height - 2 * inset).coerceAtLeast(1f)
-        drawLine(axis, Offset(inset, inset + height), Offset(inset + width, inset + height))
-        records.forEach { record ->
-            val xFraction = if (end == start) 0.5f else
-                ((record.timestampMillis - start).toDouble() / (end - start)).toFloat()
-            val yFraction = if (high == low) 0.5f else (value(record) - low) / (high - low)
-            drawCircle(ink, 4.dp.toPx(), Offset(inset + width * xFraction, inset + height * (1 - yFraction)))
+    val points = trendPointsInPeriod(metrics, nowMillis, period, valueOf)
+    val diastolic = if (type == ChartMetricType.BLOOD_PRESSURE) {
+        trendPointsInPeriod(metrics, nowMillis, period) { record ->
+            val sys = record.systolicBp.takeIf { it > 0 }
+            val dia = record.diastolicBp.takeIf { it > 0 }
+            if (sys != null && dia != null) dia.toFloat() else null
         }
+    } else {
+        emptyList()
     }
-    Text("Menor valor: ${savedMetricValue(records.minBy { value(it) }, type)}", style = MaterialTheme.typography.bodyMedium)
+    if (points.isNotEmpty()) {
+        val peak = points.maxBy { it.value }
+        val low = points.minBy { it.value }
+        Text("Maior valor neste período: ${formatTrendValue(type, peak.value)}", style = MaterialTheme.typography.bodyMedium)
+        TrendChart(
+            points = points,
+            range = range,
+            color = color,
+            secondaryPoints = diastolic,
+        )
+        Text("Menor valor neste período: ${formatTrendValue(type, low.value)}", style = MaterialTheme.typography.bodyMedium)
+    } else {
+        TrendChart(points = emptyList(), range = range, color = color)
+    }
+}
+
+private fun formatTrendValue(type: ChartMetricType, value: Float): String {
+    val locale = Locale.forLanguageTag("pt-BR")
+    return when (type) {
+        ChartMetricType.HEART_RATE -> "${value.toInt()} bpm"
+        ChartMetricType.SPO2 -> "${value.toInt()}%"
+        ChartMetricType.TEMPERATURE -> String.format(locale, "%.1f °C", value)
+        ChartMetricType.BLOOD_PRESSURE -> "${value.toInt()} mmHg"
+        else -> value.toString()
+    }
 }

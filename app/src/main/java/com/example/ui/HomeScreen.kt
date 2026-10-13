@@ -481,7 +481,11 @@ internal fun DashboardTab(
                 )
             }
         }, second = {
-            TelemetryGauges(telemetry = latestTelemetry)
+            TelemetryGauges(
+                telemetry = latestTelemetry,
+                capabilities = capabilities,
+                history = sensorMetrics,
+            )
 
             if (metricsReadFailed) com.example.ui.components.LocalReadNotice("o histórico", onRetryMetricsRead)
             else com.example.ui.components.DailyHealthSummaryCard(
