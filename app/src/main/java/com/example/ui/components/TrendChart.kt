@@ -90,6 +90,7 @@ fun TrendChart(
     modifier: Modifier = Modifier,
     secondaryPoints: List<TrendPoint> = emptyList(),
     secondaryColor: Color = color.copy(alpha = 0.55f),
+    chartDescription: String? = null,
 ) {
     Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(
@@ -114,7 +115,8 @@ fun TrendChart(
                 .height(180.dp)
                 .testTag("trend_chart")
                 .semantics {
-                    contentDescription = "Gráfico de tendência de ${range.label}. ${points.size} registros. ${range.caption}"
+                    contentDescription = chartDescription
+                        ?: "Gráfico de ${range.label}. Valores e horários disponíveis na lista abaixo."
                 },
         ) {
             val inset = 12.dp.toPx()

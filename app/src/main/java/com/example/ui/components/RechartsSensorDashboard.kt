@@ -225,6 +225,7 @@ private fun SavedReadingsPlot(
             range = range,
             color = color,
             secondaryPoints = diastolic,
+            chartDescription = "Gráfico de ${type.label}. Valores e horários disponíveis na lista abaixo.",
         )
         Text("Menor valor neste período: ${formatTrendValue(type, low.value)}", style = MaterialTheme.typography.bodyMedium)
     } else {
