@@ -313,6 +313,8 @@ private fun RealAdcSparkline(samples: List<Int>) {
         return
     }
     val normalized = remember(samples) { normalizedEcgWaveform(samples) }
+    val ink = MaterialTheme.colorScheme.primary
+    val axis = MaterialTheme.colorScheme.primaryContainer
     Text("Traçado recebido do relógio. A escala foi ajustada para exibição.", style = MaterialTheme.typography.bodyMedium)
     Canvas(
         modifier = Modifier
@@ -329,11 +331,11 @@ private fun RealAdcSparkline(samples: List<Int>) {
         }
         drawPath(
             path = path,
-            color = MaterialTheme.colorScheme.primary,
+            color = ink,
             style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round)
         )
         drawLine(
-            color = MaterialTheme.colorScheme.primaryContainer,
+            color = axis,
             start = Offset(0f, size.height / 2f),
             end = Offset(size.width, size.height / 2f),
             strokeWidth = 1.dp.toPx()
