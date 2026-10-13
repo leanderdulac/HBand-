@@ -43,7 +43,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.ui.theme.MinimalBorder
+import com.example.ui.theme.LocalStatusColors
 
 data class SyncLogEntry(
     val id: String,
@@ -78,8 +78,8 @@ fun SyncHistoryLog(
             .fillMaxWidth()
             .testTag("sync_history_log_card"),
         shape = RoundedCornerShape(28.dp),
-        border = BorderStroke(1.dp, MinimalBorder),
-        colors = CardDefaults.cardColors(containerColor = Color.White)
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
         Column(modifier = Modifier.padding(20.dp)) {
             // Header Title
@@ -92,13 +92,13 @@ fun SyncHistoryLog(
                         modifier = Modifier
                             .size(40.dp)
                             .clip(CircleShape)
-                            .background(Color(0xFFE8F0FE)),
+                            .background(MaterialTheme.colorScheme.primaryContainer),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             imageVector = Icons.Default.History,
                             contentDescription = null,
-                            tint = Color(0xFF1A73E8),
+                            tint = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.size(22.dp)
                         )
                     }
@@ -107,12 +107,12 @@ fun SyncHistoryLog(
                         Text(
                             text = "Tarefas de envio",
                             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                            color = Color(0xFF191C1E)
+                            color = MaterialTheme.colorScheme.onSurface
                         )
                         Text(
                             text = "Situação informada pelo aplicativo. Não é um comprovante de recebimento.",
                             style = MaterialTheme.typography.bodyLarge,
-                            color = Color(0xFF44474E)
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
@@ -149,7 +149,7 @@ fun SyncHistoryLog(
                     Text(
                         text = "Nenhum registro de histórico encontrado para o filtro selecionado.",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = Color(0xFF44474E)
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             } else {
@@ -179,10 +179,10 @@ private fun FilterPill(
         modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
         shape = RoundedCornerShape(16.dp),
         colors = FilterChipDefaults.filterChipColors(
-            selectedContainerColor = Color(0xFF00639B),
-            selectedLabelColor = Color.White,
-            containerColor = Color(0xFFF1F4F9),
-            labelColor = Color(0xFF44474E)
+            selectedContainerColor = MaterialTheme.colorScheme.primary,
+            selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
+            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+            labelColor = MaterialTheme.colorScheme.onSurfaceVariant
         )
     )
 }
@@ -191,20 +191,20 @@ private fun FilterPill(
 private fun SyncLogEntryCard(log: SyncLogEntry) {
     // The ViewModel assigns display timestamps to work snapshots; they are not execution times.
     val (badgeColor, statusLabel, icon) = when (log.status) {
-        "SUCCEEDED", "SYNCED" -> Triple(Color(0xFF2E7D32), "CONCLUÍDO", Icons.Default.CheckCircle)
-        "RUNNING" -> Triple(Color(0xFF00639B), "EXECUTANDO", Icons.Default.Sync)
-        "ENQUEUED", "PENDING" -> Triple(Color(0xFFE65100), "EM FILA", Icons.Default.HourglassTop)
-        "FAILED" -> Triple(Color(0xFFC62828), "FALHOU", Icons.Default.Error)
-        "BLOCKED" -> Triple(Color(0xFF44474E), "AGUARDANDO OUTRA TAREFA", Icons.Default.HourglassTop)
-        "CANCELLED" -> Triple(Color(0xFF44474E), "CANCELADO", Icons.Default.History)
-        else -> Triple(Color(0xFF44474E), "SITUAÇÃO NÃO RECONHECIDA", Icons.Default.History)
+        "SUCCEEDED", "SYNCED" -> Triple(LocalStatusColors.current.normalForeground, "CONCLUÍDO", Icons.Default.CheckCircle)
+        "RUNNING" -> Triple(MaterialTheme.colorScheme.primary, "EXECUTANDO", Icons.Default.Sync)
+        "ENQUEUED", "PENDING" -> Triple(LocalStatusColors.current.attentionForeground, "EM FILA", Icons.Default.HourglassTop)
+        "FAILED" -> Triple(MaterialTheme.colorScheme.error, "FALHOU", Icons.Default.Error)
+        "BLOCKED" -> Triple(MaterialTheme.colorScheme.onSurfaceVariant, "AGUARDANDO OUTRA TAREFA", Icons.Default.HourglassTop)
+        "CANCELLED" -> Triple(MaterialTheme.colorScheme.onSurfaceVariant, "CANCELADO", Icons.Default.History)
+        else -> Triple(MaterialTheme.colorScheme.onSurfaceVariant, "SITUAÇÃO NÃO RECONHECIDA", Icons.Default.History)
     }
 
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
-        border = BorderStroke(1.dp, MinimalBorder),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFFFAFAFE))
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
     ) {
         Column(modifier = Modifier.padding(14.dp)) {
             Column(
@@ -214,7 +214,7 @@ private fun SyncLogEntryCard(log: SyncLogEntry) {
                 Text(
                     text = log.source,
                     style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                    color = Color(0xFF191C1E),
+                    color = MaterialTheme.colorScheme.onSurface,
                 )
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Icon(
@@ -237,7 +237,7 @@ private fun SyncLogEntryCard(log: SyncLogEntry) {
             Text(
                 text = log.summary,
                 style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
-                color = Color(0xFF1E293B)
+                color = MaterialTheme.colorScheme.onSurface
             )
 
             if (!log.details.isNullOrBlank()) {
@@ -248,7 +248,7 @@ private fun SyncLogEntryCard(log: SyncLogEntry) {
                         fontFamily = FontFamily.Monospace,
                         fontSize = 11.sp
                     ),
-                    color = if (log.status == "FAILED") Color(0xFFC62828) else Color(0xFF64748B)
+                    color = if (log.status == "FAILED") MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }

@@ -21,7 +21,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -30,7 +29,6 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.example.data.local.IngestQueueEntity
-import com.example.ui.theme.MinimalBorder
 
 @Composable
 fun JsonPayloadModal(
@@ -41,8 +39,8 @@ fun JsonPayloadModal(
         Card(
             modifier = Modifier.widthIn(max = 960.dp).fillMaxWidth().padding(16.dp).testTag("json_payload_modal"),
             shape = RoundedCornerShape(28.dp),
-            border = BorderStroke(1.dp, MinimalBorder),
-            colors = CardDefaults.cardColors(containerColor = Color.White),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         ) {
             Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 // Reserve the closing action before measuring the scrollable record.
@@ -53,16 +51,16 @@ fun JsonPayloadModal(
                     Text(
                         text = "JSON HBand SDK -> HealthTech",
                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                        color = Color(0xFF191C1E),
+                        color = MaterialTheme.colorScheme.onSurface,
                     )
                     Text(
                         text = "Item da Fila #${item.id} (${item.status})",
                         style = MaterialTheme.typography.labelSmall,
-                        color = Color(0xFF00639B),
+                        color = MaterialTheme.colorScheme.primary,
                     )
                     Box(
                         Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp))
-                            .background(Color(0xFFF1F4F9)).padding(14.dp),
+                            .background(MaterialTheme.colorScheme.surfaceVariant).padding(14.dp),
                     ) {
                         Text(
                             text = item.payloadJson,
@@ -72,7 +70,7 @@ fun JsonPayloadModal(
                                 fontSize = 12.sp,
                                 lineHeight = 16.sp,
                             ),
-                            color = Color(0xFF191C1E),
+                            color = MaterialTheme.colorScheme.onSurface,
                         )
                     }
                 }
@@ -80,7 +78,7 @@ fun JsonPayloadModal(
                     onClick = onDismiss,
                     modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("close_json_inspector"),
                     shape = RoundedCornerShape(20.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00639B)),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                 ) { Text("Fechar Inspetor") }
             }
         }

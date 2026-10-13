@@ -33,7 +33,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -45,7 +44,7 @@ import androidx.compose.ui.unit.dp
 import com.example.data.hband.DetectSessionUiState
 import com.example.data.hband.DeviceCapabilities
 import com.example.data.hband.VeepooSessionGate
-import com.example.ui.theme.MinimalBorder
+import com.example.ui.theme.LocalStatusColors
 
 @Composable
 fun AdvancedDetectCard(
@@ -83,8 +82,8 @@ fun AdvancedDetectCard(
             .fillMaxWidth()
             .testTag("advanced_detect_card"),
         shape = RoundedCornerShape(28.dp),
-        border = BorderStroke(1.dp, MinimalBorder),
-        colors = CardDefaults.cardColors(containerColor = Color.White)
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
         Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -92,13 +91,13 @@ fun AdvancedDetectCard(
                     modifier = Modifier
                         .size(42.dp)
                         .clip(CircleShape)
-                        .background(Color(0xFFE0F2FE)),
+                        .background(MaterialTheme.colorScheme.primaryContainer),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         imageVector = Icons.Default.MonitorHeart,
                         contentDescription = null,
-                        tint = Color(0xFF00639B),
+                        tint = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(24.dp)
                     )
                 }
@@ -107,12 +106,12 @@ fun AdvancedDetectCard(
                     Text(
                         text = "Medições do relógio",
                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                        color = Color(0xFF191C1E)
+                        color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
                         text = "Recursos informados pelo relógio. Resultados ainda em validação.",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = Color(0xFF00639B)
+                        color = MaterialTheme.colorScheme.primary
                     )
                 }
             }
@@ -122,14 +121,14 @@ fun AdvancedDetectCard(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(14.dp))
-                        .background(Color(0xFFFFF4E5))
+                        .background(LocalStatusColors.current.attentionContainer)
                         .padding(12.dp)
                         .testTag("advanced_detect_reconnect_hint")
                 ) {
                     Text(
                         text = patientWatchConnectionHint(actionsEnabled),
                         style = MaterialTheme.typography.bodyLarge,
-                        color = Color(0xFF9A3412)
+                        color = LocalStatusColors.current.attentionForeground
                     )
                 }
             }
@@ -242,7 +241,7 @@ internal fun DetectActionBlock(
         Text(
             text = title,
             style = MaterialTheme.typography.titleLarge,
-            color = Color(0xFF191C1E)
+            color = MaterialTheme.colorScheme.onSurface
         )
         Text(
             text = when {
@@ -253,15 +252,15 @@ internal fun DetectActionBlock(
                 else -> "Use o botão abaixo para iniciar a medição."
             },
             style = MaterialTheme.typography.bodyLarge,
-            color = if (state.lastError != null) Color(0xFFBA1A1A) else Color(0xFF44474E),
+            color = if (state.lastError != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.testTag("${testTag}_status")
         )
         if (state.running && state.progress in 1..99) {
             LinearProgressIndicator(
                 progress = { (state.progress / 100f).coerceIn(0f, 1f) },
                 modifier = Modifier.fillMaxWidth(),
-                color = Color(0xFF00639B),
-                trackColor = Color(0xFFD1E4FF),
+                color = MaterialTheme.colorScheme.primary,
+                trackColor = MaterialTheme.colorScheme.primaryContainer,
             )
         }
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -269,7 +268,7 @@ internal fun DetectActionBlock(
                 onClick = onStart,
                 enabled = connected && !state.running,
                 shape = RoundedCornerShape(16.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00639B)),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                 modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag("${testTag}_start")
             ) {
                 Text(startLabel, style = MaterialTheme.typography.labelLarge)
@@ -308,7 +307,7 @@ private fun RealAdcSparkline(samples: List<Int>) {
         Text(
             text = "Ainda não há traçado do ECG disponível.",
             style = MaterialTheme.typography.bodyMedium,
-            color = Color(0xFF44474E),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.testTag("ecg_waveform_empty")
         )
         return
@@ -330,11 +329,11 @@ private fun RealAdcSparkline(samples: List<Int>) {
         }
         drawPath(
             path = path,
-            color = Color(0xFF00639B),
+            color = MaterialTheme.colorScheme.primary,
             style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round)
         )
         drawLine(
-            color = Color(0xFFD1E4FF),
+            color = MaterialTheme.colorScheme.primaryContainer,
             start = Offset(0f, size.height / 2f),
             end = Offset(size.width, size.height / 2f),
             strokeWidth = 1.dp.toPx()

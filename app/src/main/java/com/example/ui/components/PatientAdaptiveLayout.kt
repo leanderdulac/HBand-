@@ -1,11 +1,11 @@
 package com.example.ui.components
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
@@ -28,7 +28,7 @@ internal fun PatientAdaptiveScaffold(
         val rail = maxWidth >= (600 * fontScale.coerceAtLeast(1f)).dp && maxHeight >= 480.dp
         Scaffold(
             modifier = Modifier.fillMaxSize(),
-            containerColor = Color(0xFFF8F9FF),
+            containerColor = MaterialTheme.colorScheme.background,
             snackbarHost = snackbarHost,
             bottomBar = { if (!rail) PatientNavigationBar(selectedTab, pendingCount, onSelect, queueReadFailed) },
         ) { padding ->
