@@ -76,7 +76,6 @@ import com.example.ui.components.HomeWelcomeHeader
 import com.example.ui.components.JsonPayloadModal
 import com.example.ui.components.QueueInspector
 import com.example.ui.components.TelemetryGauges
-import com.example.ui.theme.MinimalBorder
 import com.example.data.hband.VeepooSessionGate
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -112,6 +111,7 @@ fun HomeScreen(
     val profileForEditor by viewModel.profileForEditor.collectAsStateWithLifecycle()
     val profileSaveState by viewModel.profileSaveState.collectAsStateWithLifecycle()
     val autoReconnectBle by viewModel.autoReconnectBle.collectAsStateWithLifecycle()
+    val themeOption by viewModel.themeOption.collectAsStateWithLifecycle()
     val deviceCapabilities by viewModel.deviceCapabilities.collectAsStateWithLifecycle()
     val autoMeasureState by viewModel.autoMeasureState.collectAsStateWithLifecycle()
     val wearDetectState by viewModel.wearDetectState.collectAsStateWithLifecycle()
@@ -348,6 +348,8 @@ fun HomeScreen(
                     onStopFindByPhone = { viewModel.stopFindDeviceByPhone() },
                     onHealthRemindChange = { viewModel.setBandHealthRemind(it) },
                     ingestDiagnostics = ingestDiagnostics,
+                    themeOption = themeOption,
+                    onThemeOptionChange = { viewModel.setThemeOption(it) },
                 )
             }
         }
