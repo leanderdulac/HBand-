@@ -60,7 +60,8 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.ui.theme.MinimalBorder
+import com.example.ui.theme.LocalBreathingPhaseColors
+import com.example.ui.theme.LocalStatusColors
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -70,11 +71,22 @@ import com.example.ui.BreathingSaveState
 import com.example.ui.BreathingSaveStatus
 import java.util.UUID
 
-enum class BreathingPhase(val label: String, val durationSeconds: Int, val color: Color) {
-    INHALE("Inspire profundamente...", 4, Color(0xFF0288D1)),
-    HOLD("Segure a respiração...", 4, Color(0xFF7C3AED)),
-    EXHALE("Expire devagar...", 4, Color(0xFF059669)),
-    REST("Pausa & Relaxamento...", 2, Color(0xFFD97706))
+enum class BreathingPhase(val label: String, val durationSeconds: Int) {
+    INHALE("Inspire profundamente...", 4),
+    HOLD("Segure a respiração...", 4),
+    EXHALE("Expire devagar...", 4),
+    REST("Pausa & Relaxamento...", 2),
+}
+
+@Composable
+private fun BreathingPhase.themeColor(): Color {
+    val colors = LocalBreathingPhaseColors.current
+    return when (this) {
+        BreathingPhase.INHALE -> colors.inhale
+        BreathingPhase.HOLD -> colors.hold
+        BreathingPhase.EXHALE -> colors.exhale
+        BreathingPhase.REST -> colors.rest
+    }
 }
 
 @Composable
@@ -231,6 +243,7 @@ fun BreathingExerciseCard(
         BreathingPhase.REST -> 0.85f
     }
 
+    val phaseColor = currentPhase.themeColor()
     val animatedScale by animateFloatAsState(
         targetValue = if (isRunning) targetScale else 1.0f,
         animationSpec = tween(
@@ -245,8 +258,8 @@ fun BreathingExerciseCard(
             .fillMaxWidth()
             .testTag("breathing_exercise_card"),
         shape = RoundedCornerShape(28.dp),
-        border = BorderStroke(1.dp, MinimalBorder),
-        colors = CardDefaults.cardColors(containerColor = Color.White)
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
         Column(modifier = Modifier.padding(20.dp)) {
             Column(
@@ -258,13 +271,13 @@ fun BreathingExerciseCard(
                         modifier = Modifier
                             .size(42.dp)
                             .clip(CircleShape)
-                            .background(Color(0xFFECFDF5)),
+                            .background(LocalStatusColors.current.normalContainer),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             imageVector = Icons.Default.SelfImprovement,
                             contentDescription = null,
-                            tint = Color(0xFF059669),
+                            tint = LocalStatusColors.current.normalForeground,
                             modifier = Modifier.size(24.dp)
                         )
                     }
@@ -275,25 +288,25 @@ fun BreathingExerciseCard(
                         Text(
                             text = "Respiração Guiada",
                             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                            color = Color(0xFF191C1E)
+                            color = MaterialTheme.colorScheme.onSurface
                         )
                         Text(
                             text = "Orientação visual e vibração",
                             style = MaterialTheme.typography.bodyMedium,
-                            color = Color(0xFF44474E)
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
 
                 Surface(
                     shape = RoundedCornerShape(14.dp),
-                    color = Color(0xFFECFDF5)
+                    color = LocalStatusColors.current.normalContainer
                 ) {
                     Text(
                         text = if (readFailed) "Tempo salvo indisponível" else totalBreathingSeconds?.let { "Tempo salvo: ${it / 60}\u00A0min ${it % 60}\u00A0s" }
                             ?: "Carregando tempo salvo…",
                         style = MaterialTheme.typography.bodyLarge,
-                        color = Color(0xFF047857),
+                        color = LocalStatusColors.current.normalForeground,
                         modifier = Modifier
                             .padding(horizontal = 10.dp, vertical = 6.dp)
                             .testTag("total_breathing_duration_badge")
@@ -317,7 +330,7 @@ fun BreathingExerciseCard(
                     .fillMaxWidth()
                     .height(180.dp)
                     .clip(RoundedCornerShape(24.dp))
-                    .background(Color(0xFFF8FAFC)),
+                    .background(MaterialTheme.colorScheme.surfaceVariant),
                 contentAlignment = Alignment.Center
             ) {
                 // Outer Pulse Ring
@@ -326,7 +339,7 @@ fun BreathingExerciseCard(
                         .size(130.dp)
                         .scale(animatedScale)
                         .clip(CircleShape)
-                        .background(currentPhase.color.copy(alpha = 0.2f))
+                        .background(phaseColor.copy(alpha = 0.2f))
                 )
 
                 // Inner Core Circle
@@ -335,7 +348,7 @@ fun BreathingExerciseCard(
                         .size(90.dp)
                         .scale(if (isRunning) (animatedScale * 0.85f) else 1.0f)
                         .clip(CircleShape)
-                        .background(currentPhase.color),
+                        .background(phaseColor),
                     contentAlignment = Alignment.Center
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -343,14 +356,14 @@ fun BreathingExerciseCard(
                             Text(
                                 text = "$phaseSecondsRemaining",
                                 style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold),
-                                color = if (currentPhase.color.luminance() > 0.179f) Color.Black else Color.White,
+                                color = if (phaseColor.luminance() > 0.179f) Color.Black else Color.White,
                                 modifier = Modifier.testTag("breathing_phase_seconds_text")
                             )
                         } else {
                             Icon(
                                 imageVector = Icons.Default.Air,
                                 contentDescription = null,
-                                tint = Color.White,
+                                tint = MaterialTheme.colorScheme.onPrimary,
                                 modifier = Modifier.size(32.dp)
                             )
                         }
@@ -364,8 +377,8 @@ fun BreathingExerciseCard(
             Surface(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(16.dp),
-                color = currentPhase.color.copy(alpha = 0.1f),
-                border = BorderStroke(1.dp, currentPhase.color.copy(alpha = 0.3f))
+                color = phaseColor.copy(alpha = 0.1f),
+                border = BorderStroke(1.dp, phaseColor.copy(alpha = 0.3f))
             ) {
                 Column(
                     modifier = Modifier
@@ -383,7 +396,7 @@ fun BreathingExerciseCard(
                     Text(
                         text = "Tempo neste exercício: ${sessionTotalSeconds / 60}\u00A0min ${sessionTotalSeconds % 60}\u00A0s",
                         style = MaterialTheme.typography.bodyLarge,
-                        color = Color(0xFF334155),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.testTag("session_timer_text")
                     )
                 }

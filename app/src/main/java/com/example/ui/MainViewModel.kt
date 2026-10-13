@@ -42,6 +42,7 @@ import androidx.lifecycle.asFlow
 import androidx.work.WorkManager
 
 import com.example.ui.components.SyncLogEntry
+import com.example.ui.theme.AppThemeOption
 import com.example.util.HrNotificationHelper
 import com.example.worker.HBandWorkScheduler
 import android.content.Context
@@ -245,6 +246,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _autoReconnectBle = MutableStateFlow(prefs.getBoolean("auto_reconnect_ble", true))
     val autoReconnectBle: StateFlow<Boolean> = _autoReconnectBle.asStateFlow()
+
+    private val _themeOption = MutableStateFlow(
+        AppThemeOption.fromStorage(prefs.getString(AppThemeOption.PREFS_KEY, null)),
+    )
+    val themeOption: StateFlow<AppThemeOption> = _themeOption.asStateFlow()
+
+    fun setThemeOption(option: AppThemeOption) {
+        _themeOption.value = option
+        prefs.edit().putString(AppThemeOption.PREFS_KEY, option.storageKey).apply()
+    }
 
     private val hydrationReadRetries = MutableStateFlow(0)
     private val breathingReadRetries = MutableStateFlow(0)

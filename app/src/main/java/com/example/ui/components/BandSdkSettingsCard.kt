@@ -32,7 +32,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
@@ -53,7 +52,7 @@ import com.example.data.hband.LongSeatUiState
 import com.example.data.hband.NightTurnUiState
 import com.example.data.hband.WearDetectUiState
 import com.example.data.hband.VeepooSessionGate
-import com.example.ui.theme.MinimalBorder
+import com.example.ui.theme.LocalStatusColors
 
 @Composable
 fun BandSdkSettingsCard(
@@ -88,8 +87,8 @@ fun BandSdkSettingsCard(
             .fillMaxWidth()
             .testTag("band_sdk_settings_card"),
         shape = RoundedCornerShape(28.dp),
-        border = BorderStroke(1.dp, MinimalBorder),
-        colors = CardDefaults.cardColors(containerColor = Color.White)
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
         Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -97,13 +96,13 @@ fun BandSdkSettingsCard(
                     modifier = Modifier
                         .size(42.dp)
                         .clip(CircleShape)
-                        .background(Color(0xFFE0F2FE)),
+                        .background(MaterialTheme.colorScheme.primaryContainer),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         imageVector = Icons.Default.Watch,
                         contentDescription = null,
-                        tint = Color(0xFF00639B),
+                        tint = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(24.dp)
                     )
                 }
@@ -112,7 +111,7 @@ fun BandSdkSettingsCard(
                     Text(
                         text = "Opções do meu relógio",
                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                        color = Color(0xFF191C1E)
+                        color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
                         text = if (capabilities.probed) {
@@ -121,7 +120,7 @@ fun BandSdkSettingsCard(
                             "Conecte o relógio para verificar as opções disponíveis."
                         },
                         style = MaterialTheme.typography.bodyLarge,
-                        color = Color(0xFF00639B)
+                        color = MaterialTheme.colorScheme.primary
                     )
                 }
             }
@@ -129,7 +128,7 @@ fun BandSdkSettingsCard(
             if (com.example.BuildConfig.DEBUG) PatientSection("Informações para suporte") { Text(
                 text = capabilityLine(capabilities),
                 style = MaterialTheme.typography.bodySmall,
-                color = Color(0xFF44474E),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.testTag("band_capability_summary")
             ) }
 
@@ -138,14 +137,14 @@ fun BandSdkSettingsCard(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(14.dp))
-                        .background(Color(0xFFFFF4E5))
+                        .background(LocalStatusColors.current.attentionContainer)
                         .padding(12.dp)
                         .testTag("band_sdk_reconnect_hint")
                 ) {
                     Text(
                         text = patientWatchConnectionHint(actionsEnabled),
                         style = MaterialTheme.typography.bodyLarge,
-                        color = Color(0xFF9A3412)
+                        color = LocalStatusColors.current.attentionForeground
                     )
                 }
             }
@@ -202,7 +201,7 @@ fun BandSdkSettingsCard(
                     Text(
                         text = "Recebendo o histórico do relógio…",
                         style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                        color = Color(0xFF00639B),
+                        color = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.testTag("history_sync_phase")
                     )
                     Spacer(modifier = Modifier.height(6.dp))
@@ -211,15 +210,15 @@ fun BandSdkSettingsCard(
                         modifier = Modifier
                             .fillMaxWidth()
                             .testTag("history_sync_progress"),
-                        color = Color(0xFF00639B),
-                        trackColor = Color(0xFFD1E4FF),
+                        color = MaterialTheme.colorScheme.primary,
+                        trackColor = MaterialTheme.colorScheme.primaryContainer,
                     )
                 }
             } else {
                 Text(
                     text = historyReadStatusText(historySync),
                     style = MaterialTheme.typography.bodyLarge,
-                    color = Color(0xFF334155),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.testTag("history_sync_status")
                 )
             }
@@ -228,7 +227,7 @@ fun BandSdkSettingsCard(
                 onClick = onSyncHistory,
                 enabled = actionsEnabled && !historySync.isRunning,
                 shape = RoundedCornerShape(18.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00639B)),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                 modifier = Modifier
                     .fillMaxWidth()
                     .heightIn(min = 56.dp)
@@ -309,7 +308,7 @@ fun BandSdkSettingsCard(
                         onClick = onStartFindByPhone,
                         enabled = actionsEnabled && !findDevice.finding,
                         shape = RoundedCornerShape(16.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00639B)),
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                         modifier = Modifier
                             .fillMaxWidth().heightIn(min = 56.dp)
                             .testTag("find_by_phone_start")
@@ -350,12 +349,12 @@ private fun SettingToggleRow(
             Text(
                 text = title,
                 style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold),
-                color = Color(0xFF191C1E)
+                color = MaterialTheme.colorScheme.onSurface
             )
             Text(
                 text = subtitle,
                 style = MaterialTheme.typography.bodyMedium,
-                color = Color(0xFF44474E)
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
         Switch(
@@ -363,8 +362,8 @@ private fun SettingToggleRow(
             onCheckedChange = onCheckedChange,
             enabled = enabled,
             colors = SwitchDefaults.colors(
-                checkedThumbColor = Color.White,
-                checkedTrackColor = Color(0xFF00639B)
+                checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
+                checkedTrackColor = MaterialTheme.colorScheme.primary
             ),
             modifier = Modifier.testTag(testTag).semantics { contentDescription = title }
         )

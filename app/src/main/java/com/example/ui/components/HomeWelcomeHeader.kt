@@ -31,7 +31,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.graphics.Color
 import com.example.R
 
 @Composable
@@ -71,7 +70,7 @@ fun HomeWelcomeHeader(
             Button(
                 onClick = onEditProfile,
                 shape = RoundedCornerShape(20.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE0F2FE), contentColor = Color(0xFF004A77)),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primaryContainer, contentColor = MaterialTheme.colorScheme.onPrimaryContainer),
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
                 modifier = Modifier.heightIn(min = 56.dp).testTag("header_edit_profile_button"),
             ) { Text("Meu perfil", style = MaterialTheme.typography.labelLarge) }
@@ -80,7 +79,7 @@ fun HomeWelcomeHeader(
             Text(
                 text = "Olá!",
                 style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
-                color = Color(0xFF44474E)
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             if (fullName.isNotBlank()) Text(
                 text = fullName,
@@ -90,7 +89,7 @@ fun HomeWelcomeHeader(
                 ),
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
-                color = Color(0xFF001D31)
+                color = MaterialTheme.colorScheme.onSurface
             )
         }
 

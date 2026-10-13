@@ -48,7 +48,8 @@ class MainActivity : ComponentActivity() {
                     isError = true,
                 )
             }) { checkAndRequestBlePermissions() }
-            MyApplicationTheme {
+            val themeOption by mainViewModel.themeOption.collectAsStateWithLifecycle()
+            MyApplicationTheme(themeOption = themeOption) {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     BleLabFrame(enabled = BuildConfig.BLE_LAB) {
                         StorageStartupScreen(state) { HomeScreen(viewModel = mainViewModel) }

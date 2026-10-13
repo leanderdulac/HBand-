@@ -27,7 +27,6 @@ import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.DeleteSweep
-import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.getValue
@@ -60,8 +59,9 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import com.example.ui.theme.MinimalBorder
+import com.example.ui.theme.AppThemeOption
+import com.example.ui.theme.LocalStatusColors
+import com.example.ui.theme.PillShape
 
 @Composable
 @OptIn(ExperimentalLayoutApi::class)
@@ -105,6 +105,8 @@ fun SettingsTab(
     onStopFindByPhone: () -> Unit = {},
     onHealthRemindChange: (Boolean) -> Unit = {},
     ingestDiagnostics: com.example.data.ingest.IngestDiagnostics = com.example.data.ingest.IngestDiagnostics(),
+    themeOption: AppThemeOption = AppThemeOption.LIGHT,
+    onThemeOptionChange: (AppThemeOption) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val scrollState = rememberScrollState()
@@ -134,12 +136,13 @@ fun SettingsTab(
             }
         }
 
-        // BLE Auto-Reconnect Card
+        // BLE Auto-Reconnect Card — keep above the theme picker so the
+        // reconnect control stays on-screen on a 320×740 settings viewport.
         Card(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(28.dp),
-            border = BorderStroke(1.dp, MinimalBorder),
-            colors = CardDefaults.cardColors(containerColor = Color.White)
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
         ) {
             Row(
                 modifier = Modifier
@@ -160,25 +163,27 @@ fun SettingsTab(
                         text = "Reconectar relógio",
                         modifier = Modifier.fillMaxWidth(),
                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                        color = Color(0xFF191C1E)
+                        color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
                         text = "Tentar conectar novamente quando o relógio perder a conexão.",
                         modifier = Modifier.fillMaxWidth(),
                         style = MaterialTheme.typography.bodySmall,
-                        color = Color(0xFF44474E)
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
                 Switch(
                     checked = autoReconnectBle,
                     onCheckedChange = null,
                     colors = SwitchDefaults.colors(
-                        checkedThumbColor = Color.White,
-                        checkedTrackColor = Color(0xFF00639B)
+                        checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
+                        checkedTrackColor = MaterialTheme.colorScheme.primary
                     ),
                 )
             }
         }
+
+        ThemeSelectorCard(themeOption = themeOption, onThemeOptionChange = onThemeOptionChange)
 
         PatientSection(title = "Opções do relógio", forceExpanded = historySyncState.isRunning || findDeviceState.finding) {
             BandSdkSettingsCard(
@@ -216,8 +221,8 @@ fun SettingsTab(
                     .fillMaxWidth()
                     .testTag("hr_threshold_settings_card"),
                 shape = RoundedCornerShape(28.dp),
-                border = BorderStroke(1.dp, MinimalBorder),
-                colors = CardDefaults.cardColors(containerColor = Color.White)
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
             ) {
                 Column(modifier = Modifier.padding(20.dp)) {
                     // Keep the named switch separate from the heading at large font scales.
@@ -230,13 +235,13 @@ fun SettingsTab(
                                 modifier = Modifier
                                     .size(42.dp)
                                     .clip(CircleShape)
-                                    .background(Color(0xFFFFEBEE)),
+                                    .background(MaterialTheme.colorScheme.errorContainer),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.Favorite,
                                     contentDescription = null,
-                                    tint = Color(0xFFD32F2F),
+                                    tint = MaterialTheme.colorScheme.error,
                                     modifier = Modifier.size(24.dp)
                                 )
                             }
@@ -245,12 +250,12 @@ fun SettingsTab(
                                 Text(
                                     text = "Limites dos avisos",
                                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                                    color = Color(0xFF191C1E)
+                                    color = MaterialTheme.colorScheme.onSurface
                                 )
                                 Text(
                                     text = "Avisos de batimentos neste aparelho",
                                     style = MaterialTheme.typography.bodyMedium,
-                                    color = Color(0xFF44474E)
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
                         }
@@ -277,8 +282,8 @@ fun SettingsTab(
                                 checked = alertsEnabled,
                                 onCheckedChange = null,
                                 colors = SwitchDefaults.colors(
-                                    checkedThumbColor = Color.White,
-                                    checkedTrackColor = Color(0xFFD32F2F)
+                                    checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
+                                    checkedTrackColor = MaterialTheme.colorScheme.error
                                 ),
                             )
                         }
@@ -290,8 +295,8 @@ fun SettingsTab(
                     Surface(
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(16.dp),
-                        color = if (alertsEnabled) Color(0xFFE8F5E9) else Color(0xFFF1F4F9),
-                        border = BorderStroke(1.dp, if (alertsEnabled) Color(0xFFA5D6A7) else Color(0xFFE2E8F0))
+                        color = if (alertsEnabled) LocalStatusColors.current.normalContainer else MaterialTheme.colorScheme.surfaceVariant,
+                        border = BorderStroke(1.dp, if (alertsEnabled) LocalStatusColors.current.normalForeground else MaterialTheme.colorScheme.outlineVariant)
                     ) {
                         Row(
                             modifier = Modifier.padding(14.dp),
@@ -300,7 +305,7 @@ fun SettingsTab(
                             Icon(
                                 imageVector = Icons.Default.NotificationsActive,
                                 contentDescription = null,
-                                tint = if (alertsEnabled) Color(0xFF2E7D32) else Color(0xFF64748B),
+                                tint = if (alertsEnabled) LocalStatusColors.current.normalForeground else MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.size(20.dp)
                             )
                             Spacer(modifier = Modifier.width(10.dp))
@@ -308,7 +313,7 @@ fun SettingsTab(
                                 Text(
                                     text = if (alertsEnabled) "Limites de aviso: $lowerThreshold – $upperThreshold bpm" else "Avisos desativados no aplicativo",
                                     style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                                    color = if (alertsEnabled) Color(0xFF1B5E20) else Color(0xFF64748B)
+                                    color = if (alertsEnabled) LocalStatusColors.current.normalForeground else MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                                 Text(
                                     text = if (alertsEnabled)
@@ -316,7 +321,7 @@ fun SettingsTab(
                                     else
                                         "Use a opção acima para ativar os avisos neste aparelho.",
                                     style = MaterialTheme.typography.bodyMedium,
-                                    color = if (alertsEnabled) Color(0xFF2E7D32) else Color(0xFF64748B)
+                                    color = if (alertsEnabled) LocalStatusColors.current.normalForeground else MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
                         }
@@ -339,17 +344,17 @@ fun SettingsTab(
                                 Text(
                                     text = "Avisar acima de",
                                     style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
-                                    color = Color(0xFF191C1E)
+                                    color = MaterialTheme.colorScheme.onSurface
                                 )
                             }
                             Surface(
                                 shape = RoundedCornerShape(12.dp),
-                                color = Color(0xFFFFEBEE)
+                                color = MaterialTheme.colorScheme.errorContainer
                             ) {
                                 Text(
                                     text = "$upperThreshold bpm",
                                     style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                                    color = Color(0xFFD32F2F),
+                                    color = MaterialTheme.colorScheme.error,
                                     modifier = Modifier
                                         .padding(horizontal = 10.dp, vertical = 4.dp)
                                         .testTag("upper_threshold_display")
@@ -365,9 +370,9 @@ fun SettingsTab(
                             valueRange = 80f..180f,
                             steps = 99,
                             colors = SliderDefaults.colors(
-                                thumbColor = Color(0xFFD32F2F),
-                                activeTrackColor = Color(0xFFD32F2F),
-                                inactiveTrackColor = Color(0xFFFFCDD2)
+                                thumbColor = MaterialTheme.colorScheme.error,
+                                activeTrackColor = MaterialTheme.colorScheme.error,
+                                inactiveTrackColor = MaterialTheme.colorScheme.errorContainer
                             ),
                             enabled = alertsEnabled,
                             modifier = Modifier
@@ -389,11 +394,11 @@ fun SettingsTab(
                                     shape = RoundedCornerShape(12.dp),
                                     border = BorderStroke(
                                         1.dp,
-                                        if (upperThreshold == preset) Color(0xFFD32F2F) else Color(0xFFE2E8F0)
+                                        if (upperThreshold == preset) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.outlineVariant
                                     ),
                                     colors = ButtonDefaults.outlinedButtonColors(
-                                        containerColor = if (upperThreshold == preset) Color(0xFFFFEBEE) else Color.Transparent,
-                                        contentColor = if (upperThreshold == preset) Color(0xFFD32F2F) else Color(0xFF44474E)
+                                        containerColor = if (upperThreshold == preset) MaterialTheme.colorScheme.errorContainer else Color.Transparent,
+                                        contentColor = if (upperThreshold == preset) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
                                     ),
                                     modifier = Modifier
                                         .heightIn(min = 56.dp)
@@ -417,16 +422,16 @@ fun SettingsTab(
                             Text(
                                 text = "Avisar abaixo de",
                                 style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
-                                color = Color(0xFF191C1E)
+                                color = MaterialTheme.colorScheme.onSurface
                             )
                             Surface(
                                 shape = RoundedCornerShape(12.dp),
-                                color = Color(0xFFE3F2FD)
+                                color = MaterialTheme.colorScheme.primaryContainer
                             ) {
                                 Text(
                                     text = "$lowerThreshold bpm",
                                     style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                                    color = Color(0xFF005EA6),
+                                    color = MaterialTheme.colorScheme.primary,
                                     modifier = Modifier
                                         .padding(horizontal = 10.dp, vertical = 4.dp)
                                         .testTag("lower_threshold_display")
@@ -442,9 +447,9 @@ fun SettingsTab(
                             valueRange = 35f..75f,
                             steps = 39,
                             colors = SliderDefaults.colors(
-                                thumbColor = Color(0xFF0288D1),
-                                activeTrackColor = Color(0xFF0288D1),
-                                inactiveTrackColor = Color(0xFFBBDEFB)
+                                thumbColor = MaterialTheme.colorScheme.primary,
+                                activeTrackColor = MaterialTheme.colorScheme.primary,
+                                inactiveTrackColor = MaterialTheme.colorScheme.primaryContainer
                             ),
                             enabled = alertsEnabled,
                             modifier = Modifier
@@ -466,11 +471,11 @@ fun SettingsTab(
                                     shape = RoundedCornerShape(12.dp),
                                     border = BorderStroke(
                                         1.dp,
-                                        if (lowerThreshold == preset) Color(0xFF0288D1) else Color(0xFFE2E8F0)
+                                        if (lowerThreshold == preset) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
                                     ),
                                     colors = ButtonDefaults.outlinedButtonColors(
-                                        containerColor = if (lowerThreshold == preset) Color(0xFFE3F2FD) else Color.Transparent,
-                                        contentColor = if (lowerThreshold == preset) Color(0xFF005EA6) else Color(0xFF44474E)
+                                        containerColor = if (lowerThreshold == preset) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
+                                        contentColor = if (lowerThreshold == preset) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                                     ),
                                     modifier = Modifier
                                         .heightIn(min = 56.dp)
@@ -506,8 +511,8 @@ fun SettingsTab(
                         .fillMaxWidth()
                         .testTag("api_credentials_smoke_test_card"),
                     shape = RoundedCornerShape(28.dp),
-                    border = BorderStroke(1.dp, MinimalBorder),
-                    colors = CardDefaults.cardColors(containerColor = Color.White)
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
                 ) {
                     Column(modifier = Modifier.padding(20.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -515,13 +520,13 @@ fun SettingsTab(
                                 modifier = Modifier
                                     .size(38.dp)
                                     .clip(CircleShape)
-                                    .background(Color(0xFFE0F2FE)),
+                                    .background(MaterialTheme.colorScheme.primaryContainer),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.Settings,
                                     contentDescription = null,
-                                    tint = Color(0xFF0284C7),
+                                    tint = MaterialTheme.colorScheme.primary,
                                     modifier = Modifier.size(20.dp)
                                 )
                             }
@@ -530,12 +535,12 @@ fun SettingsTab(
                                 Text(
                                     text = "Conexão com o serviço",
                                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                                    color = Color(0xFF191C1E)
+                                    color = MaterialTheme.colorScheme.onSurface
                                 )
                                 Text(
                                     text = "Verificação de disponibilidade, sem criar leituras.",
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = Color(0xFF0284C7)
+                                    color = MaterialTheme.colorScheme.primary
                                 )
                             }
                         }
@@ -549,7 +554,7 @@ fun SettingsTab(
                         Button(
                             onClick = onTestApiSmoke,
                             shape = RoundedCornerShape(18.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7)),
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .testTag("run_smoke_heart_test_button")
@@ -578,8 +583,8 @@ fun SettingsTab(
                         .fillMaxWidth()
                         .testTag("factory_reset_clean_data_card"),
                     shape = RoundedCornerShape(28.dp),
-                    border = BorderStroke(1.dp, Color(0xFFFFCDD2)),
-                    colors = CardDefaults.cardColors(containerColor = Color.White)
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.errorContainer),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
                 ) {
                     Column(modifier = Modifier.padding(20.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -587,13 +592,13 @@ fun SettingsTab(
                                 modifier = Modifier
                                     .size(38.dp)
                                     .clip(CircleShape)
-                                    .background(Color(0xFFFFEBEE)),
+                                    .background(MaterialTheme.colorScheme.errorContainer),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.DeleteSweep,
                                     contentDescription = null,
-                                    tint = Color(0xFFC62828),
+                                    tint = MaterialTheme.colorScheme.error,
                                     modifier = Modifier.size(20.dp)
                                 )
                             }
@@ -602,12 +607,12 @@ fun SettingsTab(
                                 Text(
                                     text = "Apagar registros locais de teste",
                                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                                    color = Color(0xFFC62828)
+                                    color = MaterialTheme.colorScheme.error
                                 )
                                 Text(
                                     text = "Limpa histórico local, métricas, logs de fila e biometria",
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = Color(0xFF74777F)
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
                         }
@@ -617,7 +622,7 @@ fun SettingsTab(
                         Text(
                             text = "Esta limpeza é uma ferramenta de desenvolvimento. Ela não troca o paciente, não altera sua identificação e não confirma exclusão de dados enviados a outros serviços.",
                             style = MaterialTheme.typography.bodySmall,
-                            color = Color(0xFF44474E)
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
 
                         Spacer(modifier = Modifier.height(16.dp))
@@ -625,7 +630,7 @@ fun SettingsTab(
                         Button(
                             onClick = { showResetConfirmDialog = true },
                             shape = RoundedCornerShape(18.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFC62828)),
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .testTag("reset_all_data_button")
@@ -654,7 +659,7 @@ fun SettingsTab(
                 Text(
                     text = "Zerar todos os dados locais?",
                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                    color = Color(0xFFC62828)
+                    color = MaterialTheme.colorScheme.error
                 )
             },
             text = {
@@ -669,7 +674,7 @@ fun SettingsTab(
                         showResetConfirmDialog = false
                         onResetAllData()
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFC62828))
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
                 ) {
                     Text("Confirmar e Zerar")
                 }
@@ -681,4 +686,69 @@ fun SettingsTab(
             }
         )
     }
+}
+
+@Composable
+internal fun ThemeSelectorCard(
+    themeOption: AppThemeOption,
+    onThemeOptionChange: (AppThemeOption) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = MaterialTheme.colorScheme
+    Card(
+        modifier = modifier.fillMaxWidth().testTag("theme_selector"),
+        colors = CardDefaults.cardColors(containerColor = colors.surface),
+        shape = MaterialTheme.shapes.extraLarge,
+        border = BorderStroke(1.dp, colors.outlineVariant),
+    ) {
+        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("Aparência", style = MaterialTheme.typography.titleLarge)
+            Text(
+                "O tema padrão é claro. Os temas escuros usam as paletas da proposta visual.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = colors.onSurfaceVariant,
+            )
+            AppThemeOption.entries.forEach { option ->
+                val selected = themeOption == option
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 56.dp)
+                        .clip(PillShape)
+                        .testTag("theme_option_${option.storageKey}")
+                        .toggleable(
+                            value = selected,
+                            role = Role.RadioButton,
+                            onValueChange = { if (it) onThemeOptionChange(option) },
+                        )
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Box(
+                        Modifier
+                            .size(22.dp)
+                            .clip(CircleShape)
+                            .background(if (selected) colors.primary else colors.outlineVariant),
+                    )
+                    Column(Modifier.weight(1f)) {
+                        Text(option.label, style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            themeOptionHint(option),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = colors.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+internal fun themeOptionHint(option: AppThemeOption): String = when (option) {
+    AppThemeOption.LIGHT -> "Branco com azul confiança. Padrão do aplicativo."
+    AppThemeOption.DARK_BLUE -> "Fundo escuro com azul confiança."
+    AppThemeOption.DARK_INDIGO -> "Fundo escuro com índigo."
+    AppThemeOption.DARK_GRAPHITE -> "Fundo grafite com acento ciano."
+    AppThemeOption.FOLLOW_SYSTEM -> "Claro ou escuro azul, conforme o celular."
 }

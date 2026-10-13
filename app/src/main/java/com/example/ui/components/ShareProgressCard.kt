@@ -37,14 +37,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.local.HBandSensorMetricEntity
-import com.example.ui.theme.MinimalBorder
 import com.example.util.ProgressImageGenerator
 import com.example.util.ShareProgressData
 import kotlinx.coroutines.CancellationException
@@ -67,8 +65,8 @@ fun ShareProgressCard(
             .fillMaxWidth()
             .testTag("share_progress_card"),
         shape = RoundedCornerShape(28.dp),
-        border = BorderStroke(1.dp, Color(0xFFC7D2FE)),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFFEEF2FF))
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
     ) {
         Column(modifier = Modifier.padding(20.dp)) {
             Row(
@@ -81,13 +79,13 @@ fun ShareProgressCard(
                         modifier = Modifier
                             .size(42.dp)
                             .clip(CircleShape)
-                            .background(Color(0xFF4F46E5)),
+                            .background(MaterialTheme.colorScheme.primary),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             imageVector = Icons.Default.IosShare,
                             contentDescription = null,
-                            tint = Color.White,
+                            tint = MaterialTheme.colorScheme.onPrimary,
                             modifier = Modifier.size(22.dp)
                         )
                     }
@@ -98,12 +96,12 @@ fun ShareProgressCard(
                         Text(
                             text = "Preparar um cartão dos registros",
                             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                            color = Color(0xFF1E1B4B)
+                            color = MaterialTheme.colorScheme.onSurface
                         )
                         Text(
                             text = "Confira os dados antes de escolher com quem compartilhar.",
                             style = MaterialTheme.typography.bodyMedium,
-                            color = Color(0xFF4338CA)
+                            color = MaterialTheme.colorScheme.primary
                         )
                     }
                 }
@@ -114,14 +112,14 @@ fun ShareProgressCard(
             Surface(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(18.dp),
-                color = Color.White,
-                border = BorderStroke(1.dp, Color(0xFFE0E7FF))
+                color = MaterialTheme.colorScheme.surface,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text(
                         text = "O cartão reúne os registros disponíveis dos últimos 7 dias. Cada informação indica seu período. Preparar o cartão ainda não envia nada.",
                         style = MaterialTheme.typography.bodyLarge,
-                        color = Color(0xFF374151)
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
 
                     Spacer(modifier = Modifier.height(14.dp))
