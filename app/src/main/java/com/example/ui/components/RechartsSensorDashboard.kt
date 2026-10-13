@@ -63,7 +63,7 @@ fun RechartsSensorDashboard(
     }
     var selectedMetric by rememberSaveable { mutableStateOf(initialMetric) }
     var menuOpen by remember { mutableStateOf(false) }
-    var showGraph by rememberSaveable { mutableStateOf(false) }
+    var showGraph by rememberSaveable { mutableStateOf(initialMetric != ChartMetricType.SEVEN_DAY_SUMMARY) }
     var period by rememberSaveable { mutableStateOf(ChartPeriod.D7) }
     val now by rememberHistoryTime()
     val records = remember(sensorMetrics, selectedMetric, now) {
