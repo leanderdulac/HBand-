@@ -10,6 +10,8 @@ class HBandBootReceiver : BroadcastReceiver() {
             intent?.action == Intent.ACTION_MY_PACKAGE_REPLACED
         ) {
             HBandBleService.startIfPersistedSession(context)
+            // WorkManager persists work across reboots; KEEP makes this a no-op when already enqueued.
+            com.example.worker.HBandWorkScheduler.schedulePeriodicIngest(context)
         }
     }
 }

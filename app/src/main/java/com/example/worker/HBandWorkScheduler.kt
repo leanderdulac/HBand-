@@ -1,6 +1,7 @@
 package com.example.worker
 
 import android.content.Context
+import androidx.work.BackoffPolicy
 import androidx.work.Constraints
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.ExistingWorkPolicy
@@ -26,6 +27,7 @@ object HBandWorkScheduler {
         )
             .addTag("hband_sync_worker")
             .setConstraints(constraints)
+            .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
             .build()
 
         WorkManager.getInstance(context).enqueueUniquePeriodicWork(
@@ -45,6 +47,7 @@ object HBandWorkScheduler {
         val oneTimeWorkRequest = OneTimeWorkRequestBuilder<HBandIngestWorker>()
             .addTag("hband_sync_worker")
             .setConstraints(constraints)
+            .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
             .build()
 
         WorkManager.getInstance(context).enqueueUniqueWork(
