@@ -136,6 +136,8 @@ fun SettingsTab(
             }
         }
 
+        BatteryOptimizationSettingsCard()
+
         // BLE Auto-Reconnect Card — keep above the theme picker so the
         // reconnect control stays on-screen on a 320×740 settings viewport.
         Card(

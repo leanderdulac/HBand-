@@ -172,6 +172,8 @@ fun HomeScreen(
 
     PatientNotificationEffect(notification, snackbarHostState, viewModel::dismissNotification)
 
+    com.example.ui.components.BatteryOptimizationPrompt(hasPairedWatch = connectedDevice != null)
+
     com.example.ui.components.PatientAdaptiveScaffold(
         modifier = modifier,
         selectedTab = selectedTab,
