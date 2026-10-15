@@ -1,6 +1,7 @@
 import CoreBluetooth
 import Foundation
 import os
+import SwiftUI
 import UIKit
 import VeepooBleSDK
 import shared
@@ -540,7 +541,7 @@ final class VeepooSession: NSObject, ObservableObject {
     }
 
     private func resumeSession(_ peripheral: CBPeripheral) {
-        let model = VPPeripheralModel(peripher: peripheral)
+        guard let model = VPPeripheralModel(peripher: peripheral) else { return }
         let watch = ScannedWatch(
             name: lastName ?? peripheral.name ?? "VE30",
             address: lastAddress ?? peripheral.identifier.uuidString,
@@ -561,7 +562,7 @@ final class VeepooSession: NSObject, ObservableObject {
     }
 
     private func connectRetrieved(_ peripheral: CBPeripheral) {
-        let model = VPPeripheralModel(peripher: peripheral)
+        guard let model = VPPeripheralModel(peripher: peripheral) else { return }
         let watch = ScannedWatch(
             name: lastName ?? peripheral.name ?? "VE30",
             address: lastAddress ?? peripheral.identifier.uuidString,
@@ -694,7 +695,7 @@ final class VeepooCentralForwarder: NSObject, CBCentralManagerDelegate {
     }
 
     func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
-        sdkDelegate?.centralManager?(central, didDisconnect: peripheral, error: error)
+        sdkDelegate?.centralManager?(central, didDisconnectPeripheral: peripheral, error: error)
         Task { @MainActor in
             self.session?.onDidDisconnect(peripheral, reason: error?.localizedDescription ?? "desconectado")
         }

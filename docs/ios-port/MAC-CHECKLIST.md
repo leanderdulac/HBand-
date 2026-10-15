@@ -98,5 +98,6 @@ Rebuild `shared.framework` after pulling this branch (`./iosApp/Scripts/embed-sh
 - HTTP 200 no Core com chave real
 - Restauração de verdade em background
 
-Ajuste fino de nomes Swift do SDK, se o Xcode reclamar, é esperado
-nesta fase (o vendor mistura `VP*` e `Ble*`).
+**Antes de pushar Swift do Veepoo:** grep `iosApp/Vendor/VeepooBleSDK.framework/Headers`
+pelos selectors e `init` (`initWithPeripher` é failable; `didDisconnectPeripheral:`,
+não `didDisconnect:`; views SwiftUI precisam de `import SwiftUI`). Linux CI não pega.
