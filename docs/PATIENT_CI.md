@@ -7,7 +7,7 @@ Android Verify executa em PRs (inclusive bases empilhadas) e push em main.
 | --- | --- |
 | android-lint | lintDebug, lintRelease |
 | android-compile | compileReleaseKotlin, compileDebugAndroidTestKotlin |
-| android-test | testDebugUnitTest |
+| android-test | testDebugUnitTest, :shared:jvmTest |
 | android-build | assembleDebug |
 
 Cada job confere o HEAD exato informado pelo evento antes/depois da execução.

@@ -25,3 +25,4 @@ dependencyResolutionManagement {
 rootProject.name = "HBand HealthSync"
 
 include(":app")
+include(":shared")

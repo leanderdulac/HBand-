@@ -1,0 +1,17 @@
+// Placeholders. Leandro replaces DEVELOPMENT_TEAM with the Next2U Team ID
+// in Xcode (Signing & Capabilities) before the first archive / TestFlight.
+// Do not commit a real distribution certificate.
+
+PRODUCT_NAME = Next2U Paciente
+PRODUCT_BUNDLE_IDENTIFIER = br.com.next2u.saude.paciente
+DEVELOPMENT_TEAM = TEAMIDXXXX
+CODE_SIGN_STYLE = Automatic
+MARKETING_VERSION = 0.1.0
+CURRENT_PROJECT_VERSION = 1
+IPHONEOS_DEPLOYMENT_TARGET = 16.0
+TARGETED_DEVICE_FAMILY = 1,2
+SWIFT_VERSION = 5.0
+GENERATE_INFOPLIST_FILE = NO
+INFOPLIST_FILE = Next2UPaciente/Info.plist
+ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon
+SUPPORTED_PLATFORMS = iphoneos iphonesimulator
