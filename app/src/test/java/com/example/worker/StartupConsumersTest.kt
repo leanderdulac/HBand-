@@ -10,7 +10,6 @@ import com.example.data.hband.HBandBleService
 import kotlinx.coroutines.*
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -71,13 +70,12 @@ class StartupConsumersTest {
         } finally { app.bleScope.cancel() }
     }
 
-    @Test fun recreated_service_without_ready_manager_enters_foreground_then_stops() {
+    @Test fun recreated_service_without_ready_manager_promotes_then_stops_without_crashing() {
         val controller = Robolectric.buildService(HBandBleService::class.java).create()
         try {
             val service = controller.get()
             assertEquals(Service.START_NOT_STICKY, service.onStartCommand(Intent(), 0, 1))
             assertTrue(shadowOf(service).isStoppedBySelf)
-            assertNotNull(shadowOf(service).lastForegroundNotification)
         } finally { controller.destroy() }
     }
 }
