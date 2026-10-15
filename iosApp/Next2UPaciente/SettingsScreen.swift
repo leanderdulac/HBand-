@@ -43,7 +43,11 @@ struct SettingsScreen: View {
             .background(palette.background.ignoresSafeArea())
             .navigationTitle("Ajustes")
             .sheet(isPresented: $showProfile) {
-                ProfileEditorSheet(onClose: { showProfile = false })
+                ProfileEditorSheet(onClose: {
+                    showProfile = false
+                    session.notifyProfileChanged()
+                })
+                .environment(\.patientPalette, palette)
             }
             .onChange(of: autoReconnect) { value in
                 session.setAutoReconnect(value)
@@ -233,6 +237,7 @@ struct SettingsScreen: View {
     }
 }
 
+/// Android `UserProfileDialog` fields, labels and validation. No invented clinical fields.
 struct ProfileEditorSheet: View {
     @Environment(\.patientPalette) private var palette
     var onClose: () -> Void
@@ -246,75 +251,251 @@ struct ProfileEditorSheet: View {
     @State private var contact = ""
     @State private var notes = ""
     @State private var patientId = ""
+    @State private var profileId = "CURRENT_USER"
+    @State private var goalsExpanded = false
+    @State private var identityExpanded = false
+    @State private var confirmDiscard = false
+    @State private var saveFailed = false
+
+    private var parsedAge: Int32? { profileInt(age) }
+    private var parsedHeight: Float? { profileDecimal(height) }
+    private var parsedWeight: Float? { profileDecimal(weight) }
+    private var parsedSteps: Int32? { profileInt(steps) }
+    private var parsedWater: Int32? { profileInt(water) }
+    private var nameValid: Bool { !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    private var valid: Bool {
+        nameValid && parsedAge != nil && parsedHeight != nil && parsedWeight != nil &&
+            parsedSteps != nil && parsedWater != nil
+    }
 
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
-                    field("Nome", $name)
-                    field("Idade", $age)
-                    field("Sexo", $gender)
-                    field("Altura (cm)", $height)
-                    field("Peso (kg)", $weight)
-                    field("Meta de passos", $steps)
-                    field("Meta de água (ml)", $water)
-                    field("Contato de emergência", $contact)
-                    field("Notas", $notes)
-                    field("patient_id", $patientId)
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("Este é o perfil salvo neste aparelho. Confira seus dados antes de salvar.")
+                        .font(.system(size: 17))
+                    field("Nome completo", $name, tag: "input_profile_name", error: !nameValid, kind: .text)
+                    field("Idade em anos", $age, tag: "input_age", error: parsedAge == nil, kind: .number)
+                    field("Gênero", $gender, tag: "input_gender", error: false, kind: .text)
+                    field("Altura em centímetros", $height, tag: "input_height", error: parsedHeight == nil, kind: .decimal)
+                    field("Peso em quilos", $weight, tag: "input_weight", error: parsedWeight == nil, kind: .decimal)
+                    disclosure("Metas e contato", expanded: $goalsExpanded) {
+                        Text("Metas cadastradas").font(.system(size: 17, weight: .semibold))
+                        field("Meta de passos por dia", $steps, tag: "input_step_goal", error: parsedSteps == nil, kind: .number)
+                        field("Meta de água em mL por dia", $water, tag: "input_water_goal", error: parsedWater == nil, kind: .number)
+                        field("Contato de emergência", $contact, tag: "input_emergency_contact", error: false, kind: .phone)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Observações")
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(palette.onSurfaceVariant)
+                            TextField("Observações", text: $notes, axis: .vertical)
+                                .font(.system(size: 17))
+                                .lineLimit(2...6)
+                                .frame(minHeight: PatientTheme.minTouch)
+                                .accessibilityIdentifier("input_medical_notes")
+                        }
+                    }
+                    disclosure("Identificação do cadastro", expanded: $identityExpanded) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Identificação do paciente")
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(palette.onSurfaceVariant)
+                            Text(patientId)
+                                .font(.system(size: 17))
+                                .frame(maxWidth: .infinity, minHeight: PatientTheme.minTouch, alignment: .leading)
+                                .accessibilityIdentifier("input_patient_id")
+                        }
+                        Text("Esta identificação vincula os registros ao cadastro. Se precisar corrigi-la, fale com a equipe responsável.")
+                            .font(.system(size: 15))
+                            .foregroundStyle(palette.onSurfaceVariant)
+                    }
+                    if !valid {
+                        Text("Confira os campos marcados antes de salvar.")
+                            .font(.system(size: 17))
+                            .foregroundStyle(palette.statusAlertForeground)
+                    }
+                    if saveFailed {
+                        Text("Não foi possível gravar o perfil neste aparelho.")
+                            .font(.system(size: 17))
+                            .foregroundStyle(palette.statusAlertForeground)
+                    }
                     Button("Salvar perfil") { save() }
                         .buttonStyle(PatientPrimaryButton())
+                        .disabled(!valid)
+                        .opacity(valid ? 1 : 0.5)
+                        .accessibilityIdentifier("btn_save_profile")
                 }
+                .foregroundStyle(palette.onSurface)
                 .padding(PatientTheme.margin)
             }
             .background(palette.background.ignoresSafeArea())
             .navigationTitle("Meu perfil")
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Fechar", action: onClose) } }
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancelar", action: requestClose)
+                }
+            }
             .onAppear { load() }
+            .sheet(isPresented: $confirmDiscard) {
+                discardSheet
+            }
         }
+        .accessibilityIdentifier("profile_editor")
     }
 
-    private func field(_ label: String, _ text: Binding<String>) -> some View {
+    private var discardSheet: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Sair sem salvar?")
+                .font(.system(size: 22, weight: .semibold))
+            Text("Você alterou seu perfil. Se sair agora, essas alterações serão perdidas.")
+                .font(.system(size: 17))
+            Button("Continuar editando") { confirmDiscard = false }
+                .buttonStyle(PatientPrimaryButton())
+                .accessibilityIdentifier("profile_continue_editing")
+            Button("Sair sem salvar") { onClose() }
+                .font(.system(size: 17, weight: .semibold))
+                .frame(maxWidth: .infinity, minHeight: PatientTheme.primaryButton)
+                .accessibilityIdentifier("profile_discard_changes")
+        }
+        .foregroundStyle(palette.onSurface)
+        .padding(PatientTheme.margin)
+        .presentationDetents([.medium])
+        .accessibilityIdentifier("profile_discard_dialog")
+    }
+
+    private enum FieldKind { case text, number, decimal, phone }
+
+    private func field(_ label: String, _ text: Binding<String>, tag: String, error: Bool, kind: FieldKind) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(label).font(.system(size: 15, weight: .semibold)).foregroundStyle(palette.onSurfaceVariant)
             TextField(label, text: text)
                 .font(.system(size: 17))
+                .keyboardType(keyboard(kind))
                 .frame(minHeight: PatientTheme.minTouch)
                 .foregroundStyle(palette.onSurface)
+                .overlay(alignment: .bottom) {
+                    Rectangle()
+                        .fill(error ? palette.statusAlertForeground : palette.outlineVariant)
+                        .frame(height: 1)
+                }
+                .accessibilityIdentifier(tag)
+            if error {
+                Text(errorCopy(kind))
+                    .font(.system(size: 15))
+                    .foregroundStyle(palette.statusAlertForeground)
+            }
         }
     }
 
+    @ViewBuilder
+    private func disclosure<Content: View>(_ title: String, expanded: Binding<Bool>, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Button {
+                expanded.wrappedValue.toggle()
+            } label: {
+                HStack {
+                    Text(title).font(.system(size: 17, weight: .semibold))
+                    Spacer()
+                    Image(systemName: expanded.wrappedValue ? "chevron.up" : "chevron.down")
+                }
+                .foregroundStyle(palette.onSurface)
+                .frame(minHeight: PatientTheme.minTouch)
+            }
+            .buttonStyle(.plain)
+            if expanded.wrappedValue { content() }
+        }
+    }
+
+    private func keyboard(_ kind: FieldKind) -> UIKeyboardType {
+        switch kind {
+        case .text: return .default
+        case .number: return .numberPad
+        case .decimal: return .decimalPad
+        case .phone: return .phonePad
+        }
+    }
+
+    private func errorCopy(_ kind: FieldKind) -> String {
+        switch kind {
+        case .text: return "Preencha este campo."
+        case .number: return "Digite só números, sem vírgula ou sinal de menos."
+        case .decimal: return "Digite um número sem sinal de menos. Você pode usar vírgula."
+        case .phone: return "Preencha este campo."
+        }
+    }
+
+    private func profileInt(_ value: String) -> Int32? {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let parsed = Int32(trimmed, radix: 10), parsed >= 0 else { return nil }
+        return parsed
+    }
+
+    private func profileDecimal(_ value: String) -> Float? {
+        let parsed = Float(value.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: ",", with: "."))
+        guard let parsed, parsed.isFinite, parsed >= 0 else { return nil }
+        return parsed
+    }
+
+    private func commaDecimal(_ value: Float) -> String {
+        String(value).replacingOccurrences(of: ".", with: ",")
+    }
+
     private func load() {
-        let p = PatientStore.shared.profile()
-        name = p.fullName
-        age = "\(p.age)"
-        gender = p.gender
-        height = String(format: "%.0f", p.heightCm)
-        weight = String(format: "%.0f", p.weightKg)
-        steps = "\(p.dailyStepGoal)"
-        water = "\(p.targetWaterMl)"
-        contact = p.emergencyContact
-        notes = p.medicalNotes
-        patientId = p.patientId
+        let profile = PatientStore.shared.profile()
+        profileId = profile.id
+        patientId = profile.patientId
+        name = profile.fullName
+        age = "\(profile.age)"
+        gender = profile.gender
+        height = commaDecimal(profile.heightCm)
+        weight = commaDecimal(profile.weightKg)
+        steps = "\(profile.dailyStepGoal)"
+        water = "\(profile.targetWaterMl)"
+        contact = profile.emergencyContact
+        notes = profile.medicalNotes
+    }
+
+    private var hasChanges: Bool {
+        let profile = PatientStore.shared.profile()
+        return name != profile.fullName ||
+            age != "\(profile.age)" ||
+            gender != profile.gender ||
+            height != commaDecimal(profile.heightCm) ||
+            weight != commaDecimal(profile.weightKg) ||
+            steps != "\(profile.dailyStepGoal)" ||
+            water != "\(profile.targetWaterMl)" ||
+            contact != profile.emergencyContact ||
+            notes != profile.medicalNotes
+    }
+
+    private func requestClose() {
+        if hasChanges { confirmDiscard = true } else { onClose() }
     }
 
     private func save() {
-        let current = PatientStore.shared.profile()
-        _ = PatientStore.shared.saveProfile(
+        guard valid, let parsedAge, let parsedHeight, let parsedWeight, let parsedSteps, let parsedWater else { return }
+        saveFailed = false
+        let saved = PatientStore.shared.saveProfile(
             profile: UserProfile(
-                id: current.id,
-                patientId: patientId.isEmpty ? current.patientId : patientId,
-                fullName: name,
-                age: Int32(age, radix: 10) ?? current.age,
+                id: profileId,
+                patientId: patientId,
+                fullName: name.trimmingCharacters(in: .whitespacesAndNewlines),
+                age: parsedAge,
                 gender: gender,
-                heightCm: Float(height.replacingOccurrences(of: ",", with: ".")) ?? current.heightCm,
-                weightKg: Float(weight.replacingOccurrences(of: ",", with: ".")) ?? current.weightKg,
-                dailyStepGoal: Int32(steps, radix: 10) ?? current.dailyStepGoal,
-                targetWaterMl: Int32(water, radix: 10) ?? current.targetWaterMl,
+                heightCm: parsedHeight,
+                weightKg: parsedWeight,
+                dailyStepGoal: parsedSteps,
+                targetWaterMl: parsedWater,
                 emergencyContact: contact,
                 medicalNotes: notes
             )
         )
-        onClose()
+        if saved {
+            VeepooSession.shared.notifyProfileChanged()
+            onClose()
+        } else {
+            saveFailed = true
+        }
     }
 }
 

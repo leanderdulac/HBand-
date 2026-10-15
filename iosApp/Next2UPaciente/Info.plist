@@ -36,6 +36,10 @@
 	<string>$(NEXT2U_CORE_BASE_URL)</string>
 	<key>Next2UIngestApiKey</key>
 	<string>$(NEXT2U_INGEST_API_KEY)</string>
+	<key>Next2UGeminiApiKey</key>
+	<string>$(NEXT2U_GEMINI_API_KEY)</string>
+	<key>Next2UAiInsightEnabled</key>
+	<string>$(NEXT2U_AI_INSIGHT_ENABLED)</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>bluetooth-central</string>

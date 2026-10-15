@@ -9,10 +9,15 @@ struct HomeScreen: View {
     var onConnectWatch: () -> Void
 
     @AppStorage("auto_ingest_live") private var autoIngest = true
+    @StateObject private var insight = GeminiInsightController()
     @State private var showWatchDetails = false
     @State private var showOtherReadings = false
+    @State private var renameDraft = ""
 
-    private var profileName: String { PatientStore.shared.profile().fullName }
+    private var profileName: String {
+        _ = session.profileRevision
+        return PatientStore.shared.profile().fullName
+    }
     private var now: Int64 { PatientReadings.nowMillis }
     private var latest: SensorMetric? { PatientCharts.shared.latest() }
     private var connected: Bool { session.connected != nil && session.hardwareReady }
@@ -23,6 +28,9 @@ struct HomeScreen: View {
                 VStack(alignment: .leading, spacing: 16) {
                     HomeWelcomeHeader(fullName: profileName, onEditProfile: onShowProfile)
                     deviceCard
+                    if insight.highlightEnabled {
+                        AiInsightHighlightCard(controller: insight)
+                    }
                     vitalGrid
                     latestReadingCard
                     dailySummary
@@ -30,12 +38,27 @@ struct HomeScreen: View {
                         .buttonStyle(PatientPrimaryButton())
                         .accessibilityIdentifier("home_history_button")
                     syncCard
+                    if !insight.highlightEnabled {
+                        GeminiValidationCard()
+                    }
                 }
                 .frame(maxWidth: 720, alignment: .leading)
                 .padding(PatientTheme.margin)
             }
             .background(palette.background.ignoresSafeArea())
             .navigationBarTitleDisplayMode(.inline)
+            .onAppear {
+                renameDraft = session.displayWatchName
+                insight.appear()
+            }
+            .onChange(of: session.profileRevision) { _ in
+                insight.profileDidChange()
+            }
+            .onChange(of: session.watchAlias) { value in
+                if renameDraft.isEmpty || renameDraft == session.connected?.name {
+                    renameDraft = value
+                }
+            }
         }
     }
 
@@ -52,10 +75,11 @@ struct HomeScreen: View {
                 .font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(palette.onSurface)
                 .accessibilityIdentifier("device_connection_status")
-            if let watch = session.connected {
-                Text(watch.name)
+            if session.connected != nil || !session.displayWatchName.isEmpty {
+                Text(session.displayWatchName)
                     .font(.system(size: 17))
                     .foregroundStyle(palette.onSurface)
+                    .accessibilityIdentifier("paired_watch_name")
             }
             Button(connected ? "Salvar e enviar leitura" : "Conectar meu relógio") {
                 if connected { session.flushNow() } else { onConnectWatch() }
@@ -100,6 +124,22 @@ struct HomeScreen: View {
                 .tint(palette.primary)
                 .accessibilityIdentifier("auto_ingest_switch")
                 if connected {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Nome do relógio")
+                            .font(.system(size: 17, weight: .semibold))
+                        TextField("Nome do relógio", text: $renameDraft)
+                            .font(.system(size: 17))
+                            .frame(minHeight: PatientTheme.minTouch)
+                            .accessibilityIdentifier("input_watch_name")
+                        Button("Renomear relógio") { session.renameWatch(renameDraft) }
+                            .buttonStyle(PatientPrimaryButton())
+                            .accessibilityIdentifier("rename_watch_button")
+                        if !session.renameStatus.isEmpty {
+                            Text(session.renameStatus)
+                                .font(.system(size: 15))
+                                .foregroundStyle(palette.onSurfaceVariant)
+                        }
+                    }
                     Button("Desconectar relógio") { session.disconnect() }
                         .buttonStyle(PatientPrimaryButton())
                         .accessibilityIdentifier("disconnect_watch_button")
@@ -328,5 +368,249 @@ struct SavedDayValues: View {
             Text(value ?? "Sem medição disponível")
                 .font(.system(size: 20, weight: .semibold))
         }
+    }
+}
+
+/// Highlighted Android `AiInsightHighlightCard` — shown when `AI_INSIGHT_ENABLED` is true/YES.
+struct AiInsightHighlightCard: View {
+    @Environment(\.patientPalette) private var palette
+    @ObservedObject var controller: GeminiInsightController
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 12) {
+                ZStack {
+                    Circle().fill(palette.surface).frame(width: 44, height: 44)
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(palette.primary)
+                        .accessibilityIdentifier("ai_insight_icon")
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(GeminiInsight.shared.highlightTitle())
+                        .font(.system(size: 22, weight: .bold))
+                        .accessibilityAddTraits(.isHeader)
+                    Text(generatedLabel)
+                        .font(.system(size: 15))
+                        .foregroundStyle(palette.onSurfaceVariant)
+                        .accessibilityIdentifier("ai_insight_generated_at")
+                }
+                Spacer()
+            }
+            insightBody
+            Text(GeminiInsight.shared.reviewLabel())
+                .font(.system(size: 13))
+                .foregroundStyle(palette.onSurfaceVariant)
+                .accessibilityIdentifier("ai_insight_review_label")
+            Button {
+                controller.refresh(force: true)
+            } label: {
+                HStack {
+                    Image(systemName: "arrow.clockwise")
+                    Text(GeminiInsight.shared.refreshLabel())
+                }
+            }
+            .buttonStyle(PatientPrimaryButton())
+            .disabled(controller.isLoading)
+            .opacity(controller.isLoading ? 0.6 : 1)
+            .accessibilityIdentifier("refresh_gemini_insight_button")
+        }
+        .foregroundStyle(palette.onPrimaryContainer)
+        .padding(20)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            LinearGradient(
+                colors: [palette.primaryContainer, palette.primaryContainer.opacity(0.55), palette.ai],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .stroke(palette.primary.opacity(0.35), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .accessibilityIdentifier("ai_insight_highlight_card")
+    }
+
+    @ViewBuilder
+    private var insightBody: some View {
+        if controller.isLoading {
+            VStack(alignment: .leading, spacing: 10) {
+                ProgressView().tint(palette.primary)
+                InsightShimmerLines()
+                Text(GeminiInsight.shared.loadingLabel()).font(.system(size: 17))
+            }
+            .accessibilityIdentifier("ai_insight_loading")
+        } else if controller.failed {
+            Text(GeminiInsight.shared.errorCard())
+                .font(.system(size: 17))
+                .accessibilityIdentifier("ai_insight_error")
+        } else if controller.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            Text(GeminiInsight.shared.emptyCard())
+                .font(.system(size: 17))
+                .accessibilityIdentifier("ai_insight_empty")
+        } else {
+            Text(controller.text)
+                .font(.system(size: 17))
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("gemini_insight_text")
+        }
+    }
+
+    private var generatedLabel: String {
+        guard let date = controller.generatedAt else { return GeminiInsight.shared.sevenDaysLabel() }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "pt-BR")
+        formatter.dateFormat = "HH:mm"
+        return "Gerado às \(formatter.string(from: date))"
+    }
+}
+
+struct GeminiValidationCard: View {
+    @Environment(\.patientPalette) private var palette
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(GeminiInsight.shared.validationTitle())
+                .font(.system(size: 22, weight: .semibold))
+            Text(GeminiInsight.shared.validationBody())
+                .font(.system(size: 17))
+            Text(GeminiInsight.shared.validationHint())
+                .font(.system(size: 15))
+                .foregroundStyle(palette.onSurfaceVariant)
+        }
+        .foregroundStyle(palette.onSurface)
+        .padding(20)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(palette.statusAttentionContainer)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .accessibilityIdentifier("ai_insight_validation_card")
+    }
+}
+
+struct InsightShimmerLines: View {
+    @Environment(\.patientPalette) private var palette
+    @State private var pulse = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach([1.0, 0.92, 0.6], id: \.self) { fraction in
+                GeometryReader { geo in
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(palette.surface)
+                        .frame(width: geo.size.width * fraction, height: 14)
+                        .opacity(pulse ? 0.9 : 0.35)
+                }
+                .frame(height: 14)
+            }
+        }
+        .onAppear {
+            withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
+                pulse = true
+            }
+        }
+    }
+}
+
+@MainActor
+final class GeminiInsightController: ObservableObject {
+    @Published var text = ""
+    @Published var isLoading = false
+    @Published var failed = false
+    @Published var generatedAt: Date?
+
+    private var lastRateLimit: Date?
+    private var lastStarted: Date?
+    private let cooldown: TimeInterval = 60
+    private let minInterval: TimeInterval = 15 * 60
+
+    var highlightEnabled: Bool {
+        GeminiInsight.shared.isHighlightEnabled(
+            flag: VeepooSession.bundledString("Next2UAiInsightEnabled") ?? "YES"
+        )
+    }
+
+    func appear() {
+        guard highlightEnabled, text.isEmpty, !isLoading else { return }
+        refresh(force: true)
+    }
+
+    func profileDidChange() {
+        guard highlightEnabled else { return }
+        refresh(force: true)
+    }
+
+    func refresh(force: Bool) {
+        guard !isLoading else { return }
+        if !force, let lastStarted, Date().timeIntervalSince(lastStarted) < minInterval { return }
+        isLoading = true
+        failed = false
+        lastStarted = Date()
+        let now = PatientReadings.nowMillis
+        Task { await generate(nowMillis: now) }
+    }
+
+    private func generate(nowMillis: Int64) async {
+        let fallback = GeminiInsight.shared.fallbackFromStore(nowMillis: nowMillis)
+        let prompt = GeminiInsight.shared.buildPromptFromStore(nowMillis: nowMillis)
+        guard let prompt else {
+            finish(text: fallback, failed: false)
+            return
+        }
+        let key = VeepooSession.bundledString("Next2UGeminiApiKey") ?? ""
+        if GeminiInsight.shared.isPlaceholderKey(key: key) {
+            finish(text: fallback, failed: false)
+            return
+        }
+        if let lastRateLimit, Date().timeIntervalSince(lastRateLimit) < cooldown {
+            finish(text: fallback, failed: false)
+            return
+        }
+        do {
+            let url = URL(string: GeminiInsight.shared.generateUrl(apiKey: key))!
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.timeoutInterval = 30
+            request.httpBody = try JSONSerialization.data(withJSONObject: [
+                "contents": [["parts": [["text": prompt]]]],
+            ])
+            let (data, response) = try await URLSession.shared.data(for: request)
+            let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+            if code == 429 { lastRateLimit = Date() }
+            if (200...299).contains(code), let parsed = Self.parseText(data), !parsed.isEmpty {
+                finish(text: parsed, failed: false)
+                return
+            }
+            finish(text: fallback, failed: false)
+        } catch {
+            finish(text: fallback, failed: true)
+        }
+    }
+
+    private func finish(text: String, failed: Bool) {
+        self.text = text
+        self.failed = failed
+        self.generatedAt = Date()
+        self.isLoading = false
+    }
+
+    private static func parseText(_ data: Data) -> String? {
+        guard
+            let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let candidates = root["candidates"] as? [[String: Any]],
+            let content = candidates.first?["content"] as? [String: Any]
+        else { return nil }
+        let parts: [[String: Any]]
+        if let typed = content["parts"] as? [[String: Any]] {
+            parts = typed
+        } else if let array = content["parts"] as? NSArray {
+            parts = array.map { $0 }.compactMap { $0 as? [String: Any] }
+        } else {
+            return nil
+        }
+        let text = (parts.first?["text"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (text?.isEmpty == false) ? text : nil
     }
 }
