@@ -1,16 +1,24 @@
 import CoreBluetooth
 import Foundation
+import os
+import SwiftUI
+import UIKit
 import VeepooBleSDK
 import shared
 
+private let bleLog = Logger(subsystem: "br.com.next2u.saude.paciente", category: "ble")
+
 /// P0 Veepoo session: scan, connect, senha 0000, FC ao vivo, SpO₂ e bateria.
-/// Comandos do SDK não são concorrentes — FC e SpO₂ revezam, como no Android.
+///
+/// VeepooBleSDK owns the real `CBCentralManager`. A dummy sidecar with a restore
+/// id never saw the VE30, so iOS did not relaunch this process after suspend.
+/// We replace the SDK manager (same restore id, our forwarder) at launch.
 ///
 /// Enum cases use `rawValue` from `VPPublicDefine.h`. Swift strips ObjC prefixes
-/// (`BleConnectSuccess` → `.connectSuccess`, `VPTestHeartStateTesting` → `.testing`),
-/// so matching on the header names does not compile.
+/// (`BleConnectSuccess` → `.connectSuccess`), so matching header names fails.
 @MainActor
 final class VeepooSession: NSObject, ObservableObject {
+    static let shared = VeepooSession()
     static let defaultPassword = "0000"
     static let restoreId = "br.com.next2u.saude.paciente.ble"
 
@@ -34,8 +42,13 @@ final class VeepooSession: NSObject, ObservableObject {
     @Published var ingestUrl = VeepooSession.bundledString("Next2UCoreBaseUrl")
         ?? "https://healthtech-secure-api-5794833455.us-central1.run.app/"
     @Published var ingestKey = ""
+    @Published var lastBleEvent = "Nenhum evento BLE ainda"
+    @Published var lastBleEventAt: Date?
+    @Published var bleConnectionLabel = "Sem ligação"
+    @Published var lastUploadLabel = "Nenhum envio ainda"
 
     private let manager = VPBleCentralManage.sharedBleManager()!
+    private let forwarder = VeepooCentralForwarder()
     private var lastAddress: String? {
         get { UserDefaults.standard.string(forKey: "last_veepoo_address") }
         set { UserDefaults.standard.set(newValue, forKey: "last_veepoo_address") }
@@ -44,9 +57,17 @@ final class VeepooSession: NSObject, ObservableObject {
         get { UserDefaults.standard.string(forKey: "last_veepoo_name") }
         set { UserDefaults.standard.set(newValue, forKey: "last_veepoo_name") }
     }
+    private var lastPeripheralUUID: String? {
+        get { UserDefaults.standard.string(forKey: "last_veepoo_uuid") }
+        set { UserDefaults.standard.set(newValue, forKey: "last_veepoo_uuid") }
+    }
+    private var autoReconnectEnabled: Bool {
+        UserDefaults.standard.object(forKey: "auto_reconnect_ble") as? Bool ?? true
+    }
+    private var userRequestedDisconnect = false
     private var heartRunning = false
     private var spo2Running = false
-    private var restoreCentral: CBCentralManager?
+    private var heartSamplesThisBurst = 0
 
     struct ScannedWatch: Identifiable, Equatable {
         var id: String { address }
@@ -60,23 +81,31 @@ final class VeepooSession: NSObject, ObservableObject {
         }
     }
 
-    /// Build-time value from Secrets.local.xcconfig via Info.plist; nil if unset.
     static func bundledString(_ key: String) -> String? {
         guard let v = Bundle.main.object(forInfoDictionaryKey: key) as? String else { return nil }
         let t = v.trimmingCharacters(in: .whitespacesAndNewlines)
         return (t.isEmpty || t.hasPrefix("$(")) ? nil : t
     }
 
+    /// Must run on the main thread before `didFinishLaunching` returns so iOS
+    /// can deliver `willRestoreState` (TN3115).
+    static func installAtLaunch() {
+        _ = shared
+    }
+
     override init() {
         super.init()
         manager.isLogEnable = true
         manager.is24HourFormat = true
-        manager.automaticConnection = UserDefaults.standard.object(forKey: "auto_reconnect_ble") as? Bool ?? true
-        manager.connectionTimeout = 30
+        manager.automaticConnection = autoReconnectEnabled
+        // Veepoo's 30s timer cancelled pending iOS connects. Keep the system
+        // pending-connect until the VE30 advertises again.
+        manager.connectionTimeout = .max
         manager.deviceConfirmTimeout = 30
-        startRestorationSidecar()
+        attachRestorableCentral()
         configureIngest()
         refreshLocalStore()
+        note("Sessão BLE criada. Restore id \(Self.restoreId).")
     }
 
     func configureIngest() {
@@ -96,10 +125,23 @@ final class VeepooSession: NSObject, ObservableObject {
         localSummary = PatientStore.shared.localSummary()
     }
 
+    func onStoreReady() {
+        note("Store cifrado pronto.")
+        reconnectLastKnown(reason: "store pronto")
+        flushNow()
+    }
+
+    func handleBecameActive() {
+        note("App em primeiro plano.")
+        reconnectLastKnown(reason: "primeiro plano")
+    }
+
     func startScan() {
+        userRequestedDisconnect = false
         devices = []
         isScanning = true
         sessionMessage = "Procurando o relógio…"
+        note("Scan Veepoo iniciado.")
         manager.veepooSDKStartScanDeviceAndReceiveScanningDevice { [weak self] model in
             guard let self, let model else { return }
             Task { @MainActor in
@@ -128,11 +170,17 @@ final class VeepooSession: NSObject, ObservableObject {
     }
 
     func connect(_ watch: ScannedWatch) {
+        userRequestedDisconnect = false
         stopScan()
         sessionMessage = "Conectando a \(watch.name)…"
         connected = watch
         lastAddress = watch.address
         lastName = watch.name
+        rememberPeripheral(watch.model.peripheral)
+        keepPendingConnect(watch.model.peripheral)
+        manager.deviceShowConfirm = true
+        manager.automaticConnection = autoReconnectEnabled
+        note("Connect Veepoo \(watch.name) \(watch.address)")
         manager.veepooSDKConnectDevice(watch.model, deviceConnect: { [weak self] state in
             Task { @MainActor in
                 self?.handleConnect(state, watch: watch)
@@ -142,49 +190,63 @@ final class VeepooSession: NSObject, ObservableObject {
 
     func setAutoReconnect(_ enabled: Bool) {
         manager.automaticConnection = enabled
+        note("Reconectar automático: \(enabled ? "ligado" : "desligado")")
+        if enabled { reconnectLastKnown(reason: "ajuste") }
     }
 
     func disconnect() {
+        userRequestedDisconnect = true
         stopSensors()
         manager.automaticConnection = false
         manager.veepooSDKDisconnectDevice()
         hardwareReady = false
         connected = nil
+        bleConnectionLabel = "Desligado pelo usuário"
         sessionMessage = "Desconexão solicitada."
+        note("Desconexão pedida pelo usuário. Sem ligação pendente.")
     }
 
     func reconnectLastIfPossible() {
-        guard connected == nil, lastAddress != nil else { return }
-        sessionMessage = "Restaurando a sessão do relógio…"
-        startScan()
+        reconnectLastKnown(reason: "pedido")
     }
 
     /// `DeviceConnectState` in VPPublicDefine.h (BlePoweredOff = 0 … BleConfirmTimeout = 7).
     private func handleConnect(_ state: DeviceConnectState, watch: ScannedWatch) {
         switch state.rawValue {
         case 0:
+            bleConnectionLabel = "Bluetooth desligado"
             sessionMessage = "Ligue o Bluetooth do iPhone."
+            note("Bluetooth desligado.")
         case 1:
+            bleConnectionLabel = "Ligando…"
             sessionMessage = "Conectando…"
+            note("Ligando ao relógio.")
         case 2:
+            bleConnectionLabel = "Ligado, senha"
             sessionMessage = "Ligação feita. Confirmando a senha 0000…"
+            note("GATT ligado. Senha 0000.")
             verifyPassword(watch)
         case 3, 6, 7:
-            sessionMessage = "Falha ou tempo esgotado na ligação. Toque de novo em conectar."
             hardwareReady = false
+            bleConnectionLabel = "Falha ou tempo esgotado"
+            sessionMessage = "Falha ou tempo esgotado na ligação. Mantendo ligação pendente."
+            note("Falha/timeout Veepoo (\(state.rawValue)). Pending connect iOS.")
+            keepPendingConnect(watch.model.peripheral)
+            reconnectLastKnown(reason: "falha \(state.rawValue)")
         case 4:
+            note("Senha ok (callback de ligação).")
             onHandshake(watch)
         case 5:
-            sessionMessage = "A senha padrão 0000 foi recusada. Confira o relógio."
             hardwareReady = false
+            bleConnectionLabel = "Senha recusada"
+            sessionMessage = "A senha padrão 0000 foi recusada. Confira o relógio."
+            note("Senha 0000 recusada.")
         default:
             sessionMessage = "Estado de ligação desconhecido (\(state.rawValue))."
+            note("Estado de ligação \(state.rawValue).")
         }
     }
 
-    /// `veepooSDKSynchronousPasswordWithType:password:SynchronizationResult:`
-    /// `SynchronousPasswordType.VerifyPasswordType = 0`.
-    /// `PasswordSynchronTpye`: 1 success, 5 read success, 6 success+time (usual).
     private func verifyPassword(_ watch: ScannedWatch) {
         manager.veepooSDKSynchronousPassword(
             with: SynchronousPasswordType(rawValue: 0)!,
@@ -194,12 +256,15 @@ final class VeepooSession: NSObject, ObservableObject {
                     guard let self else { return }
                     switch result.rawValue {
                     case 1, 5, 6:
+                        self.note("Senha confirmada (\(result.rawValue)).")
                         self.onHandshake(watch)
                     case 0, 4:
                         self.sessionMessage = "A senha padrão 0000 foi recusada."
                         self.hardwareReady = false
+                        self.note("Senha recusada (\(result.rawValue)).")
                     default:
                         self.sessionMessage = "Confirmação de senha: código \(result.rawValue)."
+                        self.note("Senha código \(result.rawValue).")
                     }
                 }
             }
@@ -207,23 +272,25 @@ final class VeepooSession: NSObject, ObservableObject {
     }
 
     private func onHandshake(_ watch: ScannedWatch) {
-        guard !hardwareReady else { return }
+        if hardwareReady {
+            startHeart()
+            return
+        }
         hardwareReady = true
+        bleConnectionLabel = "Relógio pronto"
         sessionMessage = "Relógio pronto. Lendo dados do dia e depois a frequência cardíaca."
+        note("Handshake. Reinscreve serviços e inicia FC.")
         readBattery()
-        // veepooSdkStartReadDeviceAllDataWithReadStateChangeBlock:
-        // VPReadDeviceBaseDataComplete = 2
         manager.peripheralManage.veepooSdkStartReadDeviceAllData { [weak self] state, _, _, _ in
             Task { @MainActor in
                 if state.rawValue == 2 {
                     self?.sessionMessage = "Histórico do relógio lido. Medindo batimentos…"
+                    self?.note("Histórico do band lido. FC.")
                     self?.startHeart()
                 }
             }
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 8) { [weak self] in
-            if self?.heartRunning == false { self?.startHeart() }
-        }
+        startHeart()
     }
 
     private func readBattery() {
@@ -234,27 +301,30 @@ final class VeepooSession: NSObject, ObservableObject {
         }
     }
 
+    /// Rotate FC / SpO₂ from BLE callbacks only — `asyncAfter` is frozen in background.
     private func startHeart() {
         guard hardwareReady, !heartRunning else { return }
         stopOxygen()
         heartRunning = true
+        heartSamplesThisBurst = 0
         manager.peripheralManage.veepooSDKTestHeartStart(true) { [weak self] state, value in
             Task { @MainActor in
                 guard let self else { return }
-                // VPTestHeartStateTesting = 1, VPTestHeartStateNotWear = 2
                 if state.rawValue == 1, value >= 30, value <= 240 {
                     self.heartRate = Int(value)
                     self.sessionMessage = "Batimentos: \(value) bpm (leitura do relógio)."
                     HeartAlertDelivery.evaluate(heartRate: Int(value))
+                    self.heartSamplesThisBurst += 1
                     self.recordAndFlush()
+                    if self.heartSamplesThisBurst >= 4 {
+                        self.startOxygen()
+                    }
                 }
                 if state.rawValue == 2 {
                     self.sessionMessage = "O relógio não está no pulso."
+                    self.note("Relógio fora do pulso.")
                 }
             }
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 20) { [weak self] in
-            self?.startOxygen()
         }
     }
 
@@ -268,12 +338,9 @@ final class VeepooSession: NSObject, ObservableObject {
                 if value >= 50, value <= 100 {
                     self.spo2 = Int(value)
                     self.recordAndFlush()
+                    self.startHeart()
                 }
             }
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in
-            self?.stopOxygen()
-            self?.startHeart()
         }
     }
 
@@ -296,7 +363,6 @@ final class VeepooSession: NSObject, ObservableObject {
         stopOxygen()
     }
 
-    /// Flush queued rows. If a live reading is on screen, reuse the existing record path.
     func flushNow() {
         if heartRate > 0 || spo2 > 0 {
             recordAndFlush()
@@ -304,8 +370,12 @@ final class VeepooSession: NSObject, ObservableObject {
         }
         configureIngest()
         isFlushing = true
+        let task = beginIngestTask()
         Task {
-            defer { isFlushing = false }
+            defer {
+                self.isFlushing = false
+                self.endIngestTask(task)
+            }
             guard let flush = try? await IngestRuntime.shared.flush() else { return }
             applyFlush(flush)
         }
@@ -339,14 +409,22 @@ final class VeepooSession: NSObject, ObservableObject {
         pendingCount = Int(flush.pendingCount)
         failedCount = Int(IngestRuntime.shared.failedCount())
         lastFlushSyncedCount = Int(flush.syncedCount)
+        lastUploadLabel = "HTTP \(flush.lastHttpCode) · \(flush.message)"
         refreshLocalStore()
         IngestBackground.schedule()
+        bleLog.info("upload http=\(flush.lastHttpCode, privacy: .public) pending=\(flush.pendingCount, privacy: .public)")
     }
 
     private func recordAndFlush() {
+        guard PatientStore.shared.status == .ready else {
+            note("Leitura recebida; store ainda não abriu.")
+            return
+        }
         configureIngest()
         let watch = connected
+        let task = beginIngestTask()
         Task {
+            defer { self.endIngestTask(task) }
             guard let recorded = try? await IngestRuntime.shared.recordLive(
                 deviceId: watch?.address ?? "",
                 deviceModel: watch?.name ?? "VE30",
@@ -372,25 +450,294 @@ final class VeepooSession: NSObject, ObservableObject {
         }
     }
 
-    private func startRestorationSidecar() {
-        restoreCentral = CBCentralManager(
-            delegate: self,
+    private func beginIngestTask() -> UIBackgroundTaskIdentifier {
+        var id = UIBackgroundTaskIdentifier.invalid
+        id = UIApplication.shared.beginBackgroundTask(withName: "next2u.ingest") { [weak self] in
+            self?.endIngestTask(id)
+        }
+        return id
+    }
+
+    private func endIngestTask(_ id: UIBackgroundTaskIdentifier) {
+        if id != .invalid {
+            UIApplication.shared.endBackgroundTask(id)
+        }
+    }
+
+    private func attachRestorableCentral() {
+        forwarder.sdk = manager
+        forwarder.session = self
+        manager.centralManager.delegate = nil
+        let restored = CBCentralManager(
+            delegate: forwarder,
             queue: .main,
             options: [
                 CBCentralManagerOptionRestoreIdentifierKey: Self.restoreId,
                 CBCentralManagerOptionShowPowerAlertKey: false,
             ]
         )
+        manager.centralManager = restored
+        note("CBCentralManager do Veepoo com restore id.")
+    }
+
+    func onCentralState(_ state: CBManagerState) {
+        switch state {
+        case .poweredOn:
+            bleConnectionLabel = hardwareReady ? "Relógio pronto" : "Bluetooth ligado"
+            note("Bluetooth ligado.")
+            reconnectLastKnown(reason: "poweredOn")
+        case .poweredOff:
+            hardwareReady = false
+            bleConnectionLabel = "Bluetooth desligado"
+            sessionMessage = "Ligue o Bluetooth do iPhone."
+            note("Bluetooth desligado. Sem pending connect.")
+        case .unauthorized:
+            bleConnectionLabel = "Bluetooth sem permissão"
+            note("Bluetooth sem permissão.")
+        case .resetting:
+            note("Bluetooth a reiniciar.")
+        default:
+            note("Estado do Bluetooth \(state.rawValue).")
+        }
+    }
+
+    func onWillRestoreState(_ dict: [String: Any]) {
+        let peripherals = (dict[CBCentralManagerRestoredStatePeripheralsKey] as? [CBPeripheral]) ?? []
+        note("willRestoreState: \(peripherals.count) periférico(s).")
+        sessionMessage = "O iOS restaurou o Bluetooth. Repondo a sessão do relógio."
+        if peripherals.isEmpty {
+            reconnectLastKnown(reason: "restore vazio")
+            return
+        }
+        for peripheral in peripherals {
+            lastPeripheralUUID = peripheral.identifier.uuidString
+            rememberPeripheral(peripheral)
+            if peripheral.state == .connected {
+                resumeSession(peripheral)
+            } else {
+                keepPendingConnect(peripheral)
+                connectRetrieved(peripheral)
+            }
+        }
+    }
+
+    func onDidConnect(_ peripheral: CBPeripheral) {
+        lastPeripheralUUID = peripheral.identifier.uuidString
+        rememberPeripheral(peripheral)
+        bleConnectionLabel = "GATT ligado"
+        note("didConnect \(peripheral.identifier.uuidString)")
+        if !hardwareReady {
+            resumeSession(peripheral)
+        }
+    }
+
+    func onDidDisconnect(_ peripheral: CBPeripheral, reason: String) {
+        hardwareReady = false
+        heartRunning = false
+        spo2Running = false
+        bleConnectionLabel = "Desligado"
+        note("didDisconnect \(reason)")
+        keepPendingConnect(peripheral)
+    }
+
+    private func resumeSession(_ peripheral: CBPeripheral) {
+        guard let model = VPPeripheralModel(peripher: peripheral) else { return }
+        let watch = ScannedWatch(
+            name: lastName ?? peripheral.name ?? "VE30",
+            address: lastAddress ?? peripheral.identifier.uuidString,
+            rssi: 0,
+            model: model
+        )
+        connected = watch
+        lastAddress = watch.address
+        lastName = watch.name
+        lastPeripheralUUID = peripheral.identifier.uuidString
+        note("Reposiciona sessão Veepoo (senha + FC).")
+        manager.deviceShowConfirm = false
+        manager.veepooSDKConnectDevice(model, deviceConnect: { [weak self] state in
+            Task { @MainActor in
+                self?.handleConnect(state, watch: watch)
+            }
+        })
+    }
+
+    private func connectRetrieved(_ peripheral: CBPeripheral) {
+        guard let model = VPPeripheralModel(peripher: peripheral) else { return }
+        let watch = ScannedWatch(
+            name: lastName ?? peripheral.name ?? "VE30",
+            address: lastAddress ?? peripheral.identifier.uuidString,
+            rssi: 0,
+            model: model
+        )
+        connected = watch
+        lastAddress = watch.address
+        lastName = watch.name
+        lastPeripheralUUID = peripheral.identifier.uuidString
+        manager.deviceShowConfirm = false
+        manager.automaticConnection = autoReconnectEnabled
+        note("Reconnect UUID \(peripheral.identifier.uuidString)")
+        manager.veepooSDKConnectDevice(model, deviceConnect: { [weak self] state in
+            Task { @MainActor in
+                self?.handleConnect(state, watch: watch)
+            }
+        })
+    }
+
+    private func reconnectLastKnown(reason: String) {
+        guard autoReconnectEnabled, !userRequestedDisconnect else { return }
+        if hardwareReady, manager.isConnected { return }
+        note("Reconnect (\(reason)).")
+        if let uuid = lastPeripheralUUID.flatMap(UUID.init(uuidString:)) {
+            let found = manager.centralManager.retrievePeripherals(withIdentifiers: [uuid])
+            if let peripheral = found.first {
+                keepPendingConnect(peripheral)
+                connectRetrieved(peripheral)
+                return
+            }
+        }
+        if lastAddress != nil {
+            startScan()
+        }
+    }
+
+    private func rememberPeripheral(_ peripheral: CBPeripheral?) {
+        guard let peripheral else { return }
+        lastPeripheralUUID = peripheral.identifier.uuidString
+    }
+
+    /// iOS keeps this connect pending with no app-side timeout until the VE30
+    /// advertises again. Veepoo's 30s timer is disabled (`connectionTimeout = .max`).
+    private func keepPendingConnect(_ peripheral: CBPeripheral?) {
+        guard let peripheral else { return }
+        guard autoReconnectEnabled, !userRequestedDisconnect else { return }
+        lastPeripheralUUID = peripheral.identifier.uuidString
+        manager.centralManager.connect(
+            peripheral,
+            options: [
+                CBConnectPeripheralOptionNotifyOnConnectionKey: true,
+                CBConnectPeripheralOptionNotifyOnDisconnectionKey: true,
+                CBConnectPeripheralOptionNotifyOnNotificationKey: true,
+            ]
+        )
+        note("Pending connect iOS \(peripheral.identifier.uuidString)")
+    }
+
+    func note(_ message: String) {
+        lastBleEvent = message
+        lastBleEventAt = Date()
+        bleLog.info("\(message, privacy: .public)")
+    }
+
+    var diagnosticsLines: [String] {
+        let when = lastBleEventAt.map(Self.stamp) ?? "—"
+        return [
+            "Último evento BLE: \(lastBleEvent) (\(when))",
+            "Ligação: \(bleConnectionLabel)",
+            "Último envio: \(lastUploadLabel)",
+        ]
+    }
+
+    private static func stamp(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "pt-BR")
+        formatter.dateFormat = "dd/MM HH:mm:ss"
+        return formatter.string(from: date)
     }
 }
 
-extension VeepooSession: CBCentralManagerDelegate {
-    nonisolated func centralManagerDidUpdateState(_ central: CBCentralManager) {}
+/// Forwards Core Bluetooth to Veepoo and intercepts restore / disconnect.
+final class VeepooCentralForwarder: NSObject, CBCentralManagerDelegate {
+    weak var sdk: VPBleCentralManage?
+    nonisolated(unsafe) weak var session: VeepooSession?
 
-    nonisolated func centralManager(_ central: CBCentralManager, willRestoreState dict: [String: Any]) {
+    private var sdkDelegate: CBCentralManagerDelegate? { sdk }
+
+    func centralManagerDidUpdateState(_ central: CBCentralManager) {
+        sdkDelegate?.centralManagerDidUpdateState(central)
         Task { @MainActor in
-            sessionMessage = "O iOS restaurou o Bluetooth. Tentando o último relógio."
-            reconnectLastIfPossible()
+            self.session?.onCentralState(central.state)
         }
+    }
+
+    func centralManager(_ central: CBCentralManager, willRestoreState dict: [String: Any]) {
+        sdkDelegate?.centralManager?(central, willRestoreState: dict)
+        Task { @MainActor in
+            self.session?.onWillRestoreState(dict)
+        }
+    }
+
+    func centralManager(
+        _ central: CBCentralManager,
+        didDiscover peripheral: CBPeripheral,
+        advertisementData: [String: Any],
+        rssi RSSI: NSNumber
+    ) {
+        sdkDelegate?.centralManager?(
+            central,
+            didDiscover: peripheral,
+            advertisementData: advertisementData,
+            rssi: RSSI
+        )
+    }
+
+    func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
+        sdkDelegate?.centralManager?(central, didConnect: peripheral)
+        Task { @MainActor in
+            self.session?.onDidConnect(peripheral)
+        }
+    }
+
+    func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
+        sdkDelegate?.centralManager?(central, didFailToConnect: peripheral, error: error)
+        Task { @MainActor in
+            self.session?.onDidDisconnect(peripheral, reason: error?.localizedDescription ?? "falha ao ligar")
+        }
+    }
+
+    func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
+        sdkDelegate?.centralManager?(central, didDisconnectPeripheral: peripheral, error: error)
+        Task { @MainActor in
+            self.session?.onDidDisconnect(peripheral, reason: error?.localizedDescription ?? "desconectado")
+        }
+    }
+
+    func centralManager(
+        _ central: CBCentralManager,
+        connectionEventDidOccur event: CBConnectionEvent,
+        for peripheral: CBPeripheral
+    ) {
+        sdkDelegate?.centralManager?(central, connectionEventDidOccur: event, for: peripheral)
+        Task { @MainActor in
+            if event == .peerConnected {
+                self.session?.onDidConnect(peripheral)
+            } else {
+                self.session?.onDidDisconnect(peripheral, reason: "connectionEvent")
+            }
+        }
+    }
+}
+
+struct BleDiagnosticsCard: View {
+    @Environment(\.patientPalette) private var palette
+    @ObservedObject var session: VeepooSession
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Diagnóstico BLE")
+                .font(.system(size: 17, weight: .semibold))
+            ForEach(session.diagnosticsLines, id: \.self) { line in
+                Text(line).font(.system(size: 15))
+            }
+            Text("Force-quit e Bluetooth desligado param o envio. Isto não confirma o Core.")
+                .font(.system(size: 15))
+                .foregroundStyle(palette.onSurfaceVariant)
+        }
+        .foregroundStyle(palette.onSurface)
+        .padding(20)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(palette.surface)
+        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(palette.outlineVariant, lineWidth: 1))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .accessibilityIdentifier("ble_diagnostics_card")
     }
 }

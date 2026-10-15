@@ -67,6 +67,7 @@ final class StorageSession: ObservableObject {
         }.value
         if opened == .ready {
             PatientStore.shared.attachQueue()
+            VeepooSession.shared.onStoreReady()
         }
         status = opened
     }

@@ -49,14 +49,15 @@ Pressão **não** é medida neste P0 (teste de ~50 s, não é barato).
 Se a chave for placeholder, a fila **conserva** a linha e não chama
 a rede — isso é correto.
 
-## 6. Background (primeiro passo)
+## 6. Background BLE
 
-1. Com o relógio ligado, vá à tela inicial (não mate o app).
-2. Volte ao next2u SAÚDE. A sessão pode ter sido restaurada
-   (`bluetooth-central` + restore id `br.com.next2u.saude.paciente.ble`).
-3. **Force-quit não relança.** No iOS 26, force-quit / alguns toggles
-   só voltam com AccessorySetupKit (fase 6).
-4. Não espere a continuidade do FGS Android.
+Ver `docs/ios-port/BACKGROUND-BLE.md`. Resumo no aparelho:
+
+1. Parear o VE30, deixar FC a enviar. Ir à tela inicial **sem** force-quit.
+2. Envios / Ajustes → **Diagnóstico BLE** (último evento, ligação, HTTP).
+3. Esperar 20–40 min em background: os envios devem continuar ou retomar.
+4. **Force-quit não relança.** Bluetooth off também para. Reinstalar perde o UUID.
+5. Religar o app deve `retrievePeripherals` no último UUID.
 
 ## 7. Visual (Início / Histórico / tema / logo)
 
@@ -97,5 +98,6 @@ Rebuild `shared.framework` after pulling this branch (`./iosApp/Scripts/embed-sh
 - HTTP 200 no Core com chave real
 - Restauração de verdade em background
 
-Ajuste fino de nomes Swift do SDK, se o Xcode reclamar, é esperado
-nesta fase (o vendor mistura `VP*` e `Ble*`).
+**Antes de pushar Swift do Veepoo:** grep `iosApp/Vendor/VeepooBleSDK.framework/Headers`
+pelos selectors e `init` (`initWithPeripher` é failable; `didDisconnectPeripheral:`,
+não `didDisconnect:`; views SwiftUI precisam de `import SwiftUI`). Linux CI não pega.

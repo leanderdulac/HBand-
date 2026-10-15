@@ -16,6 +16,7 @@ struct QueueScreen: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     Next2uBrandLogo()
+                    BleDiagnosticsCard(session: session)
                     Text("Envios")
                         .font(.system(size: 28, weight: .bold))
                         .foregroundStyle(palette.onSurface)
