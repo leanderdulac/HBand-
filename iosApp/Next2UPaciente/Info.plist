@@ -26,6 +26,8 @@
 	<string>O next2u SAÚDE usa o Bluetooth para conectar o relógio e receber suas medições de saúde.</string>
 	<key>NSBluetoothPeripheralUsageDescription</key>
 	<string>O next2u SAÚDE usa o Bluetooth para conectar o relógio e receber suas medições de saúde.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>O next2u SAÚDE usa a localização apenas se o iOS exigir para encontrar o relógio por Bluetooth.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>bluetooth-central</string>

@@ -5,6 +5,7 @@ import SwiftUI
 struct ContentView: View {
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage("app_theme_option") private var themeStorage = AppThemeOption.light.rawValue
+    @StateObject private var session = VeepooSession()
     @State private var tab = 0
 
     private var palette: PatientPalette {
@@ -28,16 +29,15 @@ struct ContentView: View {
             .tabItem { Label("Histórico", systemImage: "chart.xyaxis.line") }
             .tag(1)
 
-            PlaceholderScreen(
-                title: "Relógio",
-                bodyText: "A conexão com o VE30 usa o SDK oficial Veepoo para iOS (HBandSDK/iOS_Ble_SDK). Ainda não está ligado neste esqueleto."
-            )
+            WatchScreen(session: session)
             .tabItem { Label("Relógio", systemImage: "applewatch") }
             .tag(2)
 
             PlaceholderScreen(
                 title: "Envios",
-                bodyText: "A fila para o Core (client_reading_id e lote) vive no módulo Kotlin shared. Este iPhone ainda não envia leituras."
+                bodyText: session.lastFlushMessage.isEmpty
+                    ? "A fila (client_reading_id e lote) vive no módulo Kotlin shared. O último HTTP aparece também em Relógio."
+                    : "Último envio: HTTP \(session.lastHttpCode). \(session.lastFlushMessage)"
             )
             .tabItem { Label("Envios", systemImage: "icloud.and.arrow.up") }
             .tag(3)

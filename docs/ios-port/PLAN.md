@@ -235,11 +235,12 @@ Evidência pública (consultada em 2026-10-15):
 | Wiki | [VeepooSDK iOS API Document](https://github.com/HBandSDK/iOS_Ble_SDK/wiki/VeepooSDK-iOS-API-Document) (doc 1.2.4, 2026-06-17) |
 | Aviso do vendor | iOS permite dois apps no mesmo periférico; **não** deixar o app H Band oficial e o Next2U ligados ao mesmo VE30 |
 
-**Gap de versão:** o Android deste repo usa `vpprotocol-2.3.80.15`. As
-pastas públicas do iOS vão até **2.2.XX.15**. Antes do primeiro pareamento
-VE30 no iPhone, no Mac: abrir o framework, ler `VeepooBleSDKVersion` e
-confirmar com o vendor se há drop 2.3.x iOS. Sem isso, capacidades P1
-(ECG, glicose, composição) podem faltar ou divergir.
+**Gap de versão (fase 2, conferido no binário):** o Android deste repo
+usa `vpprotocol-2.3.80.15`. O drop iOS mais novo é a pasta `2.2.XX.15`;
+a string `VeepooBleSDKVersion` no binário é **2.2.107.15**. Não há 2.3.x
+iOS no repositório oficial. P0 (scan / senha `0000` / FC / SpO₂ /
+bateria) existe nos dois. P1 (ECG, glicose, composição) só depois do
+VE30 físico. Info.plist do framework diz `0.0.0.1` — ignorar.
 
 Reimplementar CoreBluetooth só entra se o vendor não cobrir o firmware
 do piloto. Não começar por engenharia reversa do AAR.
@@ -371,12 +372,19 @@ para a fase de BLE, com `THIRD_PARTY_NOTICE` equivalente.
 - Simulator sobe a casca SwiftUI e liga o framework `shared`
 - Aceite: archive local sem Veepoo ainda
 
-### Fase 2 — BLE P0 (scan / senha / FC / bateria)
+### Fase 2 — BLE P0 (scan / senha / FC / bateria) — em curso nesta PR
 
-- Vendor `VeepooBleSDK.framework` (versão conferida vs 2.3.80.15)
-- Scan, connect, `verifyPassword`, HeartData, bateria, disconnect
-- Capability probe sem assumir P1
-- Aceite: VE30 físico pareado; `is_real_sensor_data=true` só com GATT real
+- [x] Vendor `iosApp/Vendor/VeepooBleSDK.framework` drop **2.2.107.15**
+      (pasta `2.2.XX.15`). Android continua em `vpprotocol-2.3.80.15`.
+      Gap documentado em `iosApp/Vendor/THIRD_PARTY_NOTICE.md`.
+- [x] SwiftUI P0: scan, connect, senha `0000`, FC ao vivo, SpO₂ em
+      revezamento, bateria. PA (~50 s) fica de fora.
+- [x] Leituras entram em `IngestRuntime` (KMP): `client_reading_id` no
+      insert, lote ≤ 50, recibo seletivo.
+- [x] `bluetooth-central` + restore id sidecar; limites em
+      `docs/ios-port/BACKGROUND-BLE.md`.
+- [x] Checklist Mac: `docs/ios-port/MAC-CHECKLIST.md`.
+- [ ] Aceite físico VE30 + HTTP 200 — **só no Mac/iPhone do Leandro**.
 
 ### Fase 3 — Fila e Core
 

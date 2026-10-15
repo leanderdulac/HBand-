@@ -13,17 +13,22 @@ para TestFlight até o Leandro preencher o Team ID no Mac.
 
 ## No Mac (Xcode já instalado)
 
-1. Gerar o framework KMP (só neste Mac; o CI Linux não faz isso):
+O `VeepooBleSDK.framework` é **só iPhoneOS/arm64**. Use um iPhone físico.
+
+1. Gerar o framework KMP e copiar para `iosApp/Vendor/shared.framework`:
 
    ```bash
-   ./gradlew :shared:linkDebugFrameworkIosSimulatorArm64
+   chmod +x iosApp/Scripts/embed-shared.sh
+   ./iosApp/Scripts/embed-shared.sh
    ```
 
 2. Abrir `iosApp/Next2UPaciente.xcodeproj`.
 3. Signing & Capabilities → selecionar o Team Next2U → substituir `TEAMIDXXXX`.
 4. Confirmar ou trocar o bundle ID.
-5. Rodar no Simulator. As cinco abas (Início, Histórico, Relógio, Envios,
-   Ajustes) usam os tokens Claro do PR #17.
+5. Rodar no **iPhone**. Checklist: `docs/ios-port/MAC-CHECKLIST.md`.
+
+SDK Veepoo vendored: **2.2.107.15** (`iosApp/Vendor/`). Android:
+`vpprotocol-2.3.80.15`. Ver `iosApp/Vendor/THIRD_PARTY_NOTICE.md`.
 
 ## Depois do primeiro archive
 
