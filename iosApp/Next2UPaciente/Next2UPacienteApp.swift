@@ -29,6 +29,8 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
         // bluetooth-central + CBCentralManager restore id live on VeepooSession.
+        IngestBackground.register()
+        IngestBackground.schedule()
         return true
     }
 }

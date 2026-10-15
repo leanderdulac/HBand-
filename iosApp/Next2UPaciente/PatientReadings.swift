@@ -8,6 +8,10 @@ enum PatientReadings {
         nsArray(PatientCharts.shared.allMetrics()).compactMap { $0 as? SensorMetric }
     }
 
+    static func queueItems(_ values: Any?) -> [StoredQueueItem] {
+        nsArray(values).compactMap { $0 as? StoredQueueItem }
+    }
+
     static func floats(_ values: Any?) -> [Double] {
         nsArray(values).compactMap { item in
             if let number = item as? NSNumber { return number.doubleValue }

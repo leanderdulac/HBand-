@@ -5,6 +5,7 @@ import com.next2u.healthsync.shared.model.HBandTelemetry
 import com.next2u.healthsync.shared.model.QueuedReading
 import com.next2u.healthsync.shared.model.SleepSummary
 import com.next2u.healthsync.shared.platform.isoUtcNow
+import com.next2u.healthsync.shared.platform.nowMillis
 import com.next2u.healthsync.shared.store.PatientStore
 import io.ktor.client.engine.HttpClientEngine
 import kotlinx.coroutines.sync.Mutex
@@ -35,6 +36,7 @@ data class StoredQueueItem(
     val clientReadingId: String,
     val payloadJson: String,
     val status: String = "PENDING",
+    val queuedAtMillis: Long = 0,
 )
 
 data class RecordOutcome(
@@ -77,6 +79,42 @@ object IngestRuntime {
     fun configurationError(): String? = configuration.status.configurationError
 
     fun pendingCount(): Int = load().count { it.status == "PENDING" }
+
+    fun failedCount(): Int = load().count { it.status == "FAILED" }
+
+    fun items(): List<StoredQueueItem> = load()
+
+    fun visibleItems(): List<StoredQueueItem> = load()
+        .sortedWith(compareBy<StoredQueueItem> {
+            when (it.status) { "FAILED" -> 0; "PENDING" -> 1; else -> 2 }
+        }.thenByDescending { it.queuedAtMillis })
+        .take(30)
+
+    fun statusLabel(status: String): String = when (status) {
+        "PENDING" -> "Aguardando envio"
+        "FAILED" -> "Falha no envio"
+        "SYNCED" -> "Concluído no aplicativo"
+        else -> "Situação do envio indisponível"
+    }
+
+    fun retryFailed(clientReadingId: String) {
+        val items = load().toMutableList()
+        mark(items, clientReadingId, "PENDING")
+        persist(items)
+    }
+
+    fun retryAllFailed() {
+        val items = load().map { if (it.status == "FAILED") it.copy(status = "PENDING") else it }
+        persist(items)
+    }
+
+    fun deleteItem(clientReadingId: String) {
+        persist(load().filterNot { it.clientReadingId == clientReadingId })
+    }
+
+    fun clearAll() {
+        persist(emptyList())
+    }
 
     fun useStore(next: QueueStore) {
         store = next
@@ -134,7 +172,12 @@ object IngestRuntime {
         val payload = IngestPayload.telemetryToJson(telemetry, patientId)
         val id = IngestReadingIdentity.forPayload(payload)
         val items = load().toMutableList()
-        items += StoredQueueItem(clientReadingId = id, payloadJson = payload, status = "PENDING")
+        items += StoredQueueItem(
+            clientReadingId = id,
+            payloadJson = payload,
+            status = "PENDING",
+            queuedAtMillis = nowMillis(),
+        )
         persist(items)
         RecordOutcome(true, id, "Registro na fila com client_reading_id $id.")
     }

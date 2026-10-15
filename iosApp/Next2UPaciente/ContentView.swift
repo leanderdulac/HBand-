@@ -33,8 +33,9 @@ struct ContentView: View {
                 .tabItem { Label("Relógio", systemImage: "applewatch") }
                 .tag(2)
 
-            PlaceholderScreen(title: "Envios", bodyText: enviosBody)
+            QueueScreen(session: session)
                 .tabItem { Label("Envios", systemImage: "icloud.and.arrow.up") }
+                .badge(session.pendingCount)
                 .tag(3)
 
             SettingsPlaceholder(themeStorage: $themeStorage)
@@ -43,16 +44,6 @@ struct ContentView: View {
         }
         .tint(palette.primary)
         .environment(\.patientPalette, palette)
-    }
-
-    private var enviosBody: String {
-        let local = session.localSummary.isEmpty
-            ? "A fila e as medições ficam no store cifrado do Kotlin shared."
-            : session.localSummary
-        if session.lastFlushMessage.isEmpty {
-            return local
-        }
-        return "\(local)\n\nÚltimo envio: HTTP \(session.lastHttpCode). \(session.lastFlushMessage)"
     }
 }
 

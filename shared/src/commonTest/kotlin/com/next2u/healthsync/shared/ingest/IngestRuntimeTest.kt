@@ -109,4 +109,35 @@ class IngestRuntimeTest {
         assertEquals(0, IngestRuntime.pendingCount())
         assertEquals(0, PatientStore.metricCount())
     }
+
+    @Test
+    fun retry_and_delete_keep_patient_copy() = runTest {
+        val recorded = IngestRuntime.recordLive(
+            deviceId = "C4:E3:42:AA:30:A4",
+            deviceModel = "VE30",
+            heartRate = 74,
+            spo2 = 97,
+            systolic = 0,
+            diastolic = 0,
+            temperatureCelsius = 0f,
+            steps = 0,
+            calories = 0f,
+            distanceMeters = 0f,
+            hrvScore = 0,
+            patientId = "PAT-1",
+        )
+        assertTrue(recorded.queued)
+        val id = recorded.clientReadingId!!
+        IngestRuntime.retryFailed(id)
+        assertEquals(1, IngestRuntime.pendingCount())
+        assertEquals("Aguardando envio", IngestRuntime.statusLabel("PENDING"))
+        assertEquals("Falha no envio", IngestRuntime.statusLabel("FAILED"))
+        val visible = IngestRuntime.visibleItems()
+        assertEquals(1, visible.size)
+        assertEquals(id, visible.single().clientReadingId)
+        assertTrue(visible.single().queuedAtMillis > 0)
+        IngestRuntime.deleteItem(id)
+        assertEquals(0, IngestRuntime.pendingCount())
+        assertTrue(IngestRuntime.visibleItems().isEmpty())
+    }
 }
