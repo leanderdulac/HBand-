@@ -2,6 +2,10 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>br.com.next2u.saude.paciente.ingest</string>
+	</array>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>pt-BR</string>
 	<key>CFBundleDisplayName</key>
@@ -28,15 +32,15 @@
 	<string>O next2u SAÚDE usa o Bluetooth para conectar o relógio e receber suas medições de saúde.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>O next2u SAÚDE usa a localização apenas se o iOS exigir para encontrar o relógio por Bluetooth.</string>
+	<key>Next2UCoreBaseUrl</key>
+	<string>$(NEXT2U_CORE_BASE_URL)</string>
+	<key>Next2UIngestApiKey</key>
+	<string>$(NEXT2U_INGEST_API_KEY)</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>bluetooth-central</string>
 		<string>fetch</string>
 		<string>processing</string>
-	</array>
-	<key>BGTaskSchedulerPermittedIdentifiers</key>
-	<array>
-		<string>br.com.next2u.saude.paciente.ingest</string>
 	</array>
 	<key>UILaunchScreen</key>
 	<dict>

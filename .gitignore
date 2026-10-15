@@ -21,3 +21,6 @@ iosApp/Vendor/shared.framework/
 local.properties
 .env
 debug.keystore
+
+# iOS local secrets
+iosApp/Config/Secrets.local.xcconfig

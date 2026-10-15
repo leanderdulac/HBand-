@@ -26,7 +26,8 @@ final class VeepooSession: NSObject, ObservableObject {
     @Published var lastFlushMessage = ""
     @Published var lastHttpCode: Int = 0
     @Published var pendingCount: Int = 0
-    @Published var ingestUrl = "https://healthtech-secure-api-5794833455.us-central1.run.app/"
+    @Published var ingestUrl = VeepooSession.bundledString("Next2UCoreBaseUrl")
+        ?? "https://healthtech-secure-api-5794833455.us-central1.run.app/"
     @Published var ingestKey = ""
 
     private let manager = VPBleCentralManage.sharedBleManager()!
@@ -54,6 +55,13 @@ final class VeepooSession: NSObject, ObservableObject {
         }
     }
 
+    /// Build-time value from Secrets.local.xcconfig via Info.plist; nil if unset.
+    static func bundledString(_ key: String) -> String? {
+        guard let v = Bundle.main.object(forInfoDictionaryKey: key) as? String else { return nil }
+        let t = v.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (t.isEmpty || t.hasPrefix("$(")) ? nil : t
+    }
+
     override init() {
         super.init()
         manager.isLogEnable = true
@@ -70,7 +78,7 @@ final class VeepooSession: NSObject, ObservableObject {
         IngestRuntime.shared.configure(
             baseUrl: ingestUrl,
             overrideKey: key.isEmpty ? nil : key,
-            builtInKey: ""
+            builtInKey: VeepooSession.bundledString("Next2UIngestApiKey") ?? ""
         )
         pendingCount = Int(IngestRuntime.shared.pendingCount())
     }
