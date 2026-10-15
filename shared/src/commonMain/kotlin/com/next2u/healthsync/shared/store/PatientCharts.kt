@@ -17,19 +17,35 @@ object PatientCharts {
         sparklineValues(PatientStore.metrics(), nowMillis) { it.temperatureValue() }
 
     fun heartTrend(nowMillis: Long, period: ChartPeriod): List<TrendPoint> =
-        trendPointsInPeriod(PatientStore.metrics(), nowMillis, period) { it.heartRateValue() }
+        heartTrend(nowMillis, period.days)
 
     fun spo2Trend(nowMillis: Long, period: ChartPeriod): List<TrendPoint> =
-        trendPointsInPeriod(PatientStore.metrics(), nowMillis, period) { it.spo2Value() }
+        spo2Trend(nowMillis, period.days)
 
     fun pressureTrend(nowMillis: Long, period: ChartPeriod): List<TrendPoint> =
-        trendPointsInPeriod(PatientStore.metrics(), nowMillis, period) { it.systolicValue() }
+        pressureTrend(nowMillis, period.days)
 
     fun diastolicTrend(nowMillis: Long, period: ChartPeriod): List<TrendPoint> =
-        trendPointsInPeriod(PatientStore.metrics(), nowMillis, period) { it.diastolicBp.takeIf { v -> v > 0 }?.toFloat() }
+        diastolicTrend(nowMillis, period.days)
 
     fun temperatureTrend(nowMillis: Long, period: ChartPeriod): List<TrendPoint> =
-        trendPointsInPeriod(PatientStore.metrics(), nowMillis, period) { it.temperatureValue() }
+        temperatureTrend(nowMillis, period.days)
+
+    /** Int days so Swift never has to pass a Kotlin Native enum. */
+    fun heartTrend(nowMillis: Long, days: Int): List<TrendPoint> =
+        trendPointsInPeriod(PatientStore.metrics(), nowMillis, days) { it.heartRateValue() }
+
+    fun spo2Trend(nowMillis: Long, days: Int): List<TrendPoint> =
+        trendPointsInPeriod(PatientStore.metrics(), nowMillis, days) { it.spo2Value() }
+
+    fun pressureTrend(nowMillis: Long, days: Int): List<TrendPoint> =
+        trendPointsInPeriod(PatientStore.metrics(), nowMillis, days) { it.systolicValue() }
+
+    fun diastolicTrend(nowMillis: Long, days: Int): List<TrendPoint> =
+        trendPointsInPeriod(PatientStore.metrics(), nowMillis, days) { it.diastolicBp.takeIf { v -> v > 0 }?.toFloat() }
+
+    fun temperatureTrend(nowMillis: Long, days: Int): List<TrendPoint> =
+        trendPointsInPeriod(PatientStore.metrics(), nowMillis, days) { it.temperatureValue() }
 
     fun latest(): SensorMetric? = PatientStore.latestMetric()
 

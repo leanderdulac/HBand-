@@ -238,7 +238,8 @@ struct HomeScreen: View {
         return suffix.isEmpty ? "\(number)" : "\(number)\(suffix)"
     }
 
-    private func detailRow(_ label: String, _ value: String?) {
+    @ViewBuilder
+    private func detailRow(_ label: String, _ value: String?) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Divider()
             Text(label).font(.system(size: 17))

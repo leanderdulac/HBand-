@@ -31,6 +31,8 @@ class ChartSupportTest {
         assertEquals(72f, week.single().value)
         val month = trendPointsInPeriod(metrics, now, ChartPeriod.D30) { it.heartRateValue() }
         assertEquals(1, month.size)
+        val byDays = trendPointsInPeriod(metrics, now, days = 7) { it.heartRateValue() }
+        assertEquals(week, byDays)
         assertEquals("7 dias", ChartPeriod.D7.label)
         assertEquals("30 dias", ChartPeriod.D30.label)
         assertEquals("3 meses", ChartPeriod.M3.label)

@@ -3,17 +3,14 @@ import shared
 
 struct HistoryScreen: View {
     @Environment(\.patientPalette) private var palette
-    @State private var selected = ChartMetricType.sevenDaySummary
-    @State private var period = ChartPeriod.d7
+    @State private var selected = HistoryMetric.sevenDaySummary
+    @State private var period = HistoryPeriod.d7
     @State private var showGraph = false
     @State private var menuOpen = false
     @State private var daysAgo = 0
 
     private var now: Int64 { PatientReadings.nowMillis }
     private var week: [SavedDay] { PatientReadings.savedWeek() }
-    private static let metricTypes: [ChartMetricType] = [
-        .sevenDaySummary, .heartRate, .bloodPressure, .spo2, .temperature, .activity,
-    ]
 
     var body: some View {
         NavigationStack {
@@ -48,7 +45,7 @@ struct HistoryScreen: View {
                 .buttonStyle(PatientPrimaryButton())
                 .accessibilityIdentifier("history_metric_menu")
             if menuOpen {
-                ForEach(Self.metricTypes, id: \.name) { type in
+                ForEach(HistoryMetric.allCases) { type in
                     Button {
                         selected = type
                         menuOpen = false
@@ -116,7 +113,7 @@ struct HistoryScreen: View {
             } else {
                 Text("Até 15 registros mais recentes neste celular. As datas seguem o horário do celular.")
                     .font(.system(size: 17))
-                if selected == .heartRate || selected == .spo2 || selected == .temperature || selected == .bloodPressure {
+                if selected.showsTrend {
                     ChartPeriodRow(selected: $period)
                     Button(showGraph ? "Fechar gráfico" : "Ver gráfico") { showGraph.toggle() }
                         .buttonStyle(PatientPrimaryButton())
@@ -150,20 +147,20 @@ struct HistoryScreen: View {
         case .heartRate:
             caption = ExpectedRangeCopy.caption(for: "heart_rate")
             color = palette.heart
-            points = PatientReadings.points(PatientCharts.shared.heartTrend(nowMillis: now, period: period))
+            points = PatientReadings.points(PatientCharts.shared.heartTrend(nowMillis: now, days: Int32(period.days)))
         case .spo2:
             caption = ExpectedRangeCopy.caption(for: "spo2")
             color = palette.spo2
-            points = PatientReadings.points(PatientCharts.shared.spo2Trend(nowMillis: now, period: period))
+            points = PatientReadings.points(PatientCharts.shared.spo2Trend(nowMillis: now, days: Int32(period.days)))
         case .temperature:
             caption = ExpectedRangeCopy.caption(for: "temperature")
             color = palette.temperature
-            points = PatientReadings.points(PatientCharts.shared.temperatureTrend(nowMillis: now, period: period))
+            points = PatientReadings.points(PatientCharts.shared.temperatureTrend(nowMillis: now, days: Int32(period.days)))
         case .bloodPressure:
             caption = ExpectedRangeCopy.caption(for: "bp_systolic")
             color = palette.pressure
-            points = PatientReadings.points(PatientCharts.shared.pressureTrend(nowMillis: now, period: period))
-            secondary = PatientReadings.points(PatientCharts.shared.diastolicTrend(nowMillis: now, period: period))
+            points = PatientReadings.points(PatientCharts.shared.pressureTrend(nowMillis: now, days: Int32(period.days)))
+            secondary = PatientReadings.points(PatientCharts.shared.diastolicTrend(nowMillis: now, days: Int32(period.days)))
         default:
             caption = ExpectedRangeCopy.unconfigured
             color = palette.primary

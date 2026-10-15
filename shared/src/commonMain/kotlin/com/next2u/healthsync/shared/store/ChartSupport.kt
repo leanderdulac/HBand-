@@ -38,17 +38,24 @@ fun sparklineValues(
 fun trendPointsInPeriod(
     metrics: List<SensorMetric>,
     nowMillis: Long,
-    period: ChartPeriod,
+    days: Int,
     valueOf: (SensorMetric) -> Float?,
 ): List<TrendPoint> {
     if (metrics.isEmpty()) return emptyList()
-    val start = nowMillis - period.days * 24L * 60 * 60 * 1000
+    val start = nowMillis - days * 24L * 60 * 60 * 1000
     return metrics.asSequence()
         .filter { it.timestampMillis > start && it.timestampMillis <= nowMillis }
         .mapNotNull { record -> valueOf(record)?.let { TrendPoint(record.timestampMillis, it) } }
         .sortedBy { it.timestampMillis }
         .toList()
 }
+
+fun trendPointsInPeriod(
+    metrics: List<SensorMetric>,
+    nowMillis: Long,
+    period: ChartPeriod,
+    valueOf: (SensorMetric) -> Float?,
+): List<TrendPoint> = trendPointsInPeriod(metrics, nowMillis, period.days, valueOf)
 
 fun SensorMetric.heartRateValue(): Float? = heartRate.takeIf { it > 0 }?.toFloat()
 fun SensorMetric.spo2Value(): Float? = spO2.takeIf { it > 0 }?.toFloat()

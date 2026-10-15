@@ -217,15 +217,67 @@ struct VitalCard: View {
     }
 }
 
+/// Swift-side period chips. Kotlin Native `ChartPeriod` is a class and is not
+/// visible here without `import shared`; Histórico talks to `:shared` with `days`.
+enum HistoryPeriod: String, CaseIterable, Identifiable {
+    case d7, d30, m3
+
+    var id: String { rawValue }
+
+    var days: Int {
+        switch self {
+        case .d7: return 7
+        case .d30: return 30
+        case .m3: return 90
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .d7: return "7 dias"
+        case .d30: return "30 dias"
+        case .m3: return "3 meses"
+        }
+    }
+}
+
+/// Swift-side metric menu. Same labels as Kotlin `ChartMetricType`.
+enum HistoryMetric: String, CaseIterable, Identifiable {
+    case sevenDaySummary
+    case heartRate
+    case bloodPressure
+    case spo2
+    case temperature
+    case activity
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .sevenDaySummary: return "Resumo de 7 dias"
+        case .heartRate: return "Batimentos"
+        case .bloodPressure: return "Pressão arterial"
+        case .spo2: return "Oxigênio no sangue"
+        case .temperature: return "Temperatura"
+        case .activity: return "Passos e calorias"
+        }
+    }
+
+    var showsTrend: Bool {
+        switch self {
+        case .heartRate, .spo2, .temperature, .bloodPressure: return true
+        case .sevenDaySummary, .activity: return false
+        }
+    }
+}
+
 struct ChartPeriodRow: View {
     @Environment(\.patientPalette) private var palette
-    @Binding var selected: ChartPeriod
-
-    private let periods: [ChartPeriod] = [.d7, .d30, .m3]
+    @Binding var selected: HistoryPeriod
 
     var body: some View {
         HStack(spacing: 8) {
-            ForEach(periods, id: \.name) { period in
+            ForEach(HistoryPeriod.allCases) { period in
                 Button {
                     selected = period
                 } label: {
@@ -241,7 +293,7 @@ struct ChartPeriodRow: View {
                         )
                 }
                 .buttonStyle(.plain)
-                .accessibilityIdentifier("chart_period_\(period.name.lowercased())")
+                .accessibilityIdentifier("chart_period_\(period.rawValue)")
             }
         }
         .accessibilityIdentifier("chart_period_row")
