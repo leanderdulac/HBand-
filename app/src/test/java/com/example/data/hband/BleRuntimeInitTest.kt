@@ -7,6 +7,7 @@ import com.example.HBandHealthSyncApp
 import com.example.resolveRuntimeBleManager
 import com.example.ui.theme.AppThemeOption
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
