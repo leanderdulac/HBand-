@@ -29,7 +29,7 @@ final class VeepooSession: NSObject, ObservableObject {
     @Published var ingestUrl = "https://healthtech-secure-api-5794833455.us-central1.run.app/"
     @Published var ingestKey = ""
 
-    private let manager = VPBleCentralManage.sharedBleManager()
+    private let manager = VPBleCentralManage.sharedBleManager()!
     private var lastAddress: String? {
         get { UserDefaults.standard.string(forKey: "last_veepoo_address") }
         set { UserDefaults.standard.set(newValue, forKey: "last_veepoo_address") }
@@ -112,7 +112,7 @@ final class VeepooSession: NSObject, ObservableObject {
         connected = watch
         lastAddress = watch.address
         lastName = watch.name
-        manager.veepooSDKConnectDevice(watch.model, deviceConnectBlock: { [weak self] state in
+        manager.veepooSDKConnectDevice(watch.model, deviceConnect: { [weak self] state in
             Task { @MainActor in
                 self?.handleConnect(state, watch: watch)
             }
@@ -274,7 +274,7 @@ final class VeepooSession: NSObject, ObservableObject {
         configureIngest()
         let watch = connected
         Task {
-            let recorded = await IngestRuntime.shared.recordLive(
+            guard let recorded = try? await IngestRuntime.shared.recordLive(
                 deviceId: watch?.address ?? "",
                 deviceModel: watch?.name ?? "VE30",
                 heartRate: Int32(heartRate),
@@ -287,11 +287,11 @@ final class VeepooSession: NSObject, ObservableObject {
                 distanceMeters: 0,
                 hrvScore: 0,
                 patientId: "PAT-HBAND-001"
-            )
+            ) else { return }
             lastClientReadingId = recorded.clientReadingId
             pendingCount = Int(IngestRuntime.shared.pendingCount())
             if recorded.queued {
-                let flush = await IngestRuntime.shared.flush()
+                guard let flush = try? await IngestRuntime.shared.flush() else { return }
                 lastFlushMessage = flush.message
                 lastHttpCode = Int(flush.lastHttpCode)
                 pendingCount = Int(flush.pendingCount)

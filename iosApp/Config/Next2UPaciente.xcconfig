@@ -16,5 +16,5 @@ ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon
 SUPPORTED_PLATFORMS = iphoneos
 FRAMEWORK_SEARCH_PATHS = $(inherited) $(SRCROOT)/Vendor $(SRCROOT)/Vendor/shared.framework/..
 HEADER_SEARCH_PATHS = $(inherited) $(SRCROOT)/Vendor/VeepooBleSDK.framework/Headers
-OTHER_LDFLAGS = $(inherited) -ObjC
+OTHER_LDFLAGS = $(inherited) -ObjC -framework JL_BLEKit -framework JLDialUnit -framework ABParTool -framework ZipZap -framework GRDFUSDK -L$(SRCROOT)/Vendor/FMDB -lFMDB -lsqlite3 -lz
 ENABLE_BITCODE = NO

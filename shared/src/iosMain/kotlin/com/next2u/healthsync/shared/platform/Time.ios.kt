@@ -9,7 +9,7 @@ import platform.Foundation.timeZoneWithName
 internal actual fun isoUtcNow(): String {
     val formatter = NSDateFormatter()
     formatter.locale = NSLocale(localeIdentifier = "en_US_POSIX")
-    formatter.timeZone = NSTimeZone.timeZoneWithName("UTC")
+    formatter.timeZone = NSTimeZone.timeZoneWithName("UTC")!!
     formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss'Z'"
     return formatter.stringFromDate(NSDate())
 }
