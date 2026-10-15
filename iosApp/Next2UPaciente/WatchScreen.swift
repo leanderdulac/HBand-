@@ -8,6 +8,7 @@ struct WatchScreen: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: PatientTheme.cardGap) {
+                    Next2uBrandLogo()
                     Text("Relógio")
                         .font(.system(size: 28, weight: .bold))
                         .foregroundStyle(palette.onSurface)
@@ -126,12 +127,14 @@ struct WatchScreen: View {
 }
 
 struct PatientPrimaryButton: ButtonStyle {
+    @Environment(\.patientPalette) private var palette
+
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.system(size: 17, weight: .semibold))
             .frame(maxWidth: .infinity, minHeight: PatientTheme.primaryButton)
-            .foregroundStyle(.white)
-            .background(Color(hex: 0x1450A3).opacity(configuration.isPressed ? 0.7 : 1))
+            .foregroundStyle(palette.onPrimary)
+            .background(palette.primary.opacity(configuration.isPressed ? 0.7 : 1))
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 }

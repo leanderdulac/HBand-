@@ -287,6 +287,22 @@ final class VeepooSession: NSObject, ObservableObject {
         stopOxygen()
     }
 
+    /// Flush queued rows. If a live reading is on screen, reuse the existing record path.
+    func flushNow() {
+        if heartRate > 0 || spo2 > 0 {
+            recordAndFlush()
+            return
+        }
+        configureIngest()
+        Task {
+            guard let flush = try? await IngestRuntime.shared.flush() else { return }
+            lastFlushMessage = flush.message
+            lastHttpCode = Int(flush.lastHttpCode)
+            pendingCount = Int(flush.pendingCount)
+            refreshLocalStore()
+        }
+    }
+
     private func recordAndFlush() {
         configureIngest()
         let watch = connected

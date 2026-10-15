@@ -14,6 +14,7 @@ struct StorageStartupView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
+                Next2uBrandLogo()
                 if status == .opening {
                     Text("Abrindo seus registros")
                         .font(.system(size: 22, weight: .semibold))

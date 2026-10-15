@@ -58,13 +58,23 @@ a rede — isso é correto.
    só voltam com AccessorySetupKit (fase 6).
 4. Não espere a continuidade do FGS Android.
 
-## 7. Store cifrado (fase A)
+## 7. Visual (Início / Histórico / tema / logo)
+
+1. Launch screen: fundo `#F5F8FC` e o wordmark `next2u SAÚDE` (mesmo PNG do Android).
+2. Ícone do app: o pulso laranja do launcher Android, fundo branco, todos os sizes.
+3. Início: logo 48 pt à esquerda, «Olá!», nome, «Meu relógio», cartões de FC/SpO₂ com sparkline, «Registros de hoje», «Ver histórico».
+4. Histórico: seletor, resumo 7 dias, «Ver gráfico», chips 7/30/90. Caption **«não é limiar clínico»**. Sem faixa pintada.
+5. Ajustes → Aparência: Claro (padrão), Escuro azul, Escuro índigo, Escuro grafite + ciano, Seguir o sistema.
+
+## 8. Store cifrado (fase A)
 
 1. Na abertura deve aparecer «Abrindo seus registros» e só então as cinco abas.
 2. Depois de um batimento real, Relógio e Envios mostram «N medições gravadas neste iPhone».
 3. Mate o app e reabra: o número de medições **permanece** (ficheiro cifrado + Keychain).
 4. Se o store falhar: a tela «Não foi possível abrir seus registros» (cópia Android) e **sem** coleta/envio. Não limpe dados.
 5. `Secrets.local.xcconfig` em `/tmp/hband-ios` **nunca** entra no git.
+
+Rebuild `shared.framework` after pulling this branch (`./iosApp/Scripts/embed-shared.sh`).
 
 ## O que este ambiente Linux não verificou
 
