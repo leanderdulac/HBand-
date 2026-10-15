@@ -26,6 +26,8 @@ final class VeepooSession: NSObject, ObservableObject {
     @Published var lastFlushMessage = ""
     @Published var lastHttpCode: Int = 0
     @Published var pendingCount: Int = 0
+    @Published var localMetricCount: Int = 0
+    @Published var localSummary = ""
     @Published var ingestUrl = VeepooSession.bundledString("Next2UCoreBaseUrl")
         ?? "https://healthtech-secure-api-5794833455.us-central1.run.app/"
     @Published var ingestKey = ""
@@ -71,6 +73,7 @@ final class VeepooSession: NSObject, ObservableObject {
         manager.deviceConfirmTimeout = 30
         startRestorationSidecar()
         configureIngest()
+        refreshLocalStore()
     }
 
     func configureIngest() {
@@ -81,6 +84,12 @@ final class VeepooSession: NSObject, ObservableObject {
             builtInKey: VeepooSession.bundledString("Next2UIngestApiKey") ?? ""
         )
         pendingCount = Int(IngestRuntime.shared.pendingCount())
+        refreshLocalStore()
+    }
+
+    func refreshLocalStore() {
+        localMetricCount = Int(PatientStore.shared.metricCount())
+        localSummary = PatientStore.shared.localSummary()
     }
 
     func startScan() {
@@ -298,6 +307,7 @@ final class VeepooSession: NSObject, ObservableObject {
             ) else { return }
             lastClientReadingId = recorded.clientReadingId
             pendingCount = Int(IngestRuntime.shared.pendingCount())
+            refreshLocalStore()
             if recorded.queued {
                 guard let flush = try? await IngestRuntime.shared.flush() else { return }
                 lastFlushMessage = flush.message

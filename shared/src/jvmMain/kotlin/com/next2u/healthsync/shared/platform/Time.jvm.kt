@@ -9,3 +9,5 @@ internal actual fun isoUtcNow(): String =
     SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
         timeZone = TimeZone.getTimeZone("UTC")
     }.format(Date())
+
+internal actual fun nowMillis(): Long = System.currentTimeMillis()

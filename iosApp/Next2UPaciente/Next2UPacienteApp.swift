@@ -1,13 +1,24 @@
 import SwiftUI
 import UIKit
+import shared
 
 @main
 struct Next2UPacienteApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+    @StateObject private var storage = StorageSession()
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            Group {
+                if storage.status == .ready {
+                    ContentView()
+                } else {
+                    StorageStartupView(status: storage.status)
+                }
+            }
+            .task {
+                await storage.openIfNeeded()
+            }
         }
     }
 }

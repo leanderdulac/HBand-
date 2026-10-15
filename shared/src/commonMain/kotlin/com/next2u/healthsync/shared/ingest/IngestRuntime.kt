@@ -5,6 +5,7 @@ import com.next2u.healthsync.shared.model.HBandTelemetry
 import com.next2u.healthsync.shared.model.QueuedReading
 import com.next2u.healthsync.shared.model.SleepSummary
 import com.next2u.healthsync.shared.platform.isoUtcNow
+import com.next2u.healthsync.shared.store.PatientStore
 import io.ktor.client.engine.HttpClientEngine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -123,13 +124,14 @@ object IngestRuntime {
         if (!telemetry.isRealSensorData) {
             return RecordOutcome(false, message = "Somente leituras reais do relógio entram na fila.")
         }
-        if (!deduper.shouldEnqueue(telemetry)) {
-            return RecordOutcome(false, message = "Leitura repetida no intervalo de 30s; mantida só na tela.")
-        }
-        val payload = IngestPayload.telemetryToJson(telemetry, patientId)
+        PatientStore.tryAppendMetric(telemetry)
         if (!IngestPayload.isIngestible(telemetry)) {
             return RecordOutcome(false, message = IngestPayload.MISSING_HR_ERROR)
         }
+        if (!deduper.shouldEnqueue(telemetry)) {
+            return RecordOutcome(false, message = "Leitura repetida no intervalo de 30s; gravada localmente, sem novo envio.")
+        }
+        val payload = IngestPayload.telemetryToJson(telemetry, patientId)
         val id = IngestReadingIdentity.forPayload(payload)
         val items = load().toMutableList()
         items += StoredQueueItem(clientReadingId = id, payloadJson = payload, status = "PENDING")

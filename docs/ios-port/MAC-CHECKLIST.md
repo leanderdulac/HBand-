@@ -58,6 +58,14 @@ a rede — isso é correto.
    só voltam com AccessorySetupKit (fase 6).
 4. Não espere a continuidade do FGS Android.
 
+## 7. Store cifrado (fase A)
+
+1. Na abertura deve aparecer «Abrindo seus registros» e só então as cinco abas.
+2. Depois de um batimento real, Relógio e Envios mostram «N medições gravadas neste iPhone».
+3. Mate o app e reabra: o número de medições **permanece** (ficheiro cifrado + Keychain).
+4. Se o store falhar: a tela «Não foi possível abrir seus registros» (cópia Android) e **sem** coleta/envio. Não limpe dados.
+5. `Secrets.local.xcconfig` em `/tmp/hband-ios` **nunca** entra no git.
+
 ## O que este ambiente Linux não verificou
 
 - Compilação Xcode / Swift vs nomes exatos do SDK (`DeviceConnectState`, etc.)

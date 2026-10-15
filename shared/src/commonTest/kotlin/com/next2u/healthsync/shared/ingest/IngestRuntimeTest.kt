@@ -1,5 +1,6 @@
 package com.next2u.healthsync.shared.ingest
 
+import com.next2u.healthsync.shared.store.PatientStore
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
 import io.ktor.http.HttpHeaders
@@ -9,12 +10,14 @@ import kotlinx.coroutines.test.runTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 class IngestRuntimeTest {
     @BeforeTest
     fun reset() {
+        PatientStore.resetForTests()
         IngestRuntime.useStore(MemoryQueueStore())
         IngestRuntime.useEngine(null)
         IngestRuntime.configure("https://service.invalid/", "synthetic-key", "")
@@ -83,5 +86,27 @@ class IngestRuntimeTest {
         val flush = IngestRuntime.flush()
         assertEquals(IngestApiKey.CONFIGURATION_ERROR, flush.message)
         assertEquals(1, IngestRuntime.pendingCount())
+    }
+
+    @Test
+    fun missing_hr_is_not_queued_and_does_not_need_the_store() = runTest {
+        val recorded = IngestRuntime.recordLive(
+            deviceId = "C4:E3:42:AA:30:A4",
+            deviceModel = "VE30",
+            heartRate = 0,
+            spo2 = 98,
+            systolic = 0,
+            diastolic = 0,
+            temperatureCelsius = 0f,
+            steps = 0,
+            calories = 0f,
+            distanceMeters = 0f,
+            hrvScore = 0,
+            patientId = "PAT-1",
+        )
+        assertFalse(recorded.queued)
+        assertEquals(IngestPayload.MISSING_HR_ERROR, recorded.message)
+        assertEquals(0, IngestRuntime.pendingCount())
+        assertEquals(0, PatientStore.metricCount())
     }
 }
