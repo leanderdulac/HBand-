@@ -4,6 +4,7 @@ import platform.Foundation.NSDate
 import platform.Foundation.NSDateFormatter
 import platform.Foundation.NSLocale
 import platform.Foundation.NSTimeZone
+import platform.Foundation.timeIntervalSince1970
 import platform.Foundation.timeZoneWithName
 
 internal actual fun isoUtcNow(): String {
