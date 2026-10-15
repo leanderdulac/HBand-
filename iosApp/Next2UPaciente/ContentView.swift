@@ -7,6 +7,7 @@ struct ContentView: View {
     @AppStorage("app_theme_option") private var themeStorage = AppThemeOption.light.rawValue
     @ObservedObject private var session = VeepooSession.shared
     @State private var tab = 0
+    @State private var showProfile = false
 
     private var option: AppThemeOption { AppThemeOption.fromStorage(themeStorage) }
     private var resolved: ResolvedAppTheme { PatientTheme.resolve(option, systemDark: colorScheme == .dark) }
@@ -17,7 +18,7 @@ struct ContentView: View {
             HomeScreen(
                 session: session,
                 onShowHistory: { tab = 1 },
-                onShowProfile: { tab = 4 },
+                onShowProfile: { showProfile = true },
                 onConnectWatch: {
                     tab = 2
                     session.startScan()
@@ -45,6 +46,13 @@ struct ContentView: View {
         }
         .tint(palette.primary)
         .environment(\.patientPalette, palette)
+        .sheet(isPresented: $showProfile) {
+            ProfileEditorSheet(onClose: {
+                showProfile = false
+                session.notifyProfileChanged()
+            })
+            .environment(\.patientPalette, palette)
+        }
         .onChange(of: scenePhase) { phase in
             if phase == .active { session.handleBecameActive() }
         }

@@ -3,6 +3,7 @@ import SwiftUI
 struct WatchScreen: View {
     @Environment(\.patientPalette) private var palette
     @ObservedObject var session: VeepooSession
+    @State private var renameDraft = ""
 
     var body: some View {
         NavigationStack {
@@ -21,6 +22,9 @@ struct WatchScreen: View {
 
                     vitalsCard
                     actions
+                    if session.connected != nil {
+                        renameCard
+                    }
                     deviceList
                     ingestCard
                 }
@@ -54,6 +58,30 @@ struct WatchScreen: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(palette.surface)
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    private var renameCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Nome do relógio")
+                .font(.system(size: 22, weight: .semibold))
+            TextField("Nome do relógio", text: $renameDraft)
+                .font(.system(size: 17))
+                .frame(minHeight: PatientTheme.minTouch)
+                .accessibilityIdentifier("watch_tab_input_name")
+            Button("Renomear relógio") { session.renameWatch(renameDraft) }
+                .buttonStyle(PatientPrimaryButton())
+            if !session.renameStatus.isEmpty {
+                Text(session.renameStatus)
+                    .font(.system(size: 15))
+                    .foregroundStyle(palette.onSurfaceVariant)
+            }
+        }
+        .foregroundStyle(palette.onSurface)
+        .padding(PatientTheme.margin)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(palette.surface)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .onAppear { renameDraft = session.displayWatchName }
     }
 
     private var actions: some View {

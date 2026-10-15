@@ -46,6 +46,9 @@ final class VeepooSession: NSObject, ObservableObject {
     @Published var lastBleEventAt: Date?
     @Published var bleConnectionLabel = "Sem ligação"
     @Published var lastUploadLabel = "Nenhum envio ainda"
+    @Published var profileRevision = 0
+    @Published var watchAlias = UserDefaults.standard.string(forKey: "last_veepoo_name") ?? ""
+    @Published var renameStatus = ""
 
     private let manager = VPBleCentralManage.sharedBleManager()!
     private let forwarder = VeepooCentralForwarder()
@@ -55,7 +58,15 @@ final class VeepooSession: NSObject, ObservableObject {
     }
     private var lastName: String? {
         get { UserDefaults.standard.string(forKey: "last_veepoo_name") }
-        set { UserDefaults.standard.set(newValue, forKey: "last_veepoo_name") }
+        set {
+            UserDefaults.standard.set(newValue, forKey: "last_veepoo_name")
+            watchAlias = newValue ?? ""
+        }
+    }
+
+    var displayWatchName: String {
+        if !watchAlias.isEmpty { return watchAlias }
+        return connected?.name ?? ""
     }
     private var lastPeripheralUUID: String? {
         get { UserDefaults.standard.string(forKey: "last_veepoo_uuid") }
@@ -71,7 +82,7 @@ final class VeepooSession: NSObject, ObservableObject {
 
     struct ScannedWatch: Identifiable, Equatable {
         var id: String { address }
-        let name: String
+        var name: String
         let address: String
         let rssi: Int
         let model: VPPeripheralModel
@@ -186,6 +197,44 @@ final class VeepooSession: NSObject, ObservableObject {
                 self?.handleConnect(state, watch: watch)
             }
         })
+    }
+
+    func notifyProfileChanged() {
+        profileRevision += 1
+        refreshLocalStore()
+    }
+
+    /// Local alias plus Veepoo `veepooSDKSettingDeviceNameWithString:resultBlock:` (state 0 ok).
+    func renameWatch(_ proposed: String) {
+        let trimmed = proposed.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            renameStatus = "Digite um nome para o relógio."
+            return
+        }
+        lastName = trimmed
+        if var watch = connected {
+            watch.name = trimmed
+            connected = watch
+        }
+        guard hardwareReady else {
+            renameStatus = "Nome atualizado neste iPhone. Conecte o relógio para gravar no aparelho."
+            return
+        }
+        manager.peripheralManage.veepooSDKSettingDeviceName(with: trimmed) { [weak self] state in
+            Task { @MainActor in
+                switch state {
+                case 0:
+                    self?.renameStatus = "Nome do relógio atualizado."
+                    self?.note("Nome do relógio: \(trimmed)")
+                case 2:
+                    self?.renameStatus = "O nome do relógio é longo demais."
+                case 3:
+                    self?.renameStatus = "O nome do relógio é curto demais."
+                default:
+                    self?.renameStatus = "Não foi possível gravar o nome no relógio. O apelido ficou neste iPhone."
+                }
+            }
+        }
     }
 
     func setAutoReconnect(_ enabled: Bool) {
@@ -437,7 +486,7 @@ final class VeepooSession: NSObject, ObservableObject {
                 calories: 0,
                 distanceMeters: 0,
                 hrvScore: 0,
-                patientId: "PAT-HBAND-001"
+                patientId: PatientStore.shared.profile().patientId
             ) else { return }
             lastClientReadingId = recorded.clientReadingId
             pendingCount = Int(IngestRuntime.shared.pendingCount())

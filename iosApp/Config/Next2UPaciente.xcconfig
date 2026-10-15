@@ -19,5 +19,10 @@ HEADER_SEARCH_PATHS = $(inherited) $(SRCROOT)/Vendor/VeepooBleSDK.framework/Head
 OTHER_LDFLAGS = $(inherited) -ObjC -framework JL_BLEKit -framework JLDialUnit -framework ABParTool -framework ZipZap -framework GRDFUSDK -L$(SRCROOT)/Vendor/FMDB -lFMDB -lsqlite3 -lz
 ENABLE_BITCODE = NO
 
-// Optional local secrets (gitignored): NEXT2U_INGEST_API_KEY, NEXT2U_CORE_BASE_URL
+// Optional local secrets (gitignored): NEXT2U_INGEST_API_KEY, NEXT2U_CORE_BASE_URL,
+// NEXT2U_GEMINI_API_KEY. Do not commit a real Gemini key.
+// Android .env.example keeps AI_INSIGHT_ENABLED=false; pilot iOS builds enable the
+// Início highlight card the same way a true Android .env does.
+NEXT2U_AI_INSIGHT_ENABLED = YES
+NEXT2U_GEMINI_API_KEY = YOUR_GEMINI_API_KEY
 #include? "Secrets.local.xcconfig"
