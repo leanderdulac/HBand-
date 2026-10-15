@@ -64,7 +64,7 @@ enum PatientReadings {
 
     private static func nsArray(_ value: Any?) -> [Any] {
         if let array = value as? [Any] { return array }
-        if let array = value as? NSArray { return array as [Any] }
+        if let array = value as? NSArray { return array.map { $0 } }
         return []
     }
 }
