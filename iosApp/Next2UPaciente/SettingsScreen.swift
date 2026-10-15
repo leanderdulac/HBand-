@@ -129,7 +129,7 @@ struct SettingsScreen: View {
             Text("O tema padrão é claro. Os temas escuros usam as paletas da proposta visual.")
                 .font(.system(size: 15))
                 .foregroundStyle(palette.onSurfaceVariant)
-            ForEach(AppThemeOption.allCases) { option in
+            ForEach(PatientThemeChoices.all) { option in
                 Button { themeStorage = option.rawValue } label: {
                     HStack(spacing: 12) {
                         Circle()
@@ -201,7 +201,7 @@ struct SettingsScreen: View {
                 Slider(value: Binding(get: { Double(lowerThreshold) }, set: { lowerThreshold = Int($0) }), in: 30...80, step: 1)
                     .tint(palette.primary)
                     .accessibilityIdentifier("lower_threshold_slider")
-                Text(AlertCopy.shared.CHANNEL_NAME)
+                Text(AlertCopy.shared.channelName())
                     .font(.system(size: 15, weight: .semibold))
                 Text(AlertCopy.shared.body(currentHr: Int32(upperThreshold + 10), threshold: Int32(upperThreshold)))
                     .font(.system(size: 15))
@@ -303,12 +303,12 @@ struct ProfileEditorSheet: View {
                 id: current.id,
                 patientId: patientId.isEmpty ? current.patientId : patientId,
                 fullName: name,
-                age: Int32(age) ?? current.age,
+                age: Int32(age, radix: 10) ?? current.age,
                 gender: gender,
                 heightCm: Float(height.replacingOccurrences(of: ",", with: ".")) ?? current.heightCm,
                 weightKg: Float(weight.replacingOccurrences(of: ",", with: ".")) ?? current.weightKg,
-                dailyStepGoal: Int32(steps) ?? current.dailyStepGoal,
-                targetWaterMl: Int32(water) ?? current.targetWaterMl,
+                dailyStepGoal: Int32(steps, radix: 10) ?? current.dailyStepGoal,
+                targetWaterMl: Int32(water, radix: 10) ?? current.targetWaterMl,
                 emergencyContact: contact,
                 medicalNotes: notes
             )
@@ -326,9 +326,9 @@ enum HeartAlertDelivery {
         let lower = defaults.object(forKey: "lower_hr_threshold") as? Int ?? 50
         let copy = AlertCopy.shared
         if heartRate > upper {
-            post(title: copy.TITLE_HIGH, body: copy.body(currentHr: Int32(heartRate), threshold: Int32(upper)))
+            post(title: copy.titleHigh(), body: copy.body(currentHr: Int32(heartRate), threshold: Int32(upper)))
         } else if heartRate < lower {
-            post(title: copy.TITLE_LOW, body: copy.body(currentHr: Int32(heartRate), threshold: Int32(lower)))
+            post(title: copy.titleLow(), body: copy.body(currentHr: Int32(heartRate), threshold: Int32(lower)))
         }
     }
 

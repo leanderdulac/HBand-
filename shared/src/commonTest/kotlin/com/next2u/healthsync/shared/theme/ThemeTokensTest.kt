@@ -45,8 +45,11 @@ class ThemeTokensTest {
     @Test
     fun alert_copy_is_frozen() {
         assertEquals("Avisos de batimentos", AlertCopy.CHANNEL_NAME)
+        assertEquals(AlertCopy.CHANNEL_NAME, AlertCopy.channelName())
         assertEquals("Batimentos acima do limite cadastrado", AlertCopy.TITLE_HIGH)
+        assertEquals(AlertCopy.TITLE_HIGH, AlertCopy.titleHigh())
         assertEquals("Batimentos abaixo do limite cadastrado", AlertCopy.TITLE_LOW)
+        assertEquals(AlertCopy.TITLE_LOW, AlertCopy.titleLow())
         assertEquals("Batimentos: 42 bpm. Limite cadastrado: 50 bpm.", AlertCopy.body(42, 50))
         assertEquals("Batimentos: 110 bpm. Acima do limite cadastrado de 100 bpm.", AlertCopy.snackbarHigh(110, 100))
         assertEquals("Batimentos: 40 bpm. Abaixo do limite cadastrado de 50 bpm.", AlertCopy.snackbarLow(40, 50))
