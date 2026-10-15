@@ -50,13 +50,14 @@ class HBandBleService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // startForegroundService() requires startForeground() even when we stop immediately.
+        ensureForeground()
         if (intent?.action == ACTION_STOP) {
             (application as? HBandHealthSyncApp)?.requestBleSessionStop()
             stopSelfSafely()
             return START_NOT_STICKY
         }
         if (bleManager() == null) { stopSelfSafely(); return START_NOT_STICKY }
-        ensureForeground()
         when (intent?.action) {
             ACTION_RECONNECT -> bleManager()?.reconnectLastDevice()
             else -> {
@@ -123,14 +124,19 @@ class HBandBleService : Service() {
     }
 
     private fun startInForeground(notification: Notification) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(
-                NOTIFICATION_ID,
-                notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
-            )
-        } else {
-            startForeground(NOTIFICATION_ID, notification)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(
+                    NOTIFICATION_ID,
+                    notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+                )
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+        } catch (error: Exception) {
+            android.util.Log.e("HBandBleService", "startForeground failed", error)
+            stopSelf()
         }
     }
 
@@ -196,10 +202,14 @@ class HBandBleService : Service() {
         fun start(context: Context) {
             if ((context.applicationContext as? HBandHealthSyncApp)?.readyBleManagerOrNull() == null) return
             val intent = Intent(context, HBandBleService::class.java)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
-            } else {
-                context.startService(intent)
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(intent)
+                } else {
+                    context.startService(intent)
+                }
+            } catch (error: Exception) {
+                android.util.Log.e("HBandBleService", "Unable to start BLE foreground service", error)
             }
         }
 

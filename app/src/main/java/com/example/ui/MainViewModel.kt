@@ -3,7 +3,7 @@ package com.example.ui
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.HBandHealthSyncApp
+import com.example.resolveRuntimeBleManager
 import com.example.data.hband.AlarmUiState
 import com.example.data.hband.AutoMeasureUiState
 import com.example.data.hband.DetectSessionUiState
@@ -60,9 +60,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         advancedMeasurementDao = db.advancedMeasurementDao(),
     )
 
-    val bleManager: HBandBleManager =
-        (application as? HBandHealthSyncApp)?.bleManager
-            ?: HBandBleManager(application.applicationContext, viewModelScope)
+    val bleManager: HBandBleManager = resolveRuntimeBleManager(application) {
+        HBandBleManager(application.applicationContext, viewModelScope)
+    }
 
     val apiHealth: StateFlow<ApiHealthState> = repository.apiHealth
     val isSyncing: StateFlow<Boolean> = repository.isSyncing
