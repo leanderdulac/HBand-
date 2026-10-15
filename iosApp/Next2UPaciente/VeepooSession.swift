@@ -26,6 +26,9 @@ final class VeepooSession: NSObject, ObservableObject {
     @Published var lastFlushMessage = ""
     @Published var lastHttpCode: Int = 0
     @Published var pendingCount: Int = 0
+    @Published var failedCount: Int = 0
+    @Published var isFlushing = false
+    @Published var lastFlushSyncedCount: Int = 0
     @Published var localMetricCount: Int = 0
     @Published var localSummary = ""
     @Published var ingestUrl = VeepooSession.bundledString("Next2UCoreBaseUrl")
@@ -84,6 +87,7 @@ final class VeepooSession: NSObject, ObservableObject {
             builtInKey: VeepooSession.bundledString("Next2UIngestApiKey") ?? ""
         )
         pendingCount = Int(IngestRuntime.shared.pendingCount())
+        failedCount = Int(IngestRuntime.shared.failedCount())
         refreshLocalStore()
     }
 
@@ -294,13 +298,44 @@ final class VeepooSession: NSObject, ObservableObject {
             return
         }
         configureIngest()
+        isFlushing = true
         Task {
+            defer { isFlushing = false }
             guard let flush = try? await IngestRuntime.shared.flush() else { return }
-            lastFlushMessage = flush.message
-            lastHttpCode = Int(flush.lastHttpCode)
-            pendingCount = Int(flush.pendingCount)
-            refreshLocalStore()
+            applyFlush(flush)
         }
+    }
+
+    func retryFailed(_ clientReadingId: String) {
+        IngestRuntime.shared.retryFailed(clientReadingId: clientReadingId)
+        configureIngest()
+        flushNow()
+    }
+
+    func retryAllFailed() {
+        IngestRuntime.shared.retryAllFailed()
+        configureIngest()
+        flushNow()
+    }
+
+    func deleteQueueItem(_ clientReadingId: String) {
+        IngestRuntime.shared.deleteItem(clientReadingId: clientReadingId)
+        configureIngest()
+    }
+
+    func clearQueue() {
+        IngestRuntime.shared.clearAll()
+        configureIngest()
+    }
+
+    private func applyFlush(_ flush: FlushOutcome) {
+        lastFlushMessage = flush.message
+        lastHttpCode = Int(flush.lastHttpCode)
+        pendingCount = Int(flush.pendingCount)
+        failedCount = Int(IngestRuntime.shared.failedCount())
+        lastFlushSyncedCount = Int(flush.syncedCount)
+        refreshLocalStore()
+        IngestBackground.schedule()
     }
 
     private func recordAndFlush() {
@@ -323,12 +358,11 @@ final class VeepooSession: NSObject, ObservableObject {
             ) else { return }
             lastClientReadingId = recorded.clientReadingId
             pendingCount = Int(IngestRuntime.shared.pendingCount())
+            failedCount = Int(IngestRuntime.shared.failedCount())
             refreshLocalStore()
             if recorded.queued {
                 guard let flush = try? await IngestRuntime.shared.flush() else { return }
-                lastFlushMessage = flush.message
-                lastHttpCode = Int(flush.lastHttpCode)
-                pendingCount = Int(flush.pendingCount)
+                applyFlush(flush)
             }
         }
     }

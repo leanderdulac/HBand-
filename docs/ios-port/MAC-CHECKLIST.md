@@ -66,7 +66,14 @@ a rede — isso é correto.
 4. Histórico: seletor, resumo 7 dias, «Ver gráfico», chips 7/30/90. Caption **«não é limiar clínico»**. Sem faixa pintada.
 5. Ajustes → Aparência: Claro (padrão), Escuro azul, Escuro índigo, Escuro grafite + ciano, Seguir o sistema.
 
-## 8. Store cifrado (fase A)
+## 8. Envios (fase D)
+
+1. Aba Envios: badge com pendentes; lista até 30; «Aguardando envio» / «Falha no envio».
+2. Retry item / enviar / apagar com o diálogo de confirmação Android.
+3. «Ver dados técnicos» abre o JSON (`client_reading_id`).
+4. BGTask `br.com.next2u.saude.paciente.ingest` é oportunista — **não** promete 15 min.
+
+## 9. Store cifrado (fase A)
 
 1. Na abertura deve aparecer «Abrindo seus registros» e só então as cinco abas.
 2. Depois de um batimento real, Relógio e Envios mostram «N medições gravadas neste iPhone».
