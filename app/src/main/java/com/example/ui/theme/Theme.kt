@@ -1,5 +1,6 @@
 package com.example.ui.theme
 
+import android.content.Context
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
@@ -19,9 +20,18 @@ enum class AppThemeOption(val storageKey: String, val label: String) {
 
     companion object {
         const val PREFS_KEY = "app_theme_option"
+        const val SETTINGS_PREFS = "hband_settings"
 
         fun fromStorage(value: String?): AppThemeOption =
             entries.firstOrNull { it.storageKey == value } ?: LIGHT
+
+        /** Theme for the storage-opening frame; does not construct MainViewModel. */
+        fun storedIn(context: Context): AppThemeOption =
+            fromStorage(
+                context.applicationContext
+                    .getSharedPreferences(SETTINGS_PREFS, Context.MODE_PRIVATE)
+                    .getString(PREFS_KEY, null),
+            )
     }
 }
 
