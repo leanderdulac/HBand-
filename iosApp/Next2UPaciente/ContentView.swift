@@ -38,7 +38,7 @@ struct ContentView: View {
                 .badge(session.pendingCount)
                 .tag(3)
 
-            SettingsPlaceholder(themeStorage: $themeStorage)
+            SettingsScreen(themeStorage: $themeStorage, session: session)
                 .tabItem { Label("Ajustes", systemImage: "gearshape.fill") }
                 .tag(4)
         }
