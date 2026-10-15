@@ -27,6 +27,7 @@ struct SettingsScreen: View {
                         .accessibilityAddTraits(.isHeader)
                     profileCard
                     continuityCard
+                    BleDiagnosticsCard(session: session)
                     reconnectCard
                     themeCard
                     hrAlertsCard

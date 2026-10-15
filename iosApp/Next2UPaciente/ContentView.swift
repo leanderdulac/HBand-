@@ -3,8 +3,9 @@ import SwiftUI
 /// Five destinations match the Android patient app. Início / Histórico follow PR #17.
 struct ContentView: View {
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.scenePhase) private var scenePhase
     @AppStorage("app_theme_option") private var themeStorage = AppThemeOption.light.rawValue
-    @StateObject private var session = VeepooSession()
+    @ObservedObject private var session = VeepooSession.shared
     @State private var tab = 0
 
     private var option: AppThemeOption { AppThemeOption.fromStorage(themeStorage) }
@@ -44,6 +45,9 @@ struct ContentView: View {
         }
         .tint(palette.primary)
         .environment(\.patientPalette, palette)
+        .onChange(of: scenePhase) { phase in
+            if phase == .active { session.handleBecameActive() }
+        }
     }
 }
 
