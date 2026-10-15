@@ -36,6 +36,12 @@ enum AppThemeOption: String, CaseIterable, Identifiable {
     }
 }
 
+/// Named separately so files that `import shared` do not collide with the
+/// Kotlin `AppThemeOption` class (no `allCases` on the Native export).
+enum PatientThemeChoices {
+    static var all: [AppThemeOption] { AppThemeOption.allCases }
+}
+
 enum ResolvedAppTheme {
     case lightAzul, darkAzul, darkIndigo, darkGrafite
 

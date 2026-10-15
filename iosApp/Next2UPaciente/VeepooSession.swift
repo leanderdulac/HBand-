@@ -71,7 +71,7 @@ final class VeepooSession: NSObject, ObservableObject {
         super.init()
         manager.isLogEnable = true
         manager.is24HourFormat = true
-        manager.automaticConnection = true
+        manager.automaticConnection = UserDefaults.standard.object(forKey: "auto_reconnect_ble") as? Bool ?? true
         manager.connectionTimeout = 30
         manager.deviceConfirmTimeout = 30
         startRestorationSidecar()
@@ -138,6 +138,10 @@ final class VeepooSession: NSObject, ObservableObject {
                 self?.handleConnect(state, watch: watch)
             }
         })
+    }
+
+    func setAutoReconnect(_ enabled: Bool) {
+        manager.automaticConnection = enabled
     }
 
     func disconnect() {
@@ -241,6 +245,7 @@ final class VeepooSession: NSObject, ObservableObject {
                 if state.rawValue == 1, value >= 30, value <= 240 {
                     self.heartRate = Int(value)
                     self.sessionMessage = "Batimentos: \(value) bpm (leitura do relógio)."
+                    HeartAlertDelivery.evaluate(heartRate: Int(value))
                     self.recordAndFlush()
                 }
                 if state.rawValue == 2 {

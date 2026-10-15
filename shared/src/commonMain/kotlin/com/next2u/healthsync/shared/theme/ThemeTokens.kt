@@ -210,6 +210,12 @@ object AlertCopy {
     const val CHANNEL_DESC = "Avisos no celular quando os batimentos ficam fora dos limites cadastrados"
     const val TITLE_HIGH = "Batimentos acima do limite cadastrado"
     const val TITLE_LOW = "Batimentos abaixo do limite cadastrado"
+
+    /** Function accessors so Swift does not depend on Kotlin `const val` Obj-C names. */
+    fun channelName(): String = CHANNEL_NAME
+    fun titleHigh(): String = TITLE_HIGH
+    fun titleLow(): String = TITLE_LOW
+
     fun body(currentHr: Int, threshold: Int): String =
         "Batimentos: $currentHr bpm. Limite cadastrado: $threshold bpm."
     fun snackbarHigh(currentHr: Int, threshold: Int): String =
