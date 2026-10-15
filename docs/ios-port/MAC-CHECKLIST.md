@@ -11,8 +11,8 @@ chmod +x iosApp/Scripts/embed-shared.sh
 open iosApp/Next2UPaciente.xcodeproj
 ```
 
-Signing & Capabilities → Team Next2U → trocar `TEAMIDXXXX`.
-Confirmar bundle `br.com.next2u.saude.paciente` (ou o ID oficial).
+Signing & Capabilities → Team Next2U (`H87XXMXA5G` já está no xcconfig).
+Confirmar bundle `br.com.next2u.saude.paciente`.
 
 ## 2. Compilar no iPhone
 

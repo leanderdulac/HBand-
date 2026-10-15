@@ -1,13 +1,12 @@
 # Next2U Paciente — esqueleto iOS
 
-Casca SwiftUI da fase 0. Não envia vitais, não liga o Veepoo e não assina
-para TestFlight até o Leandro preencher o Team ID no Mac.
+Casca SwiftUI + P0 Veepoo. Team ID Next2U já está no xcconfig.
 
-## Placeholders (preencher no Mac, não nesta PR)
+## Assinatura
 
-| Chave | Valor atual | Onde |
+| Chave | Valor | Onde |
 |---|---|---|
-| `DEVELOPMENT_TEAM` | `TEAMIDXXXX` | `Config/Next2UPaciente.xcconfig` |
+| `DEVELOPMENT_TEAM` | `H87XXMXA5G` | `Config/Next2UPaciente.xcconfig` |
 | `PRODUCT_BUNDLE_IDENTIFIER` | `br.com.next2u.saude.paciente` | mesmo xcconfig |
 | Signing | Automatic | Xcode cria App ID + perfil ao escolher o Team |
 
@@ -23,8 +22,8 @@ O `VeepooBleSDK.framework` é **só iPhoneOS/arm64**. Use um iPhone físico.
    ```
 
 2. Abrir `iosApp/Next2UPaciente.xcodeproj`.
-3. Signing & Capabilities → selecionar o Team Next2U → substituir `TEAMIDXXXX`.
-4. Confirmar ou trocar o bundle ID.
+3. Signing & Capabilities → Team Next2U (`H87XXMXA5G` já está no xcconfig).
+4. Confirmar o bundle `br.com.next2u.saude.paciente`.
 5. Rodar no **iPhone**. Checklist: `docs/ios-port/MAC-CHECKLIST.md`.
 
 SDK Veepoo vendored: **2.2.107.15** (`iosApp/Vendor/`). Android:
@@ -34,6 +33,4 @@ SDK Veepoo vendored: **2.2.107.15** (`iosApp/Vendor/`). Android:
 
 Passos TestFlight e Ad Hoc: `docs/ios-port/PLAN.md` §5.4.
 
-O `VeepooBleSDK.framework` **não** está vendored aqui. Copiar de
-[HBandSDK/iOS_Ble_SDK](https://github.com/HBandSDK/iOS_Ble_SDK) na fase 2,
-conferindo a versão contra `vpprotocol-2.3.80.15` do Android.
+O `VeepooBleSDK.framework` **já** está em `iosApp/Vendor/` (2.2.107.15).

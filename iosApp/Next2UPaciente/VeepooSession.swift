@@ -1,4 +1,3 @@
-import Combine
 import CoreBluetooth
 import Foundation
 import VeepooBleSDK
@@ -6,6 +5,10 @@ import shared
 
 /// P0 Veepoo session: scan, connect, senha 0000, FC ao vivo, SpO₂ e bateria.
 /// Comandos do SDK não são concorrentes — FC e SpO₂ revezam, como no Android.
+///
+/// Enum cases use `rawValue` from `VPPublicDefine.h`. Swift strips ObjC prefixes
+/// (`BleConnectSuccess` → `.connectSuccess`, `VPTestHeartStateTesting` → `.testing`),
+/// so matching on the header names does not compile.
 @MainActor
 final class VeepooSession: NSObject, ObservableObject {
     static let defaultPassword = "0000"
@@ -26,7 +29,7 @@ final class VeepooSession: NSObject, ObservableObject {
     @Published var ingestUrl = "https://healthtech-secure-api-5794833455.us-central1.run.app/"
     @Published var ingestKey = ""
 
-    private let manager = VPBleCentralManage.shared()
+    private let manager = VPBleCentralManage.sharedBleManager()
     private var lastAddress: String? {
         get { UserDefaults.standard.string(forKey: "last_veepoo_address") }
         set { UserDefaults.standard.set(newValue, forKey: "last_veepoo_address") }
@@ -37,7 +40,6 @@ final class VeepooSession: NSObject, ObservableObject {
     }
     private var heartRunning = false
     private var spo2Running = false
-    private var stage = 0
     private var restoreCentral: CBCentralManager?
 
     struct ScannedWatch: Identifiable, Equatable {
@@ -83,7 +85,7 @@ final class VeepooSession: NSObject, ObservableObject {
                 let watch = ScannedWatch(
                     name: model.deviceName ?? "HBand",
                     address: model.deviceAddress ?? "",
-                    rssi: model.RSSI?.intValue ?? 0,
+                    rssi: model.rssi?.intValue ?? 0,
                     model: model
                 )
                 guard !watch.address.isEmpty else { return }
@@ -110,11 +112,11 @@ final class VeepooSession: NSObject, ObservableObject {
         connected = watch
         lastAddress = watch.address
         lastName = watch.name
-        manager.veepooSDKConnectDevice(watch.model) { [weak self] state in
+        manager.veepooSDKConnectDevice(watch.model, deviceConnectBlock: { [weak self] state in
             Task { @MainActor in
                 self?.handleConnect(state, watch: watch)
             }
-        }
+        })
     }
 
     func disconnect() {
@@ -132,46 +134,51 @@ final class VeepooSession: NSObject, ObservableObject {
         startScan()
     }
 
+    /// `DeviceConnectState` in VPPublicDefine.h (BlePoweredOff = 0 … BleConfirmTimeout = 7).
     private func handleConnect(_ state: DeviceConnectState, watch: ScannedWatch) {
-        switch state {
-        case .BlePoweredOff:
+        switch state.rawValue {
+        case 0:
             sessionMessage = "Ligue o Bluetooth do iPhone."
-        case .BleConnecting:
+        case 1:
             sessionMessage = "Conectando…"
-        case .BleConnectSuccess:
+        case 2:
             sessionMessage = "Ligação feita. Confirmando a senha 0000…"
             verifyPassword(watch)
-        case .BleConnectFailed, .BleConnectTimeout, .BleConfirmTimeout:
+        case 3, 6, 7:
             sessionMessage = "Falha ou tempo esgotado na ligação. Toque de novo em conectar."
             hardwareReady = false
-        case .BleVerifyPasswordSuccess:
+        case 4:
             onHandshake(watch)
-        case .BleVerifyPasswordFailure:
+        case 5:
             sessionMessage = "A senha padrão 0000 foi recusada. Confira o relógio."
             hardwareReady = false
-        @unknown default:
+        default:
             sessionMessage = "Estado de ligação desconhecido (\(state.rawValue))."
         }
     }
 
+    /// `veepooSDKSynchronousPasswordWithType:password:SynchronizationResult:`
+    /// `SynchronousPasswordType.VerifyPasswordType = 0`.
+    /// `PasswordSynchronTpye`: 1 success, 5 read success, 6 success+time (usual).
     private func verifyPassword(_ watch: ScannedWatch) {
         manager.veepooSDKSynchronousPassword(
-            with: .VerifyPasswordType,
-            password: Self.defaultPassword
-        ) { [weak self] result in
-            Task { @MainActor in
-                guard let self else { return }
-                switch result {
-                case .PasswordValidationSuccess, .PasswordValidationAllSuccess, .PasswordReadSuccess:
-                    self.onHandshake(watch)
-                case .PasswordValidationFailed, .PasswordReadFailed:
-                    self.sessionMessage = "A senha padrão 0000 foi recusada."
-                    self.hardwareReady = false
-                default:
-                    self.sessionMessage = "Confirmação de senha: código \(result.rawValue)."
+            with: SynchronousPasswordType(rawValue: 0)!,
+            password: Self.defaultPassword,
+            synchronizationResult: { [weak self] result in
+                Task { @MainActor in
+                    guard let self else { return }
+                    switch result.rawValue {
+                    case 1, 5, 6:
+                        self.onHandshake(watch)
+                    case 0, 4:
+                        self.sessionMessage = "A senha padrão 0000 foi recusada."
+                        self.hardwareReady = false
+                    default:
+                        self.sessionMessage = "Confirmação de senha: código \(result.rawValue)."
+                    }
                 }
             }
-        }
+        )
     }
 
     private func onHandshake(_ watch: ScannedWatch) {
@@ -179,22 +186,23 @@ final class VeepooSession: NSObject, ObservableObject {
         hardwareReady = true
         sessionMessage = "Relógio pronto. Lendo dados do dia e depois a frequência cardíaca."
         readBattery()
-        manager.peripheralManage?.veepooSdkStartReadDeviceAllData { [weak self] state, _, _, _ in
+        // veepooSdkStartReadDeviceAllDataWithReadStateChangeBlock:
+        // VPReadDeviceBaseDataComplete = 2
+        manager.peripheralManage.veepooSdkStartReadDeviceAllData { [weak self] state, _, _, _ in
             Task { @MainActor in
-                if state == .VPReadDeviceBaseDataComplete || state == .complete {
+                if state.rawValue == 2 {
                     self?.sessionMessage = "Histórico do relógio lido. Medindo batimentos…"
                     self?.startHeart()
                 }
             }
         }
-        // Se a leitura diária não existir neste firmware, ainda assim tenta a FC.
         DispatchQueue.main.asyncAfter(deadline: .now() + 8) { [weak self] in
             if self?.heartRunning == false { self?.startHeart() }
         }
     }
 
     private func readBattery() {
-        manager.peripheralManage?.veepooSDKReadDeviceBatteryInfo { [weak self] isPercent, _, battery in
+        manager.peripheralManage.veepooSDKReadDeviceBatteryInfo { [weak self] isPercent, _, battery in
             Task { @MainActor in
                 if isPercent { self?.batteryPercent = Int(battery) }
             }
@@ -205,16 +213,16 @@ final class VeepooSession: NSObject, ObservableObject {
         guard hardwareReady, !heartRunning else { return }
         stopOxygen()
         heartRunning = true
-        stage += 1
-        manager.peripheralManage?.veepooSDKTestHeartStart(true) { [weak self] state, value in
+        manager.peripheralManage.veepooSDKTestHeartStart(true) { [weak self] state, value in
             Task { @MainActor in
                 guard let self else { return }
-                if state == .VPTestHeartStateTesting, value >= 30, value <= 240 {
+                // VPTestHeartStateTesting = 1, VPTestHeartStateNotWear = 2
+                if state.rawValue == 1, value >= 30, value <= 240 {
                     self.heartRate = Int(value)
                     self.sessionMessage = "Batimentos: \(value) bpm (leitura do relógio)."
                     self.recordAndFlush()
                 }
-                if state == .VPTestHeartStateNotWear {
+                if state.rawValue == 2 {
                     self.sessionMessage = "O relógio não está no pulso."
                 }
             }
@@ -228,7 +236,7 @@ final class VeepooSession: NSObject, ObservableObject {
         guard hardwareReady else { return }
         stopHeart()
         spo2Running = true
-        manager.peripheralManage?.veepooSDKTestOxygenStart(true) { [weak self] _, value in
+        manager.peripheralManage.veepooSDKTestOxygenStart(true) { [weak self] _, value in
             Task { @MainActor in
                 guard let self else { return }
                 if value >= 50, value <= 100 {
@@ -245,14 +253,14 @@ final class VeepooSession: NSObject, ObservableObject {
 
     private func stopHeart() {
         if heartRunning {
-            manager.peripheralManage?.veepooSDKTestHeartStart(false, testResult: { _, _ in })
+            manager.peripheralManage.veepooSDKTestHeartStart(false, testResult: nil)
         }
         heartRunning = false
     }
 
     private func stopOxygen() {
         if spo2Running {
-            manager.peripheralManage?.veepooSDKTestOxygenStart(false, testResult: { _, _ in })
+            manager.peripheralManage.veepooSDKTestOxygenStart(false, testResult: nil)
         }
         spo2Running = false
     }
@@ -266,7 +274,7 @@ final class VeepooSession: NSObject, ObservableObject {
         configureIngest()
         let watch = connected
         Task {
-            let recorded = try await IngestRuntime.shared.recordLive(
+            let recorded = await IngestRuntime.shared.recordLive(
                 deviceId: watch?.address ?? "",
                 deviceModel: watch?.name ?? "VE30",
                 heartRate: Int32(heartRate),
@@ -280,17 +288,13 @@ final class VeepooSession: NSObject, ObservableObject {
                 hrvScore: 0,
                 patientId: "PAT-HBAND-001"
             )
-            await MainActor.run {
-                lastClientReadingId = recorded.clientReadingId
-                pendingCount = Int(IngestRuntime.shared.pendingCount())
-            }
+            lastClientReadingId = recorded.clientReadingId
+            pendingCount = Int(IngestRuntime.shared.pendingCount())
             if recorded.queued {
-                let flush = try await IngestRuntime.shared.flush()
-                await MainActor.run {
-                    lastFlushMessage = flush.message
-                    lastHttpCode = Int(flush.lastHttpCode)
-                    pendingCount = Int(flush.pendingCount)
-                }
+                let flush = await IngestRuntime.shared.flush()
+                lastFlushMessage = flush.message
+                lastHttpCode = Int(flush.lastHttpCode)
+                pendingCount = Int(flush.pendingCount)
             }
         }
     }

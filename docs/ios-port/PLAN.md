@@ -7,7 +7,7 @@ verdade do piloto atual.
 
 Conta Apple Developer e Xcode no Mac de builds Next2U: **já disponíveis**
 (Leandro). Não são bloqueios desta fase. Faltam apenas valores de assinatura
-(Team ID, bundle ID definitivo, perfis) — o esqueleto usa placeholders.
+(Team ID `H87XXMXA5G` já no xcconfig; bundle `br.com.next2u.saude.paciente`).
 
 ---
 
@@ -283,14 +283,14 @@ existem nesse canal com o mesmo contrato. Fora desta fase; entitlement
 
 ### 5.4 Distribuição do piloto (TestFlight / Ad Hoc)
 
-Conta Apple Developer e Xcode: **já existem**. O esqueleto usa
-placeholders; Leandro preenche no Mac quando for assinar o primeiro build.
+Conta Apple Developer e Xcode: **já existem**. Team ID Next2U já está
+no xcconfig.
 
 **Ainda precisa do Leandro (não nesta fase):**
 
-| Item | Placeholder no repo | Quando preencher |
+| Item | Valor no repo | Quando preencher |
 |---|---|---|
-| Team ID (10 caracteres) | `TEAMIDXXXX` em `iosApp/Config/Next2UPaciente.xcconfig` | Primeiro archive no Xcode |
+| Team ID (10 caracteres) | `H87XXMXA5G` em `iosApp/Config/Next2UPaciente.xcconfig` | Já preenchido |
 | Bundle ID | `br.com.next2u.saude.paciente` | Confirmar se o ID final é este ou outro sob o time Next2U |
 | Signing | Automático (`CODE_SIGN_STYLE=Automatic`) | Xcode cria App ID + perfil ao selecionar o Team |
 | Certificados | — | Xcode gerencia Apple Development / Apple Distribution |
@@ -345,12 +345,11 @@ No Mac (Leandro), próximos comandos — **não** bloqueiam esta PR:
 
 # Abrir o app e escolher o Team
 open iosApp/Next2UPaciente.xcodeproj
-# Signing & Capabilities → Team → substituir TEAMIDXXXX
-# Confirmar bundle id br.com.next2u.saude.paciente (ou o ID oficial)
+# Signing & Capabilities → Team Next2U (H87XXMXA5G já está no xcconfig)
+# Confirmar bundle id br.com.next2u.saude.paciente
 ```
 
-Vendor do `VeepooBleSDK.framework` (cópia Apache-2.0, como os AARs) fica
-para a fase de BLE, com `THIRD_PARTY_NOTICE` equivalente.
+Vendor do `VeepooBleSDK.framework` (2.2.107.15) está em `iosApp/Vendor/`.
 
 ---
 

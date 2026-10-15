@@ -1,10 +1,9 @@
-// Placeholders. Leandro replaces DEVELOPMENT_TEAM with the Next2U Team ID
-// in Xcode (Signing & Capabilities) before the first archive / TestFlight.
+// Team Next2U. Bundle stays br.com.next2u.saude.paciente.
 // Do not commit a real distribution certificate.
 
 PRODUCT_NAME = Next2U Paciente
 PRODUCT_BUNDLE_IDENTIFIER = br.com.next2u.saude.paciente
-DEVELOPMENT_TEAM = TEAMIDXXXX
+DEVELOPMENT_TEAM = H87XXMXA5G
 CODE_SIGN_STYLE = Automatic
 MARKETING_VERSION = 0.1.0
 CURRENT_PROJECT_VERSION = 1
