@@ -13,3 +13,6 @@ internal actual fun isoUtcNow(): String {
     formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss'Z'"
     return formatter.stringFromDate(NSDate())
 }
+
+internal actual fun nowMillis(): Long =
+    (NSDate().timeIntervalSince1970 * 1000.0).toLong()

@@ -115,6 +115,9 @@ struct WatchScreen: View {
                 .foregroundStyle(palette.onSurfaceVariant)
             Text("Na fila: \(session.pendingCount)")
                 .font(.system(size: 15))
+            Text(session.localSummary.isEmpty ? "Medições gravadas: \(session.localMetricCount)" : session.localSummary)
+                .font(.system(size: 15))
+                .foregroundStyle(palette.onSurfaceVariant)
         }
         .padding(PatientTheme.margin)
         .background(palette.ai)

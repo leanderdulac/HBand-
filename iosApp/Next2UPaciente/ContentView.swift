@@ -35,9 +35,7 @@ struct ContentView: View {
 
             PlaceholderScreen(
                 title: "Envios",
-                bodyText: session.lastFlushMessage.isEmpty
-                    ? "A fila (client_reading_id e lote) vive no módulo Kotlin shared. O último HTTP aparece também em Relógio."
-                    : "Último envio: HTTP \(session.lastHttpCode). \(session.lastFlushMessage)"
+                bodyText: enviosBody
             )
             .tabItem { Label("Envios", systemImage: "icloud.and.arrow.up") }
             .tag(3)
@@ -48,6 +46,16 @@ struct ContentView: View {
         }
         .tint(palette.primary)
         .environment(\.patientPalette, palette)
+    }
+
+    private var enviosBody: String {
+        let local = session.localSummary.isEmpty
+            ? "A fila e as medições ficam no store cifrado do Kotlin shared."
+            : session.localSummary
+        if session.lastFlushMessage.isEmpty {
+            return local
+        }
+        return "\(local)\n\nÚltimo envio: HTTP \(session.lastHttpCode). \(session.lastFlushMessage)"
     }
 }
 
