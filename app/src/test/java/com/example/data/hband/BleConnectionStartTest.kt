@@ -41,7 +41,7 @@ class BleConnectionStartTest {
     private val device = HBandDevice(
         deviceId = "00:11:22:33:44:55",
         macAddress = "00:11:22:33:44:55",
-        name = "Galaxy Watch de teste",
+        name = "Pulseira GATT de teste",
         isConnected = false,
     )
 
@@ -130,6 +130,19 @@ class BleConnectionStartTest {
         assertFalse(manager.isHardwareConnected.value)
         assertFalse(manager.connectedDevice.value?.isConnected == true)
         assertNull(manager.latestTelemetry.value)
+    }
+
+    @Test fun galaxy_watch_8_is_rejected_without_veepoo_writes_or_gatt() {
+        val manager = readyManager()
+        val watch = device.copy(name = "Galaxy Watch8")
+        assertFalse(manager.connectDevice(watch))
+        assertEquals("Galaxy Watch8", manager.incompatibleWatch.value?.name)
+        assertTrue(shadowOf(remote()).bluetoothGatts.isEmpty())
+        assertFalse(manager.hasPersistedSession())
+        manager.forgetDevice()
+        assertNull(manager.incompatibleWatch.value)
+        assertNull(app.getSharedPreferences("hband_settings", Context.MODE_PRIVATE)
+            .getString(HBandBleManager.PREF_LAST_MAC, null))
     }
 
     @Test fun bluetooth_off_cannot_create_a_connected_placeholder() {

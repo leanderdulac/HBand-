@@ -78,6 +78,7 @@ class HBandHealthSyncApp : Application() {
     private fun startDataRuntime(db: AppDatabase) {
         // ECG JNI (`JNIChange` → libnative-lib.so) is missing from vpprotocol AAR.
         VeepooEcgNative.loadOnce()
+        com.example.data.hband.VeepooSdkToasts.suppressFunctionNotSupported()
         RetrofitClient.initialize(this)
         val historyRepository = WearableRepository(
             queueDao = db.ingestQueueDao(),
