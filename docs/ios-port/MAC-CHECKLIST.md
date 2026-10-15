@@ -73,7 +73,14 @@ a rede — isso é correto.
 3. «Ver dados técnicos» abre o JSON (`client_reading_id`).
 4. BGTask `br.com.next2u.saude.paciente.ingest` é oportunista — **não** promete 15 min.
 
-## 9. Store cifrado (fase A)
+## 9. Ajustes (fase E)
+
+1. Meu perfil grava no store cifrado e reaparece depois de matar o app.
+2. Cartão **Envio contínuo neste iPhone** — sem «Liberar o app», sem Samsung/Multilaser.
+3. Avisos de batimentos usam o texto congelado (`AlertCopy`). Limites cadastrados, não faixa clínica.
+4. «Opções de notificação deste aparelho» abre Ajustes do iOS.
+
+## 10. Store cifrado (fase A)
 
 1. Na abertura deve aparecer «Abrindo seus registros» e só então as cinco abas.
 2. Depois de um batimento real, Relógio e Envios mostram «N medições gravadas neste iPhone».
