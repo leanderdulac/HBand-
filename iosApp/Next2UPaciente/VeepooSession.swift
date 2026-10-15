@@ -220,7 +220,7 @@ final class VeepooSession: NSObject, ObservableObject {
             renameStatus = "Nome atualizado neste iPhone. Conecte o relógio para gravar no aparelho."
             return
         }
-        manager.peripheralManage.veepooSDKSettingDeviceNameWithString(trimmed) { [weak self] state in
+        manager.peripheralManage.veepooSDKSettingDeviceName(with: trimmed) { [weak self] state in
             Task { @MainActor in
                 switch state {
                 case 0:
