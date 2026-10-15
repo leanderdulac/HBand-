@@ -134,6 +134,12 @@ class HBandBleManager(
     private val _sessionMessage = MutableStateFlow<String?>(null)
     val sessionMessage: StateFlow<String?> = _sessionMessage.asStateFlow()
 
+    private val advertisedServices = ConcurrentHashMap<String, Set<UUID>>()
+    private val _incompatibleWatch = MutableStateFlow<HBandDevice?>(null)
+    val incompatibleWatch: StateFlow<HBandDevice?> = _incompatibleWatch.asStateFlow()
+    private val veepooWriteBackoff = VeepooWriteBackoff()
+    private var incompatibleCardMac: String? = null
+
     private val _capabilities = MutableStateFlow(DeviceCapabilities())
     val capabilities: StateFlow<DeviceCapabilities> = _capabilities.asStateFlow()
 
@@ -379,7 +385,7 @@ class HBandBleManager(
         if (!isAutoReconnectEnabled || userRequestedDisconnect || _isHardwareConnected.value) return
         val mac = prefs.getString(PREF_LAST_MAC, null)?.trim().orEmpty()
         if (mac.isEmpty() || !BluetoothAdapter.checkBluetoothAddress(mac)) return
-        val name = prefs.getString(PREF_LAST_NAME, null)?.takeIf { it.isNotBlank() } ?: "VE30"
+        val name = prefs.getString(PREF_LAST_NAME, null)?.takeIf { it.isNotBlank() } ?: "Relógio"
         connectDevice(
             HBandDevice(
                 deviceId = mac,
@@ -489,6 +495,11 @@ class HBandBleManager(
             val address = device.address ?: continue
             val rawName = bluetoothDeviceNameOrFallback(device, result.scanRecord?.deviceName ?: "")
             val displayName = if (rawName.isNotBlank()) rawName else "Dispositivo BLE ($address)"
+            val scannedUuids = buildSet {
+                result.scanRecord?.serviceUuids?.forEach { add(it.uuid) }
+                result.scanRecord?.serviceData?.keys?.forEach { add(it.uuid) }
+            }
+            if (scannedUuids.isNotEmpty()) advertisedServices[address] = scannedUuids
             val isCurrent = _connectedDevice.value?.macAddress.equals(address, ignoreCase = true) &&
                 _connectedDevice.value?.isConnected == true
             discoveredMap[address] = HBandDevice(
@@ -524,17 +535,14 @@ class HBandBleManager(
             return false
         }
         userRequestedDisconnect = false
-        // Relógios Gear/WearOS/genéricos falam Bluetooth SIG padrão (Heart Rate Service etc.)
-        // via GATT direto. VE30/HBand (e qualquer coisa não explicitamente "Gear") usam o
-        // protocolo proprietário Veepoo, que exige o SDK oficial para o handshake de senha.
-        val looksLikeGenericBleWatch = device.name.contains("Gear", ignoreCase = true) ||
-            device.name.contains("WearOS", ignoreCase = true) ||
-            device.name.contains("Galaxy Watch", ignoreCase = true)
-
-        return if (looksLikeGenericBleWatch) {
-            connectDeviceViaRawGatt(device)
-        } else {
-            connectDeviceViaVeepooSdk(device)
+        val advertised = advertisedServices[device.macAddress].orEmpty()
+        return when (VeepooDeviceSupport.classify(device.name, advertised)) {
+            VeepooDeviceSupport.Kind.UNSUPPORTED -> {
+                markIncompatible(device, persist = false)
+                false
+            }
+            VeepooDeviceSupport.Kind.SUPPORTED_VEEPOO -> connectDeviceViaVeepooSdk(device)
+            VeepooDeviceSupport.Kind.UNKNOWN -> connectDeviceViaRawGatt(device)
         }
     }
 
@@ -607,6 +615,7 @@ class HBandBleManager(
             }
             return false
         }
+        val hadLiveVeepoo = passwordHandshakeSucceeded && isVeepooConnection
         isConnectingVeepoo = true
         isVeepooConnection = true
         isSyncingPersonInfo = false
@@ -615,9 +624,10 @@ class HBandBleManager(
         passwordHandshakeSucceeded = false
         passwordConfirmInFlight = false
         pwdConfirmAttempt = 0
+        veepooWriteBackoff.reset()
         cancelPendingPwdTimeout()
         cancelPersonInfoFallback()
-        p1Controller.stopAllDetect()
+        if (hadLiveVeepoo) p1Controller.stopAllDetect() else p1Controller.cancelled = true
         cancelLiveLinkWatchdog()
         cancelHistorySync()
         cancelSdkBatteryPolling()
@@ -694,14 +704,23 @@ class HBandBleManager(
                 if (generation != pwdConfirmGeneration) return@IBleWriteResponse
                 if (code != Constants.REQUEST_SUCCESS) {
                     Log.e(TAG, "VE30 senha: WRITE_FAIL code=$code attempt=$pwdConfirmAttempt gen=$generation")
-                    _sessionMessage.value = VeepooPasswordHandshake.MSG_WRITE_FAIL
-                    if (!passwordHandshakeSucceeded &&
-                        pwdConfirmAttempt < VeepooPasswordHandshake.MAX_CONFIRM_ATTEMPTS
-                    ) {
-                        mainHandler.postDelayed(
-                            { confirmVeepooPassword(isRetry = true) },
-                            VeepooPasswordHandshake.LATE_CALLBACK_GRACE_MS,
-                        )
+                    when (veepooWriteBackoff.onWriteResult(code, Constants.REQUEST_SUCCESS)) {
+                        VeepooWriteBackoff.Decision.ABORT_UNSUPPORTED -> {
+                            markIncompatible(_connectedDevice.value, persist = false)
+                            return@IBleWriteResponse
+                        }
+                        VeepooWriteBackoff.Decision.BACKOFF -> {
+                            _sessionMessage.value = VeepooPasswordHandshake.MSG_WRITE_FAIL
+                            if (!passwordHandshakeSucceeded &&
+                                pwdConfirmAttempt < VeepooPasswordHandshake.MAX_CONFIRM_ATTEMPTS
+                            ) {
+                                mainHandler.postDelayed(
+                                    { confirmVeepooPassword(isRetry = true) },
+                                    VeepooPasswordHandshake.LATE_CALLBACK_GRACE_MS,
+                                )
+                            }
+                        }
+                        VeepooWriteBackoff.Decision.CONTINUE -> Unit
                     }
                 } else {
                     Log.i(TAG, "VE30 senha: escrita GATT OK attempt=$pwdConfirmAttempt gen=$generation")
@@ -785,6 +804,9 @@ class HBandBleManager(
         if (userRequestedDisconnect) return
         passwordHandshakeSucceeded = true
         passwordConfirmInFlight = false
+        veepooWriteBackoff.reset()
+        _incompatibleWatch.value = null
+        incompatibleCardMac = null
         cancelPendingPwdTimeout()
         cancelScheduledReconnect()
         cancelLiveLinkWatchdog()
@@ -1137,6 +1159,9 @@ class HBandBleManager(
     private fun persistLastDevice(device: HBandDevice) {
         val mac = device.macAddress.trim()
         if (!BluetoothAdapter.checkBluetoothAddress(mac)) return
+        if (VeepooDeviceSupport.classify(device.name, advertisedServices[mac].orEmpty()) ==
+            VeepooDeviceSupport.Kind.UNSUPPORTED
+        ) return
         prefs.edit()
             .putString(PREF_LAST_MAC, mac)
             .putString(PREF_LAST_NAME, device.name)
@@ -1168,7 +1193,7 @@ class HBandBleManager(
                             hasStartedVeepooSensors = false
                             isSyncingPersonInfo = false
                             cancelHistorySync()
-                            p1Controller.stopAllDetect()
+                            if (passwordHandshakeSucceeded) p1Controller.stopAllDetect() else p1Controller.cancelled = true
                             advancedDetectActive = false
                             ppgStageGeneration++
                             cancelLiveLinkWatchdog()
@@ -1193,7 +1218,7 @@ class HBandBleManager(
                         hasStartedVeepooSensors = false
                         isSyncingPersonInfo = false
                         cancelHistorySync()
-                        p1Controller.stopAllDetect()
+                        if (passwordHandshakeSucceeded) p1Controller.stopAllDetect() else p1Controller.cancelled = true
                         advancedDetectActive = false
                         ppgStageGeneration++
                         _isHardwareConnected.value = false
@@ -1257,7 +1282,8 @@ class HBandBleManager(
         cancelPendingPwdTimeout()
         cancelPersonInfoFallback()
         cancelHistorySync()
-        p1Controller.stopAllDetect()
+        val hadLiveVeepoo = passwordHandshakeSucceeded && isVeepooConnection
+        if (hadLiveVeepoo) p1Controller.stopAllDetect() else p1Controller.cancelled = true
         advancedDetectActive = false
         ppgStageGeneration++
         stopTemperatureMonitoring()
@@ -1279,6 +1305,70 @@ class HBandBleManager(
         cancelSdkBatteryPolling()
         _isHardwareConnected.value = false
         markDeviceDisconnected()
+    }
+
+    fun forgetDevice() {
+        val target = _incompatibleWatch.value ?: _connectedDevice.value
+        userRequestedDisconnect = true
+        cancelScheduledReconnect()
+        p1Controller.cancelled = true
+        isConnectingVeepoo = false
+        isVeepooConnection = false
+        passwordHandshakeSucceeded = false
+        passwordConfirmInFlight = false
+        veepooWriteBackoff.reset()
+        disconnectGatt()
+        _isHardwareConnected.value = false
+        markDeviceDisconnected()
+        _connectedDevice.value = null
+        _incompatibleWatch.value = null
+        incompatibleCardMac = null
+        val mac = target?.macAddress?.trim().orEmpty()
+        if (mac.isNotEmpty()) {
+            advertisedServices.remove(mac)
+            unbindBond(mac)
+        }
+        prefs.edit().remove(PREF_LAST_MAC).remove(PREF_LAST_NAME).apply()
+        startScanning()
+    }
+
+    private fun markIncompatible(device: HBandDevice?, persist: Boolean) {
+        val current = device ?: return
+        userRequestedDisconnect = true
+        cancelScheduledReconnect()
+        cancelPendingPwdTimeout()
+        cancelPersonInfoFallback()
+        cancelHistorySync()
+        cancelLiveLinkWatchdog()
+        p1Controller.cancelled = true
+        isConnectingVeepoo = false
+        isVeepooConnection = false
+        passwordHandshakeSucceeded = false
+        passwordConfirmInFlight = false
+        _isHardwareConnected.value = false
+        disconnectGatt()
+        markDeviceDisconnected()
+        val shown = current.copy(isConnected = false)
+        if (incompatibleCardMac != shown.macAddress) {
+            incompatibleCardMac = shown.macAddress
+            _incompatibleWatch.value = shown
+        } else if (_incompatibleWatch.value == null) {
+            _incompatibleWatch.value = shown
+        }
+        _connectedDevice.value = shown
+        if (!persist) {
+            prefs.edit().remove(PREF_LAST_MAC).remove(PREF_LAST_NAME).apply()
+        }
+        Log.w(TAG, "Relógio incompatível (${shown.name} ${shown.macAddress}); Veepoo parado.")
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun unbindBond(mac: String) {
+        if (!BluetoothAdapter.checkBluetoothAddress(mac) || !hasBlePermissions()) return
+        runCatching {
+            val remote = bluetoothAdapter?.getRemoteDevice(mac) ?: return
+            remote.javaClass.getMethod("removeBond").invoke(remote)
+        }
     }
 
     @SuppressLint("MissingPermission")
@@ -1360,6 +1450,35 @@ class HBandBleManager(
         override fun onServicesDiscovered(gatt: BluetoothGatt?, status: Int) {
             if (status == BluetoothGatt.GATT_SUCCESS && gatt != null) {
                 Log.i(TAG, "GATT Services Discovered on ${gatt.device.address}: ${gatt.services.size} services")
+                val discovered = gatt.services.map { it.uuid }.toSet()
+                if (discovered.isNotEmpty()) advertisedServices[gatt.device.address] = discovered
+                val name = bluetoothDeviceNameOrFallback(gatt.device, _connectedDevice.value?.name.orEmpty())
+                when (VeepooDeviceSupport.classify(name, discovered)) {
+                    VeepooDeviceSupport.Kind.UNSUPPORTED -> {
+                        markIncompatible(
+                            (_connectedDevice.value ?: HBandDevice()).copy(
+                                name = name,
+                                macAddress = gatt.device.address,
+                                deviceId = gatt.device.address,
+                            ),
+                            persist = false,
+                        )
+                        return
+                    }
+                    VeepooDeviceSupport.Kind.SUPPORTED_VEEPOO -> {
+                        if (!isVeepooConnection) {
+                            val device = (_connectedDevice.value ?: HBandDevice()).copy(
+                                name = name,
+                                macAddress = gatt.device.address,
+                                deviceId = gatt.device.address,
+                            )
+                            disconnectGatt()
+                            connectDeviceViaVeepooSdk(device)
+                            return
+                        }
+                    }
+                    VeepooDeviceSupport.Kind.UNKNOWN -> Unit
+                }
                 discoveredWriteCharacteristics.clear()
                 clearGattQueue()
 
@@ -1573,6 +1692,12 @@ class HBandBleManager(
     @SuppressLint("MissingPermission")
     fun broadcastSensorCommands(gatt: BluetoothGatt?) {
         val activeGatt = gatt ?: currentGatt ?: return
+        val mac = activeGatt.device?.address ?: _connectedDevice.value?.macAddress
+        if (!VeepooDeviceSupport.maySendVeepooCommand(
+                _connectedDevice.value?.name,
+                advertisedServices[mac].orEmpty(),
+            )
+        ) return
         if (discoveredWriteCharacteristics.isEmpty()) return
 
         val cal = Calendar.getInstance()
@@ -2508,6 +2633,7 @@ class HBandBleManager(
     // Kotlin initializes properties in declaration order. Restoring a saved watch
     // calls stopScanning and uses gattCallback, so their fields must exist first.
     init {
+        VeepooSdkToasts.suppressFunctionNotSupported()
         vpManager.init(context.applicationContext)
         vpManager.setAutoConnectBTBySdk(false)
         vpManager.registerBluetoothStateListener(object : IABluetoothStateListener() {

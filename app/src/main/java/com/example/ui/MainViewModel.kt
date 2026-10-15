@@ -83,6 +83,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     val scannedDevices: StateFlow<List<HBandDevice>> = bleManager.scannedDevices
     val connectedDevice: StateFlow<HBandDevice?> = bleManager.connectedDevice
+    val incompatibleWatch: StateFlow<HBandDevice?> = bleManager.incompatibleWatch
     val isScanning: StateFlow<Boolean> = bleManager.isScanning
     val scanFailure = bleManager.scanFailure
     val latestTelemetry: StateFlow<HBandTelemetry?> = bleManager.latestTelemetry
@@ -519,6 +520,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         bleManager.disconnectDevice()
         HBandBleService.stop(getApplication())
         showNotification("Desconexão solicitada. Confira o estado do relógio na tela.")
+    }
+
+    fun forgetIncompatibleWatch() {
+        bleManager.forgetDevice()
+        HBandBleService.stop(getApplication())
     }
 
     fun triggerSpotCheck() {

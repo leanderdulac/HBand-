@@ -86,6 +86,7 @@ fun HomeScreen(
 ) {
     val apiHealth by viewModel.apiHealth.collectAsStateWithLifecycle()
     val connectedDevice by viewModel.connectedDevice.collectAsStateWithLifecycle()
+    val incompatibleWatch by viewModel.incompatibleWatch.collectAsStateWithLifecycle()
     val scannedDevices by viewModel.scannedDevices.collectAsStateWithLifecycle()
     val isScanning by viewModel.isScanning.collectAsStateWithLifecycle()
     val scanFailure by viewModel.scanFailure.collectAsStateWithLifecycle()
@@ -227,6 +228,11 @@ fun HomeScreen(
                     onShowNotification = { viewModel.showNotification(it) },
                     onScanClick = { selectedTab = 2 },
                     onDisconnect = { viewModel.disconnectDevice() },
+                    incompatibleDevice = incompatibleWatch,
+                    onForgetIncompatible = {
+                        viewModel.forgetIncompatibleWatch()
+                        selectedTab = 2
+                    },
                     geminiInsightText = geminiInsightText,
                     isGeneratingGeminiInsight = isGeneratingGeminiInsight,
                     onRefreshGeminiInsight = { viewModel.generateGeminiInsight() },
@@ -283,7 +289,12 @@ fun HomeScreen(
                     onStopScan = { viewModel.stopBleScan() },
                     onConnectDevice = { viewModel.connectDevice(it) },
                     onConnectByMac = { mac -> viewModel.connectByMacAddress(mac) },
-                    onDisconnectDevice = { viewModel.disconnectDevice() }
+                    onDisconnectDevice = { viewModel.disconnectDevice() },
+                    incompatibleDevice = incompatibleWatch,
+                    onForgetIncompatible = {
+                        viewModel.forgetIncompatibleWatch()
+                        selectedTab = 2
+                    },
                 )
 
                 3 -> QueueInspector(
@@ -400,6 +411,8 @@ internal fun DashboardTab(
     onShowNotification: (String) -> Unit,
     onScanClick: () -> Unit,
     onDisconnect: () -> Unit,
+    incompatibleDevice: com.example.data.model.HBandDevice? = null,
+    onForgetIncompatible: () -> Unit = {},
     geminiInsightText: String = "",
     isGeneratingGeminiInsight: Boolean = false,
     onRefreshGeminiInsight: () -> Unit = {},
@@ -458,6 +471,11 @@ internal fun DashboardTab(
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         com.example.ui.components.PatientSummaryLayout(first = {
+            com.example.ui.components.IncompatibleWatchCard(
+                device = incompatibleDevice,
+                onForget = onForgetIncompatible,
+            )
+
             DeviceControlCard(
                 device = connectedDevice,
                 autoIngestLive = autoIngestLive,

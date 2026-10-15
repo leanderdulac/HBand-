@@ -45,6 +45,8 @@ fun PatientWatchScreen(
     onDisconnectDevice: () -> Unit,
     scanFailure: BleScanFailure? = null,
     onStopScan: (() -> Unit)? = null,
+    incompatibleDevice: HBandDevice? = null,
+    onForgetIncompatible: () -> Unit = {},
 ) {
     val context = LocalContext.current
     var permissionMessage by rememberSaveable { mutableStateOf<String?>(null) }
@@ -116,6 +118,8 @@ fun PatientWatchScreen(
         onConnectDevice = { device -> withPermissions(connectPermissions) { onConnectDevice(device) } },
         onConnectByMac = { mac -> withPermissions(connectPermissions) { onConnectByMac(mac) } },
         onDisconnectDevice = { withPermissions(connectPermissions, onDisconnectDevice) },
+        incompatibleDevice = incompatibleDevice,
+        onForgetIncompatible = onForgetIncompatible,
         onOpenPermissions = {
             try {
                 context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, "package:${context.packageName}".toUri()))
@@ -139,6 +143,8 @@ internal fun PatientWatchContent(
     onOpenPermissions: () -> Unit,
     scanFailure: BleScanFailure? = null,
     onStopScan: (() -> Unit)? = null,
+    incompatibleDevice: HBandDevice? = null,
+    onForgetIncompatible: () -> Unit = {},
 ) {
     var showSupport by rememberSaveable { mutableStateOf(false) }
     var address by rememberSaveable { mutableStateOf("") }
@@ -151,6 +157,7 @@ internal fun PatientWatchContent(
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Text("Meu relógio", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.semantics { heading() })
+        IncompatibleWatchCard(device = incompatibleDevice, onForget = onForgetIncompatible)
         PatientSummaryLayout(first = {
             Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
                 Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
