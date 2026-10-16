@@ -46,12 +46,17 @@ struct ContentView: View {
         }
         .tint(palette.primary)
         .environment(\.patientPalette, palette)
+        .environment(\.patientColorScheme, resolved.colorScheme)
+        .preferredColorScheme(resolved.colorScheme)
+        .patientChrome()
         .sheet(isPresented: $showProfile) {
             ProfileEditorSheet(onClose: {
                 showProfile = false
                 session.notifyProfileChanged()
             })
             .environment(\.patientPalette, palette)
+            .environment(\.patientColorScheme, resolved.colorScheme)
+            .preferredColorScheme(resolved.colorScheme)
         }
         .onChange(of: scenePhase) { phase in
             if phase == .active { session.handleBecameActive() }
@@ -83,6 +88,7 @@ struct PlaceholderScreen: View {
             }
             .background(palette.background.ignoresSafeArea())
             .navigationBarTitleDisplayMode(.inline)
+            .patientChrome()
         }
     }
 }
@@ -132,6 +138,7 @@ struct SettingsPlaceholder: View {
                     }
                     Text("Assinatura do piloto")
                         .font(.system(size: 22, weight: .semibold))
+                        .foregroundStyle(palette.onSurface)
                         .padding(.top, PatientTheme.margin)
                     Text(SigningPlaceholders.summary)
                         .font(.system(size: 17))
@@ -141,6 +148,7 @@ struct SettingsPlaceholder: View {
             }
             .background(palette.background.ignoresSafeArea())
             .navigationTitle("Ajustes")
+            .patientChrome()
         }
         .accessibilityIdentifier("theme_selector")
     }

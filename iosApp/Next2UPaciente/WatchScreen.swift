@@ -33,6 +33,7 @@ struct WatchScreen: View {
             }
             .background(palette.background.ignoresSafeArea())
             .navigationBarTitleDisplayMode(.inline)
+            .patientChrome()
         }
     }
 
@@ -42,7 +43,7 @@ struct WatchScreen: View {
                 .font(.system(size: 17, weight: .semibold))
             Text("Batimentos: \(session.heartRate > 0 ? "\(session.heartRate) bpm" : "—")")
                 .font(.system(size: 40, weight: .bold))
-                .foregroundStyle(Color(hex: 0xC2334A))
+                .foregroundStyle(palette.heart)
                 .accessibilityLabel("Batimentos \(session.heartRate > 0 ? "\(session.heartRate) por minuto" : "sem medição")")
             Text("Oxigênio: \(session.spo2 > 0 ? "\(session.spo2) %" : "—")")
                 .font(.system(size: 22, weight: .semibold))
@@ -54,6 +55,7 @@ struct WatchScreen: View {
                 .font(.system(size: 15))
                 .foregroundStyle(palette.onSurfaceVariant)
         }
+        .foregroundStyle(palette.onSurface)
         .padding(PatientTheme.margin)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(palette.surface)
@@ -66,6 +68,7 @@ struct WatchScreen: View {
                 .font(.system(size: 22, weight: .semibold))
             TextField("Nome do relógio", text: $renameDraft)
                 .font(.system(size: 17))
+                .patientFieldInk(palette)
                 .frame(minHeight: PatientTheme.minTouch)
                 .accessibilityIdentifier("watch_tab_input_name")
             Button("Renomear relógio") { session.renameWatch(renameDraft) }
@@ -129,9 +132,11 @@ struct WatchScreen: View {
             TextField("URL HTTPS do Core", text: $session.ingestUrl)
                 .textInputAutocapitalization(.never)
                 .font(.system(size: 17))
+                .patientFieldInk(palette)
                 .frame(minHeight: PatientTheme.minTouch)
             SecureField("Chave X-API-Key (override)", text: $session.ingestKey)
                 .font(.system(size: 17))
+                .patientFieldInk(palette)
                 .frame(minHeight: PatientTheme.minTouch)
             Button("Guardar chave e URL") { session.configureIngest() }
                 .buttonStyle(PatientPrimaryButton())
@@ -148,6 +153,7 @@ struct WatchScreen: View {
                 .font(.system(size: 15))
                 .foregroundStyle(palette.onSurfaceVariant)
         }
+        .foregroundStyle(palette.onSurface)
         .padding(PatientTheme.margin)
         .background(palette.ai)
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))

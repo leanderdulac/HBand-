@@ -5,6 +5,7 @@ import shared
 
 struct SettingsScreen: View {
     @Environment(\.patientPalette) private var palette
+    @Environment(\.patientColorScheme) private var paletteScheme
     @Binding var themeStorage: String
     @ObservedObject var session: VeepooSession
 
@@ -42,12 +43,15 @@ struct SettingsScreen: View {
             }
             .background(palette.background.ignoresSafeArea())
             .navigationTitle("Ajustes")
+            .patientChrome()
             .sheet(isPresented: $showProfile) {
                 ProfileEditorSheet(onClose: {
                     showProfile = false
                     session.notifyProfileChanged()
                 })
                 .environment(\.patientPalette, palette)
+                .environment(\.patientColorScheme, paletteScheme)
+                .preferredColorScheme(paletteScheme)
             }
             .onChange(of: autoReconnect) { value in
                 session.setAutoReconnect(value)
@@ -73,12 +77,12 @@ struct SettingsScreen: View {
         .accessibilityIdentifier("user_profile_settings_card")
     }
 
-    /// Honest iOS continuity — not the Android battery-exemption card.
+    /// Honest iOS continuity — written for the patient, without Android product names.
     private var continuityCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Envio contínuo neste iPhone")
                 .font(.system(size: 22, weight: .semibold))
-            Text("O iPhone não tem o pedido de isenção de bateria do Android. O Bluetooth em segundo plano é melhor esforço: o sistema pode pausar o app, e fechar o app pela lista de abertos não o relança.")
+            Text("O Bluetooth em segundo plano é melhor esforço: o sistema pode pausar o app, e fechar o app pela lista de abertos não o relança.")
                 .font(.system(size: 17))
             Text("Para melhorar a continuidade:")
                 .font(.system(size: 17, weight: .semibold))
@@ -86,7 +90,7 @@ struct SettingsScreen: View {
                 .font(.system(size: 17))
             Text("2. Deixe o Bluetooth ligado.")
                 .font(.system(size: 17))
-            Text("3. Não deslize o next2u SAÚDE para fechar. Force-quit no iOS não restaura a sessão do relógio.")
+            Text("3. Não deslize o next2u SAÚDE para fechar. Fechar o app pela lista de abertos não restaura a sessão do relógio.")
                 .font(.system(size: 17))
             Button("Abrir Ajustes deste iPhone") { openAppSettings() }
                 .buttonStyle(PatientPrimaryButton())
@@ -95,9 +99,10 @@ struct SettingsScreen: View {
                 showContinuityHelp.toggle()
             }
             .font(.system(size: 17, weight: .semibold))
+            .foregroundStyle(palette.onSurface)
             .frame(maxWidth: .infinity, minHeight: PatientTheme.primaryButton)
             if showContinuityHelp {
-                Text("Não existe «Liberar o app» no iOS. Samsung e Multilaser não se aplicam a este iPhone. O relógio guarda medidas; o iPhone sincroniza ao abrir, ao receber notify ou no restore do Bluetooth.")
+                Text("Não há um botão para «liberar o app» neste iPhone. O relógio guarda as medidas; o iPhone sincroniza ao abrir, ao receber uma notificação ou quando o Bluetooth restabelece a sessão.")
                     .font(.system(size: 17))
             }
         }
@@ -115,12 +120,14 @@ struct SettingsScreen: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Reconectar relógio")
                     .font(.system(size: 17, weight: .bold))
+                    .foregroundStyle(palette.onSurface)
                 Text("Tentar conectar novamente quando o relógio perder a conexão.")
                     .font(.system(size: 15))
                     .foregroundStyle(palette.onSurfaceVariant)
             }
         }
         .tint(palette.primary)
+        .foregroundStyle(palette.onSurface)
         .padding(20)
         .background(palette.surface)
         .overlay(RoundedRectangle(cornerRadius: 28, style: .continuous).stroke(palette.outlineVariant, lineWidth: 1))
@@ -170,6 +177,7 @@ struct SettingsScreen: View {
                 .foregroundStyle(palette.onSurfaceVariant)
             Toggle("Ativar avisos neste aparelho", isOn: $alertsEnabled)
                 .tint(palette.primary)
+                .foregroundStyle(palette.onSurface)
                 .frame(minHeight: PatientTheme.primaryButton)
                 .accessibilityIdentifier("hr_alerts_toggle_switch")
                 .onChange(of: alertsEnabled) { enabled in
@@ -240,6 +248,7 @@ struct SettingsScreen: View {
 /// Android `UserProfileDialog` fields, labels and validation. No invented clinical fields.
 struct ProfileEditorSheet: View {
     @Environment(\.patientPalette) private var palette
+    @Environment(\.patientColorScheme) private var paletteScheme
     var onClose: () -> Void
     @State private var name = ""
     @State private var age = ""
@@ -290,6 +299,7 @@ struct ProfileEditorSheet: View {
                                 .foregroundStyle(palette.onSurfaceVariant)
                             TextField("Observações", text: $notes, axis: .vertical)
                                 .font(.system(size: 17))
+                                .patientFieldInk(palette)
                                 .lineLimit(2...6)
                                 .frame(minHeight: PatientTheme.minTouch)
                                 .accessibilityIdentifier("input_medical_notes")
@@ -330,14 +340,20 @@ struct ProfileEditorSheet: View {
             }
             .background(palette.background.ignoresSafeArea())
             .navigationTitle("Meu perfil")
+            .navigationBarTitleDisplayMode(.large)
+            .patientChrome()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancelar", action: requestClose)
+                        .foregroundStyle(palette.primary)
                 }
             }
             .onAppear { load() }
             .sheet(isPresented: $confirmDiscard) {
                 discardSheet
+                    .environment(\.patientPalette, palette)
+                    .environment(\.patientColorScheme, paletteScheme)
+                    .preferredColorScheme(paletteScheme)
             }
         }
         .accessibilityIdentifier("profile_editor")
@@ -359,6 +375,8 @@ struct ProfileEditorSheet: View {
         }
         .foregroundStyle(palette.onSurface)
         .padding(PatientTheme.margin)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(palette.background)
         .presentationDetents([.medium])
         .accessibilityIdentifier("profile_discard_dialog")
     }
@@ -372,7 +390,7 @@ struct ProfileEditorSheet: View {
                 .font(.system(size: 17))
                 .keyboardType(keyboard(kind))
                 .frame(minHeight: PatientTheme.minTouch)
-                .foregroundStyle(palette.onSurface)
+                .patientFieldInk(palette)
                 .overlay(alignment: .bottom) {
                     Rectangle()
                         .fill(error ? palette.statusAlertForeground : palette.outlineVariant)

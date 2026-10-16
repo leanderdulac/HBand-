@@ -55,6 +55,28 @@ class GeminiInsightTest {
         assertFalse(prompt.contains("nascimento"))
         assertFalse(prompt.contains("medicamento"))
         assertTrue(prompt.contains("NÃO use títulos em markdown"))
+        assertTrue(prompt.contains("Pontuação Média de VFC"))
+        assertTrue(prompt.contains("Pico de Passos Diários: 9000"))
+    }
+
+    @Test
+    fun prompt_omits_missing_zero_metrics() {
+        val now = 2_000_000_000_000L
+        val metrics = listOf(
+            SensorMetric(id = 1, deviceId = "AA", timestamp = "t", timestampMillis = now - 1_000, heartRate = 72),
+        )
+        val prompt = GeminiInsight.buildPrompt(metrics, UserProfile(), now)
+        assertNotNull(prompt)
+        assertTrue(prompt.contains("72 BPM"))
+        assertFalse(prompt.contains("Pontuação Média de VFC"))
+        assertFalse(prompt.contains("0 passos"))
+        assertFalse(prompt.contains("Pico de Passos"))
+        assertFalse(prompt.contains("0 / 100"))
+        assertTrue(prompt.contains("valor ausente não é zero"))
+        val fallback = GeminiInsight.fallbackFrom(metrics, now)
+        assertTrue(fallback.contains("72 BPM"))
+        assertFalse(fallback.contains("VFC de 0"))
+        assertFalse(fallback.contains("0 passos"))
     }
 
     @Test
@@ -79,11 +101,22 @@ class GeminiInsightTest {
         val text = GeminiInsight.fallbackInsight(70, 70, 9000, 40)
         assertTrue(text.contains("70 BPM"))
         assertTrue(text.contains("excelente recuperação"))
+        assertTrue(text.contains("pontuação de VFC de 70"))
+        assertTrue(text.contains("9000 passos máximos"))
         assertEquals(
             "Resumo automático para revisão, gerado por IA ou por regras locais. Não é diagnóstico nem orientação médica.",
             GeminiInsight.reviewLabel(),
         )
         assertEquals("Resumo com IA", GeminiInsight.highlightTitle())
         assertEquals("Atualizar resumo", GeminiInsight.refreshLabel())
+    }
+
+    @Test
+    fun fallback_omits_zero_because_missing() {
+        val text = GeminiInsight.fallbackInsight(70, 0, 0, 0)
+        assertTrue(text.contains("70 BPM"))
+        assertFalse(text.contains("VFC de 0"))
+        assertFalse(text.contains("0 passos"))
+        assertFalse(text.contains("0 minutos"))
     }
 }

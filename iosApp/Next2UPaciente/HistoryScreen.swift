@@ -35,6 +35,7 @@ struct HistoryScreen: View {
             }
             .background(palette.background.ignoresSafeArea())
             .navigationBarTitleDisplayMode(.inline)
+            .patientChrome()
         }
         .accessibilityIdentifier("recharts_sensor_dashboard")
     }

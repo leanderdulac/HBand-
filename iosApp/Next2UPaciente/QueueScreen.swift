@@ -3,6 +3,7 @@ import shared
 
 struct QueueScreen: View {
     @Environment(\.patientPalette) private var palette
+    @Environment(\.patientColorScheme) private var paletteScheme
     @ObservedObject var session: VeepooSession
     @State private var inspect: StoredQueueItem?
     @State private var removal: QueueRemoval?
@@ -56,8 +57,12 @@ struct QueueScreen: View {
             }
             .background(palette.background.ignoresSafeArea())
             .navigationBarTitleDisplayMode(.inline)
+            .patientChrome()
             .sheet(item: $inspect) { item in
                 JsonPayloadSheet(item: item, onClose: { inspect = nil })
+                    .environment(\.patientPalette, palette)
+                    .environment(\.patientColorScheme, paletteScheme)
+                    .preferredColorScheme(paletteScheme)
             }
             .alert("Apagar registros da fila?", isPresented: Binding(
                 get: { removal != nil },
@@ -204,19 +209,23 @@ struct JsonPayloadSheet: View {
                         .foregroundStyle(palette.primary)
                     Text(item.payloadJson)
                         .font(.system(size: 12, design: .monospaced))
+                        .foregroundStyle(palette.onSurface)
                         .padding(14)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(palette.ai)
                         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                         .accessibilityIdentifier("json_payload_text")
                 }
+                .foregroundStyle(palette.onSurface)
                 .padding(20)
             }
             .background(palette.surface.ignoresSafeArea())
             .navigationBarTitleDisplayMode(.inline)
+            .patientChrome()
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Fechar", action: onClose)
+                        .foregroundStyle(palette.primary)
                         .accessibilityIdentifier("close_json_inspector")
                 }
             }
