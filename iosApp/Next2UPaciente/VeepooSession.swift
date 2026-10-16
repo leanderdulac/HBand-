@@ -81,6 +81,24 @@ final class VeepooSession: NSObject, ObservableObject {
     private var heartRunning = false
     private var spo2Running = false
     private var heartSamplesThisBurst = 0
+    /// Liveness of the measurement loop. The FC/SpO₂ rotation is driven only by BLE
+    /// callbacks, so one missed callback used to freeze it forever (no readings, no POSTs).
+    private var lastSampleAt = Date()
+    private var measureStartedAt = Date()
+    private var gattUpSince: Date?
+    private var stallTimer: DispatchSourceTimer?
+    /// Single in-flight Veepoo connect. Without it every didConnect (the SDK itself calls
+    /// connect) re-entered veepooSDKConnectDevice, producing a storm of parallel sessions,
+    /// "pairing fail" / "check result fail", and an FC test that never returned values.
+    private var sessionAttemptAt: Date?
+
+    private func beginSessionAttempt(_ origin: String) -> Bool {
+        if let at = sessionAttemptAt, Date().timeIntervalSince(at) < 25 {
+            return false
+        }
+        sessionAttemptAt = Date()
+        return true
+    }
 
     struct ScannedWatch: Identifiable, Equatable {
         var id: String { address }
@@ -119,6 +137,50 @@ final class VeepooSession: NSObject, ObservableObject {
         configureIngest()
         refreshLocalStore()
         note("Sessão BLE criada. Restore id \(Self.restoreId).")
+        startStallWatchdog()
+    }
+
+    /// Runs whenever the process is awake (foreground, or the ~10 s windows iOS grants on
+    /// each GATT indication in background) and restarts a stuck handshake/measurement.
+    private func startStallWatchdog() {
+        let timer = DispatchSource.makeTimerSource(queue: .main)
+        timer.schedule(deadline: .now() + 30, repeating: 30, leeway: .seconds(5))
+        timer.setEventHandler { [weak self] in
+            MainActor.assumeIsolated { self?.checkStall() }
+        }
+        timer.resume()
+        stallTimer = timer
+    }
+
+    private func checkStall() {
+        let now = Date()
+        guard autoReconnectEnabled, !userRequestedDisconnect else { return }
+        if !hardwareReady {
+            // GATT up but the Veepoo password handshake never finished.
+            if let since = gattUpSince, now.timeIntervalSince(since) > 60,
+               let uuid = lastPeripheralUUID.flatMap(UUID.init(uuidString:)),
+               let peripheral = manager.centralManager.retrievePeripherals(withIdentifiers: [uuid]).first,
+               peripheral.state == .connected {
+                note("Watchdog: handshake parado há \(Int(now.timeIntervalSince(since))) s. Repondo sessão.")
+                gattUpSince = now
+                sessionAttemptAt = nil
+                resumeSession(peripheral)
+            }
+            return
+        }
+        if spo2Running, now.timeIntervalSince(measureStartedAt) > 60 {
+            note("Watchdog: SpO₂ sem resultado em 60 s. Volta para FC.")
+            stopOxygen()
+            startHeart()
+            return
+        }
+        if now.timeIntervalSince(lastSampleAt) > 120, now.timeIntervalSince(measureStartedAt) > 60 {
+            note("Watchdog: sem leitura há \(Int(now.timeIntervalSince(lastSampleAt))) s. Reinicia FC.")
+            stopSensors()
+            heartRunning = false
+            spo2Running = false
+            startHeart()
+        }
     }
 
     func configureIngest() {
@@ -282,6 +344,7 @@ final class VeepooSession: NSObject, ObservableObject {
             bleConnectionLabel = "Falha ou tempo esgotado"
             sessionMessage = "Falha ou tempo esgotado na ligação. Mantendo ligação pendente."
             note("Falha/timeout Veepoo (\(state.rawValue)). Pending connect iOS.")
+            sessionAttemptAt = nil
             keepPendingConnect(watch.model.peripheral)
             reconnectLastKnown(reason: "falha \(state.rawValue)")
         case 4:
@@ -328,6 +391,9 @@ final class VeepooSession: NSObject, ObservableObject {
             return
         }
         hardwareReady = true
+        sessionAttemptAt = nil
+        gattUpSince = nil
+        lastSampleAt = Date()
         bleConnectionLabel = "Relógio pronto"
         sessionMessage = "Relógio pronto. Lendo dados do dia e depois a frequência cardíaca."
         note("Handshake. Reinscreve serviços e inicia FC.")
@@ -360,11 +426,13 @@ final class VeepooSession: NSObject, ObservableObject {
         stopOxygen()
         heartRunning = true
         heartSamplesThisBurst = 0
+        measureStartedAt = Date()
         manager.peripheralManage.veepooSDKTestHeartStart(true) { [weak self] state, value in
             Task { @MainActor in
                 guard let self else { return }
                 if state.rawValue == 1, value >= 30, value <= 240 {
                     self.heartRate = Int(value)
+                    self.lastSampleAt = Date()
                     self.sessionMessage = "Batimentos: \(value) bpm (leitura do relógio)."
                     HeartAlertDelivery.evaluate(heartRate: Int(value))
                     self.heartSamplesThisBurst += 1
@@ -385,11 +453,13 @@ final class VeepooSession: NSObject, ObservableObject {
         guard hardwareReady else { return }
         stopHeart()
         spo2Running = true
+        measureStartedAt = Date()
         manager.peripheralManage.veepooSDKTestOxygenStart(true) { [weak self] _, value in
             Task { @MainActor in
                 guard let self else { return }
                 if value >= 50, value <= 100 {
                     self.spo2 = Int(value)
+                    self.lastSampleAt = Date()
                     self.recordAndFlush()
                     self.startHeart()
                 }
@@ -492,7 +562,7 @@ final class VeepooSession: NSObject, ObservableObject {
         refreshLocalStore()
         IngestBackground.schedule()
         scheduleBackoffRetry(after: flush.pendingCount > 0 ? flush.retryInMs : 0)
-        bleLog.info("upload http=\(flush.lastHttpCode, privacy: .public) pending=\(flush.pendingCount, privacy: .public)")
+        bleLog.notice("upload http=\(flush.lastHttpCode, privacy: .public) pending=\(flush.pendingCount, privacy: .public)")
     }
 
     private func recordAndFlush() {
@@ -519,6 +589,7 @@ final class VeepooSession: NSObject, ObservableObject {
                 hrvScore: 0,
                 patientId: PatientStore.shared.profile().patientId
             ) else { return }
+            if !recorded.queued { note("Leitura não enfileirada: \(recorded.message)") }
             lastClientReadingId = recorded.clientReadingId
             pendingCount = Int(IngestRuntime.shared.pendingCount())
             failedCount = Int(IngestRuntime.shared.failedCount())
@@ -605,6 +676,7 @@ final class VeepooSession: NSObject, ObservableObject {
         lastPeripheralUUID = peripheral.identifier.uuidString
         rememberPeripheral(peripheral)
         bleConnectionLabel = "GATT ligado"
+        if gattUpSince == nil { gattUpSince = Date() }
         note("didConnect \(peripheral.identifier.uuidString)")
         if !hardwareReady {
             resumeSession(peripheral)
@@ -616,6 +688,8 @@ final class VeepooSession: NSObject, ObservableObject {
         heartRunning = false
         spo2Running = false
         bleConnectionLabel = "Desligado"
+        gattUpSince = nil
+        sessionAttemptAt = nil
         note("didDisconnect \(reason)")
         keepPendingConnect(peripheral)
     }
@@ -632,6 +706,8 @@ final class VeepooSession: NSObject, ObservableObject {
         lastAddress = watch.address
         lastName = watch.name
         lastPeripheralUUID = peripheral.identifier.uuidString
+        if gattUpSince == nil { gattUpSince = Date() }
+        guard beginSessionAttempt("resume") else { return }
         note("Reposiciona sessão Veepoo (senha + FC).")
         manager.deviceShowConfirm = false
         manager.veepooSDKConnectDevice(model, deviceConnect: { [weak self] state in
@@ -643,6 +719,7 @@ final class VeepooSession: NSObject, ObservableObject {
 
     private func connectRetrieved(_ peripheral: CBPeripheral) {
         guard let model = VPPeripheralModel(peripher: peripheral) else { return }
+        guard beginSessionAttempt("retrieve") else { return }
         let watch = ScannedWatch(
             name: lastName ?? peripheral.name ?? "VE30",
             address: lastAddress ?? peripheral.identifier.uuidString,
@@ -705,7 +782,7 @@ final class VeepooSession: NSObject, ObservableObject {
     func note(_ message: String) {
         lastBleEvent = message
         lastBleEventAt = Date()
-        bleLog.info("\(message, privacy: .public)")
+        bleLog.notice("\(message, privacy: .public)")
     }
 
     var diagnosticsLines: [String] {
