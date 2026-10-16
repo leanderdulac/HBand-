@@ -23,7 +23,11 @@ e a ficha de privacidade / política estiverem prontas.
 
 Gera `iosApp/build/Next2UPaciente.xcarchive` e um IPA em
 `iosApp/build/testflight-export` com `ExportOptions.plist`
-(`method=app-store-connect`, `destination=export`). Envie pelo Organizer
+(`method=app-store-connect`, `destination=export`). O script passa
+`-allowProvisioningUpdates` no `archive` e no `-exportArchive` para o
+Xcode criar o perfil e o certificado iOS Distribution do Team
+(`No profiles for br.com.next2u.saude.paciente` / `No signing certificate
+iOS Distribution found` sem essa flag). Envie pelo Organizer
 (Distribute App → App Store Connect → Upload) ou Transporter.
 
 Versão: `CFBundleShortVersionString` = `0.1.0`, `CFBundleVersion` = `1`
