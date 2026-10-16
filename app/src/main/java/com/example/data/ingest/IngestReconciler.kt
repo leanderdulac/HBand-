@@ -24,6 +24,9 @@ data class PreparedReading(val item: IngestQueueEntity, val patientId: String, v
  */
 object IngestReconciler {
     const val BATCH_MAX_ITEMS = 50
+
+    /** Small default flush size: a 503 mid-outage costs at most this many items of work. */
+    const val DEFAULT_FLUSH_ITEMS = 10
     const val UNCONFIRMED = "Resposta sem confirmação válida deste registro. Leitura mantida na fila."
     const val INVALID_LOCAL = "Identidade ou instante da leitura não confirmado. Registro preservado para revisão."
 

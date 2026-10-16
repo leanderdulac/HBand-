@@ -200,6 +200,7 @@ fun HomeScreen(
         ) {
             when (selectedTab) {
                 0 -> DashboardTab(
+                    autoReconnectEnabled = autoReconnectBle,
                     syncDisplayStatus = syncDisplayStatus,
                     onRetryQueueRead = viewModel::retryQueueRead,
                     pendingCount = pendingCount,
@@ -460,6 +461,7 @@ internal fun DashboardTab(
     onStopFatigue: () -> Unit = {},
     onStartBreath: () -> Unit = {},
     onStopBreath: () -> Unit = {},
+    autoReconnectEnabled: Boolean = false,
 ) {
     Column(
         modifier = Modifier
@@ -468,6 +470,11 @@ internal fun DashboardTab(
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         com.example.ui.components.PatientSummaryLayout(first = {
+            com.example.ui.components.TelemetryStatusBanners(
+                pairedMac = connectedDevice?.macAddress,
+                hardwareConnected = hardwareConnected,
+                autoReconnect = autoReconnectEnabled,
+            )
             com.example.ui.components.IncompatibleWatchCard(
                 device = incompatibleDevice,
                 onForget = onForgetIncompatible,

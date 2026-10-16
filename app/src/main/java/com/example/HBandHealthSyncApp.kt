@@ -62,6 +62,11 @@ class HBandHealthSyncApp : Application() {
         }
     }
 
+    @Volatile private var uploadNow: (() -> Unit)? = null
+
+    /** Flush the durable queue to the Core now (used by the BLE foreground service). */
+    fun requestImmediateUpload() { uploadNow?.invoke() }
+
     fun readyBleManagerOrNull(): HBandBleManager? =
         runtimeBleManager?.takeIf { storageStartup.isReady }
 
@@ -85,6 +90,7 @@ class HBandHealthSyncApp : Application() {
             sensorMetricDao = db.sensorMetricDao(),
             apiService = RetrofitClient.apiService,
             ingestTransportProvider = { RetrofitClient.captureIngestTransport() },
+            backoffGate = com.example.data.ingest.IngestBackoffGate.shared(this),
             localWriteTransaction = db.localWriteTransaction(),
             advancedMeasurementDao = db.advancedMeasurementDao(),
         )
@@ -122,6 +128,12 @@ class HBandHealthSyncApp : Application() {
                 }
             },
         ))
+        uploadNow = {
+            bleScope.launch(Dispatchers.IO) {
+                runCatching { historyRepository.processQueueDetailed() }
+                    .onFailure { Log.e(TAG, "Falha no envio imediato pelo serviço BLE.", it) }
+            }
+        }
         val prefs = getSharedPreferences("hband_settings", MODE_PRIVATE)
         bleScope.recordLiveReadingsWithSync(
             readings = bleManager.latestTelemetry,

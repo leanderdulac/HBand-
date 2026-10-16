@@ -60,8 +60,8 @@ android {
     applicationId = "com.aistudio.hbandhealthtech.pxq97m"
     minSdk = 24
     targetSdk = 36
-    versionCode = 11
-    versionName = "1.7.3"
+    versionCode = 12
+    versionName = "1.7.4"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     buildConfigField("boolean", "BLE_LAB", "false")

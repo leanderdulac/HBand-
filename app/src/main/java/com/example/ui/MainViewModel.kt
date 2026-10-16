@@ -56,6 +56,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         sensorMetricDao = db.sensorMetricDao(),
         apiService = RetrofitClient.apiService,
         ingestTransportProvider = { RetrofitClient.captureIngestTransport() },
+            backoffGate = com.example.data.ingest.IngestBackoffGate.shared(application),
         localWriteTransaction = db.localWriteTransaction(),
         advancedMeasurementDao = db.advancedMeasurementDao(),
     )
