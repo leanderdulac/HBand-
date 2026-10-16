@@ -55,4 +55,14 @@ class PatientProfileReadTest {
         assertEquals(original, first.await())
         assertEquals(2, reads)
     }
+
+    @Test fun empty_store_allows_creating_first_profile_from_blank_form() = runTest {
+        val reader = PatientProfileRead(backgroundScope, flowOf(null))
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { reader.state.collect() }
+        runCurrent()
+        val blank = com.example.ui.components.blankPatientProfile()
+        assertEquals("", blank.fullName)
+        assertTrue(reader.canSave(blank.copy(fullName = "Paciente novo")))
+        assertFalse(reader.canSave(original))
+    }
 }

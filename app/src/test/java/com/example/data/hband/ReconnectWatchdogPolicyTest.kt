@@ -27,4 +27,9 @@ class ReconnectWatchdogPolicyTest {
         assertTrue(TelemetryBannerPolicy.showBatteryWarning(true, false))
         assertFalse(TelemetryBannerPolicy.showBatteryWarning(true, true))
     }
+
+    @Test fun versionLabelFormat() {
+        org.junit.Assert.assertEquals("Versão 1.7.4 (12)", com.example.ui.components.appVersionLabel("1.7.4", 12))
+        org.junit.Assert.assertEquals("Versão 1.7.4 (12)", com.example.ui.components.appVersionLabel())
+    }
 }

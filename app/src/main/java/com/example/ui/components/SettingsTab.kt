@@ -121,6 +121,8 @@ fun SettingsTab(
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         Text("Ajustes", style = MaterialTheme.typography.headlineMedium)
+        Text(appVersionLabel(), style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.testTag("settings_version_label"))
         Card(
             modifier = Modifier.fillMaxWidth().testTag("user_profile_settings_card"),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),

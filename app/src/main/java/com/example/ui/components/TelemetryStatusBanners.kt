@@ -90,3 +90,19 @@ fun TelemetryStatusBanners(
         }
     }
 }
+
+
+/** "Versão 1.7.4 (12)" from BuildConfig, shown in Ajustes and as a Home footer. */
+fun appVersionLabel(name: String = com.example.BuildConfig.VERSION_NAME, code: Int = com.example.BuildConfig.VERSION_CODE): String =
+    "Versão $name ($code)"
+
+@Composable
+fun AppVersionFooter(modifier: Modifier = Modifier) {
+    Text(
+        appVersionLabel(),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+        modifier = modifier.fillMaxWidth().testTag("app_version_label"),
+    )
+}

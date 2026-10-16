@@ -642,6 +642,7 @@ internal fun DashboardTab(
             }
         }
 
+        com.example.ui.components.AppVersionFooter()
         Spacer(modifier = Modifier.height(24.dp))
     }
 }
