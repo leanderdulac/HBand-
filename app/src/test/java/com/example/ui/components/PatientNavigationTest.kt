@@ -40,7 +40,7 @@ class PatientNavigationTest {
             MyApplicationTheme {
                 Scaffold(
                     modifier = Modifier.fillMaxSize().padding(top = 24.dp, bottom = 24.dp),
-                    bottomBar = { PatientNavigationBar(0, 0, {}) },
+                    bottomBar = { PatientNavigationBar(0, {}) },
                 ) { padding ->
                     Column(Modifier.fillMaxSize().padding(padding)) {
                         HomeWelcomeHeader("Nome de teste", "patient-fixture", { profileOpened = true })
@@ -72,7 +72,7 @@ class PatientNavigationTest {
                     // emulator; Robolectric does not provide its physical cutout.
                     Scaffold(
                         modifier = Modifier.fillMaxSize().padding(top = 36.dp, bottom = 24.dp),
-                        bottomBar = { PatientNavigationBar(0, 125) { route = it } },
+                        bottomBar = { PatientNavigationBar(0) { route = it } },
                     ) { padding ->
                         Column(Modifier.fillMaxSize().padding(padding)) {
                             HomeWelcomeHeader("", "patient-fixture", {})
@@ -89,10 +89,7 @@ class PatientNavigationTest {
         val navigation = compose.onNodeWithTag("main_tab_row").fetchSemanticsNode()
         assertTrue("The complete connection button must fit above navigation",
             button.positionInRoot.y + button.size.height <= navigation.positionInRoot.y)
-        compose.onNodeWithTag("tab_queue").assert(
-            SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "125 registros pendentes no aplicativo"),
-        )
-        listOf("tab_dashboard", "tab_recharts", "tab_ble", "tab_queue", "tab_settings").forEachIndexed { index, tag ->
+        listOf(0 to "tab_dashboard", 2 to "tab_ble", 4 to "tab_settings").forEach { (index, tag) ->
             compose.onNodeWithTag(tag).assertIsDisplayed().performClick()
             compose.runOnIdle { assertEquals(index, route) }
         }
@@ -103,38 +100,15 @@ class PatientNavigationTest {
         var route = -1
         compose.setContent {
             CompositionLocalProvider(LocalDensity provides Density(LocalDensity.current.density, 1.6f)) {
-                MyApplicationTheme { PatientNavigationBar(0, 5) { route = it } }
+                MyApplicationTheme { PatientNavigationBar(0) { route = it } }
             }
         }
-        compose.onNodeWithTag("adaptive_patient_navigation").assertExists()
         compose.onNodeWithTag("tab_dashboard").assertIsSelected()
-        listOf("tab_dashboard", "tab_recharts", "tab_ble", "tab_queue", "tab_settings").forEachIndexed { index, tag ->
+        listOf(0 to "tab_dashboard", 2 to "tab_ble", 4 to "tab_settings").forEach { (index, tag) ->
             compose.onNodeWithTag(tag).assertIsDisplayed().performClick()
             compose.runOnIdle { assertEquals(index, route) }
         }
     }
 
-    @Test fun adaptive_navigation_announces_full_pending_count_and_updates() = assertPendingDescription()
 
-    @Test
-    @Config(qualifiers = "w600dp-h740dp-mdpi")
-    fun single_row_navigation_announces_full_pending_count_and_updates() = assertPendingDescription()
-
-    private fun assertPendingDescription() {
-        RuntimeEnvironment.setFontScale(1f)
-        val pending = mutableIntStateOf(125)
-        compose.setContent { MyApplicationTheme { PatientNavigationBar(3, pending.intValue, {}) } }
-        compose.onNodeWithTag("tab_queue").assertIsSelected().assert(
-            SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "125 registros pendentes no aplicativo"),
-        )
-        compose.runOnIdle { pending.intValue = 1 }
-        compose.onNodeWithTag("tab_queue").assert(
-            SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "1 registro pendente no aplicativo"),
-        )
-        compose.runOnIdle { pending.intValue = 0 }
-        compose.onNodeWithTag("tab_queue").assert(
-            SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Sem registros pendentes no aplicativo"),
-        )
-        compose.onNodeWithTag("tab_ble").assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.StateDescription))
-    }
 }

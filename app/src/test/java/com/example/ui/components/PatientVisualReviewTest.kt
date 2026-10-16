@@ -52,12 +52,12 @@ class PatientVisualReviewTest {
     }
 
     @Test fun navigation_large_text() = capture("navigation_large_text", 1.6f) {
-        PatientNavigationBar(0, 5, {})
+        PatientNavigationBar(0, {})
     }
 
     @Test fun home_connection_action_is_visible_with_large_text() {
         capture("home_connection_large_text", 1.6f) {
-            Scaffold(bottomBar = { PatientNavigationBar(0, 0, {}) }) { padding ->
+            Scaffold(bottomBar = { PatientNavigationBar(0, {}) }) { padding ->
                 Column(Modifier.fillMaxSize().padding(padding)) {
                     HomeWelcomeHeader("Maria de Oliveira — exemplo", "patient-fixture", {})
                     Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp)) {
@@ -134,7 +134,7 @@ class PatientVisualReviewTest {
 
     @Test fun watch_search_is_visible_with_navigation_and_large_text() {
         capture("watch_search_large_text", 1.6f) {
-            Scaffold(bottomBar = { PatientNavigationBar(2, 0, {}) }) { padding ->
+            Scaffold(bottomBar = { PatientNavigationBar(2, {}) }) { padding ->
                 Column(Modifier.fillMaxSize().padding(padding)) {
                     HomeWelcomeHeader("", "patient-fixture", {}, showGreeting = false)
                     Box(Modifier.weight(1f).padding(horizontal = 16.dp)) {

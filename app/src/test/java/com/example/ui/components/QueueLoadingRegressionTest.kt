@@ -60,15 +60,12 @@ class QueueLoadingRegressionTest {
         compose.runOnIdle { assertEquals(1, reads) }
     }
 
-    @Test fun navigation_announces_read_error_and_diagnostics_do_not_claim_zero() {
+    @Test fun diagnostics_do_not_claim_zero_on_read_error() {
         compose.setContent { MyApplicationTheme {
             androidx.compose.foundation.layout.Column {
-                PatientNavigationBar(3, null, {}, queueReadFailed = true)
                 IngestDiagnosticsCard(com.example.data.ingest.IngestDiagnostics(readFailed = true))
             }
         } }
-        compose.onNodeWithTag("tab_queue").assert(SemanticsMatcher.expectValue(
-            SemanticsProperties.StateDescription, "Fila indisponível: falha na leitura"))
         compose.onNodeWithText("Não foi possível ler a fila.", substring = true).assertExists()
         compose.onNodeWithText("Aguardando envio: 0.", substring = true).assertDoesNotExist()
         compose.onNodeWithText("Carregando configuração e registros locais…").assertDoesNotExist()
@@ -123,20 +120,6 @@ class QueueLoadingRegressionTest {
         compose.onNodeWithText("Ver registros da fila").performScrollTo().performClick()
         compose.onNodeWithText("A lista exibida está vazia.").assertExists()
         compose.runOnIdle { assertEquals(0, actions) }
-    }
-
-    @Test fun navigation_announces_loading_then_confirmed_zero_then_exact_count() {
-        val count = mutableStateOf<Int?>(null)
-        compose.setContent { MyApplicationTheme { PatientNavigationBar(3, count.value, {}) } }
-        fun description(text: String) = compose.onNodeWithTag("tab_queue")
-            .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, text))
-        description("Carregando fila do aplicativo")
-        compose.runOnIdle { count.value = 0 }
-        description("Sem registros pendentes no aplicativo")
-        compose.runOnIdle { count.value = 125 }
-        description("125 registros pendentes no aplicativo")
-        compose.runOnIdle { count.value = null }
-        description("Carregando fila do aplicativo")
     }
 
     @Test fun dashboard_loading_hides_stale_counts_and_send_actions() {

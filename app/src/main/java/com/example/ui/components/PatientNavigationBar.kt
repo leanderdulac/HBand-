@@ -18,29 +18,21 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 
-private data class PatientDestination(val label: String, val tag: String, val icon: ImageVector)
+private data class PatientDestination(val id: Int, val label: String, val tag: String, val icon: ImageVector)
 private val destinations = listOf(
-    PatientDestination("Início", "tab_dashboard", Icons.Default.Favorite),
-    PatientDestination("Histórico", "tab_recharts", Icons.Default.QueryStats),
-    PatientDestination("Relógio", "tab_ble", Icons.Default.Watch),
-    PatientDestination("Envios", "tab_queue", Icons.Default.CloudUpload),
-    PatientDestination("Ajustes", "tab_settings", Icons.Default.Settings),
+    PatientDestination(0, "Início", "tab_dashboard", Icons.Default.Favorite),
+    PatientDestination(2, "Relógio", "tab_ble", Icons.Default.Watch),
+    PatientDestination(4, "Ajustes", "tab_settings", Icons.Default.Settings),
 )
 
 @Composable
-internal fun PatientNavigationRail(selectedTab: Int, pendingCount: Int?, onSelect: (Int) -> Unit) =
-    PatientNavigationRail(selectedTab, pendingCount, onSelect, false)
-
-@Composable
-internal fun PatientNavigationRail(selectedTab: Int, pendingCount: Int?, onSelect: (Int) -> Unit, queueReadFailed: Boolean) {
+internal fun PatientNavigationRail(selectedTab: Int, onSelect: (Int) -> Unit) {
     val style = MaterialTheme.typography.labelLarge
     val measurer = rememberTextMeasurer()
     val density = LocalDensity.current
@@ -52,18 +44,18 @@ internal fun PatientNavigationRail(selectedTab: Int, pendingCount: Int?, onSelec
             .selectableGroup().testTag("patient_navigation_rail"),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        destinations.forEachIndexed { index, destination ->
-            val selected = selectedTab == index
+        destinations.forEach { destination ->
+            val selected = selectedTab == destination.id
             Column(
                 Modifier.fillMaxWidth().heightIn(min = 72.dp)
                     .background(if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent, RoundedCornerShape(20.dp))
-                    .selectable(selected, role = Role.Tab, onClick = { onSelect(index) })
+                    .selectable(selected, role = Role.Tab, onClick = { onSelect(destination.id) })
                     .padding(horizontal = 4.dp, vertical = 12.dp)
-                    .testTag(destination.tag).pendingDescription(index, pendingCount, queueReadFailed),
+                    .testTag(destination.tag),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                DestinationIcon(index, pendingCount)
+                Icon(destination.icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text(destination.label, style = style, textAlign = TextAlign.Center,
                     fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium)
             }
@@ -72,15 +64,11 @@ internal fun PatientNavigationRail(selectedTab: Int, pendingCount: Int?, onSelec
 }
 
 @Composable
-internal fun PatientNavigationBar(selectedTab: Int, pendingCount: Int?, onSelect: (Int) -> Unit) =
-    PatientNavigationBar(selectedTab, pendingCount, onSelect, false)
-
-@Composable
-internal fun PatientNavigationBar(selectedTab: Int, pendingCount: Int?, onSelect: (Int) -> Unit, queueReadFailed: Boolean) {
+internal fun PatientNavigationBar(selectedTab: Int, onSelect: (Int) -> Unit) {
     val measurer = rememberTextMeasurer()
     val labelStyle = MaterialTheme.typography.labelMedium
     val density = LocalDensity.current
-    // Measure at the user's font scale. Never shrink type to squeeze five destinations into one row.
+    // Measure at the user's font scale. Never shrink type to squeeze destinations into one row.
     val labelWidth = destinations.maxOf { measurer.measure(it.label, labelStyle).size.width }
     BoxWithConstraints(Modifier.fillMaxWidth().testTag("main_tab_row")) {
         val labelWidthDp = with(density) { labelWidth.toDp() }
@@ -88,17 +76,17 @@ internal fun PatientNavigationBar(selectedTab: Int, pendingCount: Int?, onSelect
         val fittedColumns = ((maxWidth + 4.dp) / (labelWidthDp + 12.dp)).toInt().coerceIn(1, destinations.size)
         val columns = if (fittedColumns == 4) 3 else fittedColumns
         // Three or more icon rows crowd out the primary action on small screens.
-        // Keep every named destination and pending badge in shorter text rows.
+        // Keep every named destination in shorter text rows.
         val compactRows = destinations.size > columns * 2
         if (normalRowFits) {
             NavigationBar(containerColor = MaterialTheme.colorScheme.surfaceVariant) {
-                destinations.forEachIndexed { index, destination ->
+                destinations.forEach { destination ->
                     NavigationBarItem(
-                        selected = selectedTab == index,
-                        onClick = { onSelect(index) },
-                        icon = { DestinationIcon(index, pendingCount) },
+                        selected = selectedTab == destination.id,
+                        onClick = { onSelect(destination.id) },
+                        icon = { Icon(destination.icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
                         label = { Text(destination.label, style = labelStyle) },
-                        modifier = Modifier.testTag(destination.tag).pendingDescription(index, pendingCount, queueReadFailed),
+                        modifier = Modifier.testTag(destination.tag),
                     )
                 }
             }
@@ -113,20 +101,20 @@ internal fun PatientNavigationBar(selectedTab: Int, pendingCount: Int?, onSelect
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         row.forEach { index ->
                             val destination = destinations[index]
-                            val selected = selectedTab == index
+                            val selected = selectedTab == destination.id
                             Column(
                                 Modifier.weight(1f).heightIn(min = if (compactRows) 56.dp else 64.dp)
                                     .background(
                                         if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
                                         RoundedCornerShape(12.dp),
                                     )
-                                    .selectable(selected, role = Role.Tab, onClick = { onSelect(index) })
+                                    .selectable(selected, role = Role.Tab, onClick = { onSelect(destination.id) })
                                     .padding(horizontal = 4.dp, vertical = 8.dp)
-                                    .testTag(destination.tag).pendingDescription(index, pendingCount, queueReadFailed),
+                                    .testTag(destination.tag),
                                 horizontalAlignment = Alignment.CenterHorizontally,
                                 verticalArrangement = if (compactRows) Arrangement.Center else Arrangement.spacedBy(4.dp),
                             ) {
-                                if (!compactRows) DestinationIcon(index, pendingCount)
+                                if (!compactRows) Icon(destination.icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -136,7 +124,6 @@ internal fun PatientNavigationBar(selectedTab: Int, pendingCount: Int?, onSelect
                                         fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
                                         color = MaterialTheme.colorScheme.onSurface,
                                     )
-                                    if (compactRows) PendingDestinationBadge(index, pendingCount)
                                 }
                             }
                         }
@@ -148,27 +135,5 @@ internal fun PatientNavigationBar(selectedTab: Int, pendingCount: Int?, onSelect
     }
 }
 
-@Composable
-private fun DestinationIcon(index: Int, pendingCount: Int?) {
-    BadgedBox(badge = { PendingDestinationBadge(index, pendingCount) }) {
-        Icon(destinations[index].icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-    }
-}
-
-@Composable
-private fun PendingDestinationBadge(index: Int, pendingCount: Int?) {
-    if (index == 3 && pendingCount != null && pendingCount > 0) Badge(Modifier.clearAndSetSemantics {}) {
-        Text(if (pendingCount > 99) "99+" else pendingCount.toString())
-    }
-}
-
-// The visible badge is abbreviated; assistive technology receives the complete local count.
-private fun Modifier.pendingDescription(index: Int, pendingCount: Int?, readFailed: Boolean): Modifier =
-    if (index == 3) semantics {
-        stateDescription = if (readFailed) "Fila indisponível: falha na leitura" else when (pendingCount) {
-            null -> "Carregando fila do aplicativo"
-            0 -> "Sem registros pendentes no aplicativo"
-            1 -> "1 registro pendente no aplicativo"
-            else -> "$pendingCount registros pendentes no aplicativo"
-        }
-    } else this
+/** Removed destinations saved by older versions return to Início. */
+internal fun patientMainTab(savedTab: Int): Int = if (savedTab in listOf(0, 2, 4)) savedTab else 0

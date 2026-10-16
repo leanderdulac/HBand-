@@ -39,7 +39,7 @@ class PatientAdaptiveLayoutTest {
             MyApplicationTheme {
                 Box(Modifier.width(width.value).height(800.dp)) {
                     var tab by rememberSaveable { mutableIntStateOf(0) }
-                    PatientAdaptiveScaffold(tab, 125, { tab = it }, header = {}) {
+                    PatientAdaptiveScaffold(tab, { tab = it }, header = {}) {
                         var draft by rememberSaveable { mutableStateOf("") }
                         OutlinedTextField(draft, { draft = it }, Modifier.testTag("draft"))
                     }
@@ -48,20 +48,18 @@ class PatientAdaptiveLayoutTest {
         }
         compose.onNodeWithTag("patient_navigation_rail").assertIsDisplayed()
         compose.onNodeWithTag("draft").performTextInput("Rascunho de teste")
-        compose.onNodeWithTag("tab_queue").performClick().assertIsSelected().assert(
-            SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "125 registros pendentes no aplicativo"),
-        )
+        compose.onNodeWithTag("tab_settings").performClick().assertIsSelected()
         compose.runOnIdle { width.value = 360.dp }
         compose.onNodeWithTag("patient_navigation_rail").assertDoesNotExist()
         compose.onNodeWithTag("main_tab_row").assertIsDisplayed()
-        compose.onNodeWithTag("tab_queue").assertIsSelected()
+        compose.onNodeWithTag("tab_settings").assertIsSelected()
         compose.onNodeWithTag("draft").assertTextContains("Rascunho de teste")
         compose.runOnIdle { width.value = 1000.dp }
-        compose.onNodeWithTag("tab_queue").assertIsSelected()
+        compose.onNodeWithTag("tab_settings").assertIsSelected()
         compose.onNodeWithTag("draft").assertTextContains("Rascunho de teste")
     }
 
-    @Test fun tablet_portrait_keeps_all_five_destinations_and_connection_visible() = showHome(600, 900, 1f, true, false)
+    @Test fun tablet_portrait_keeps_all_three_destinations_and_connection_visible() = showHome(600, 900, 1f, true, false)
 
     @Test fun tablet_landscape_uses_two_readable_columns() = showHome(960, 600, 1f, true, true)
 
@@ -99,7 +97,7 @@ class PatientAdaptiveLayoutTest {
         compose.setContent {
             CompositionLocalProvider(LocalDensity provides Density(LocalDensity.current.density, scale)) {
                 MyApplicationTheme {
-                    PatientAdaptiveScaffold(0, 5, { selected = it },
+                    PatientAdaptiveScaffold(0, { selected = it },
                         modifier = Modifier.fillMaxSize().padding(top = 24.dp, bottom = 24.dp),
                         header = { HomeWelcomeHeader("", "", {}) },
                     ) {
@@ -130,7 +128,7 @@ class PatientAdaptiveLayoutTest {
             assertEquals(first.x, second.x, 1f)
             assertTrue(second.y >= first.y + firstNode.size.height)
         }
-        listOf("tab_dashboard", "tab_recharts", "tab_ble", "tab_queue", "tab_settings").forEachIndexed { index, tag ->
+        listOf(0 to "tab_dashboard", 2 to "tab_ble", 4 to "tab_settings").forEach { (index, tag) ->
             compose.onNodeWithTag(tag).assertIsDisplayed().performClick()
             compose.runOnIdle { assertEquals(index, selected) }
         }
