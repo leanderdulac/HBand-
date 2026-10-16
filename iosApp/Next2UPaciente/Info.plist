@@ -34,14 +34,14 @@
 	<string>O next2u SAÚDE usa o Bluetooth para conectar o relógio e receber suas medições de saúde.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>O next2u SAÚDE não registra GPS. A permissão de localização só é pedida se este iPhone exigir para encontrar o relógio por Bluetooth.</string>
-	<key>Next2UCoreBaseUrl</key>
-	<string>$(NEXT2U_CORE_BASE_URL)</string>
-	<key>Next2UIngestApiKey</key>
-	<string>$(NEXT2U_INGEST_API_KEY)</string>
-	<key>Next2UGeminiApiKey</key>
-	<string>$(NEXT2U_GEMINI_API_KEY)</string>
 	<key>Next2UAiInsightEnabled</key>
 	<string>$(NEXT2U_AI_INSIGHT_ENABLED)</string>
+	<key>Next2UCoreBaseUrl</key>
+	<string>$(NEXT2U_CORE_BASE_URL)</string>
+	<key>Next2UGeminiApiKey</key>
+	<string>$(NEXT2U_GEMINI_API_KEY)</string>
+	<key>Next2UIngestApiKey</key>
+	<string>$(NEXT2U_INGEST_API_KEY)</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>bluetooth-central</string>
@@ -60,13 +60,6 @@
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
-		<string>UIInterfaceOrientationLandscapeLeft</string>
-		<string>UIInterfaceOrientationLandscapeRight</string>
-	</array>
-	<key>UISupportedInterfaceOrientations~ipad</key>
-	<array>
-		<string>UIInterfaceOrientationPortrait</string>
-		<string>UIInterfaceOrientationPortraitUpsideDown</string>
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
