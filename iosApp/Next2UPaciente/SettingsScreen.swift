@@ -38,6 +38,10 @@ struct SettingsScreen: View {
                     Text(SigningPlaceholders.summary)
                         .font(.system(size: 17))
                         .foregroundStyle(palette.onSurfaceVariant)
+                    Text(AppVersion.label)
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(palette.onSurface)
+                        .accessibilityIdentifier("settings_version_label")
                 }
                 .padding(PatientTheme.margin)
             }

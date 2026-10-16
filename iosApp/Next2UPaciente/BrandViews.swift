@@ -48,3 +48,26 @@ struct HomeWelcomeHeader: View {
         }
     }
 }
+
+
+/// "Versão 0.1.0 (4)" from the bundle, shown in Ajustes and as a Home footer.
+enum AppVersion {
+    static var label: String {
+        let info = Bundle.main.infoDictionary
+        let short = info?["CFBundleShortVersionString"] as? String ?? "?"
+        let build = info?["CFBundleVersion"] as? String ?? "?"
+        return "Versão \(short) (\(build))"
+    }
+}
+
+struct AppVersionFooter: View {
+    @Environment(\.patientPalette) private var palette
+    var body: some View {
+        Text(AppVersion.label)
+            .font(.system(size: 13))
+            .foregroundStyle(palette.onSurfaceVariant)
+            .frame(maxWidth: .infinity, alignment: .center)
+            .padding(.top, 8)
+            .accessibilityIdentifier("app_version_label")
+    }
+}
