@@ -12,6 +12,7 @@
 		A10000000000000100000003 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000100000003 /* Theme.swift */; };
 		A10000000000000100000004 /* SigningPlaceholders.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000100000004 /* SigningPlaceholders.swift */; };
 		A10000000000000100000005 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000100000005 /* Assets.xcassets */; };
+		A10000000000000100000020 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000100000020 /* PrivacyInfo.xcprivacy */; };
 		A10000000000000100000006 /* VeepooSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000100000008 /* VeepooSession.swift */; };
 		A10000000000000100000007 /* WatchScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000100000009 /* WatchScreen.swift */; };
 		A10000000000000100000010 /* PatientCrypto.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000100000010 /* PatientCrypto.swift */; };
@@ -41,6 +42,7 @@
 		A20000000000000100000004 /* SigningPlaceholders.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SigningPlaceholders.swift; sourceTree = "<group>"; };
 		A20000000000000100000005 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A20000000000000100000006 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		A20000000000000100000020 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		A20000000000000100000007 /* Next2UPaciente.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Next2UPaciente.xcconfig; sourceTree = "<group>"; };
 		A20000000000000100000008 /* VeepooSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VeepooSession.swift; sourceTree = "<group>"; };
 		A20000000000000100000009 /* WatchScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchScreen.swift; sourceTree = "<group>"; };
@@ -129,6 +131,7 @@
 				A20000000000000100000019 /* SettingsScreen.swift */,
 				A20000000000000100000005 /* Assets.xcassets */,
 				A20000000000000100000006 /* Info.plist */,
+				A20000000000000100000020 /* PrivacyInfo.xcprivacy */,
 			);
 			path = Next2UPaciente;
 			sourceTree = "<group>";
@@ -210,6 +213,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A10000000000000100000005 /* Assets.xcassets in Resources */,
+				A10000000000000100000020 /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -299,11 +303,14 @@
 			baseConfigurationReference = A20000000000000100000007 /* Next2UPaciente.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = H87XXMXA5G;
 				INFOPLIST_FILE = Next2UPaciente/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
+				PRODUCT_BUNDLE_IDENTIFIER = br.com.next2u.saude.paciente;
 				SDKROOT = iphoneos;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 			};
