@@ -29,12 +29,14 @@ xcodebuild \
   -configuration Release \
   -destination "generic/platform=iOS" \
   -archivePath "$ARCHIVE" \
+  -allowProvisioningUpdates \
   archive
 
 xcodebuild \
   -exportArchive \
   -archivePath "$ARCHIVE" \
   -exportPath "$EXPORT" \
-  -exportOptionsPlist "$OPTIONS"
+  -exportOptionsPlist "$OPTIONS" \
+  -allowProvisioningUpdates
 
 echo "IPA em $EXPORT (não enviado). Envie pelo Organizer ou Transporter."
