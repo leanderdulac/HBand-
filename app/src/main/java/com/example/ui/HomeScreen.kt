@@ -418,9 +418,6 @@ internal fun DashboardTab(
     onRefreshGeminiInsight: () -> Unit = {},
     geminiInsightGeneratedAtMillis: Long? = null,
     geminiInsightFailed: Boolean = false,
-    // AI_INSIGHT_ENABLED=true highlights the summary right after "Meu relógio"; false keeps the
-    // collapsed section near the end of the screen, exactly as before.
-    aiInsightEnabled: Boolean = BuildConfig.AI_INSIGHT_ENABLED,
     todayHydrationMl: Int? = null,
     hydrationTargetMl: Int? = null,
     onAddWater: (Int) -> Unit = {},
@@ -485,21 +482,19 @@ internal fun DashboardTab(
                 onDisconnect = onDisconnect,
             )
 
+            com.example.ui.components.AiInsightHighlightCard(
+                insightText = geminiInsightText,
+                isLoading = isGeneratingGeminiInsight,
+                onRefreshInsight = onRefreshGeminiInsight,
+                generatedAtMillis = geminiInsightGeneratedAtMillis,
+                failed = geminiInsightFailed,
+                modifier = Modifier.fillMaxWidth(),
+            )
+
             com.example.ui.components.LowBatteryWarningCard(
                 device = connectedDevice,
                 modifier = Modifier.fillMaxWidth()
             )
-
-            if (aiInsightEnabled) {
-                com.example.ui.components.AiInsightHighlightCard(
-                    insightText = geminiInsightText,
-                    isLoading = isGeneratingGeminiInsight,
-                    onRefreshInsight = onRefreshGeminiInsight,
-                    generatedAtMillis = geminiInsightGeneratedAtMillis,
-                    failed = geminiInsightFailed,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
         }, second = {
             TelemetryGauges(
                 telemetry = latestTelemetry,
@@ -618,19 +613,6 @@ internal fun DashboardTab(
                 onRetryRead = onRetryShareReads,
                 onGenerate = onGenerateShareData,
                 onNotify = onShowNotification,
-            )
-        }
-
-        if (!aiInsightEnabled) com.example.ui.components.PatientSection(
-            title = "Resumo com inteligência artificial",
-            forceExpanded = false,
-        ) {
-            com.example.ui.components.GeminiHealthInsightCard(
-                insightText = geminiInsightText,
-                isLoading = isGeneratingGeminiInsight,
-                onRefreshInsight = onRefreshGeminiInsight,
-                modifier = Modifier.fillMaxWidth(),
-                showInsight = false,
             )
         }
 

@@ -40,8 +40,8 @@ if (bleLab) {
   }
 }
 
-// Optional automatic AI summary, default off. Read like the Secrets plugin (.env, then
-// .env.example) but exposed as a boolean; the BLE lab has no network and never enables it.
+// Automatic AI summary on Home (1.7.3). Read like the Secrets plugin (.env, then
+// .env.example). Explicit false still disables generation; the BLE lab never enables it.
 fun readEnvFlag(name: String): Boolean = listOf(".env", ".env.example")
   .map { rootProject.file(it) }
   .filter { it.exists() }
@@ -60,8 +60,8 @@ android {
     applicationId = "com.aistudio.hbandhealthtech.pxq97m"
     minSdk = 24
     targetSdk = 36
-    versionCode = 10
-    versionName = "1.7.2"
+    versionCode = 11
+    versionName = "1.7.3"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     buildConfigField("boolean", "BLE_LAB", "false")

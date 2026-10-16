@@ -215,7 +215,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val insightReview = PatientInsightReview(
         viewModelScope, insightPolicy.manualRequests, repository.allSensorMetrics, automatic = insightPolicy.automatic,
     ) { metrics ->
-        com.example.data.remote.GeminiHealthAnalyzer.generateSevenDayInsight(metrics)
+        com.example.data.remote.GeminiHealthAnalyzer.generateSevenDayInsight(
+            metrics,
+            db.userProfileDao().getUserProfile(),
+        )
     }
     val geminiInsightText = insightReview.state.map { it.text }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
@@ -242,6 +245,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }) { profile ->
         bleManager.setPatientId(profile.patientId)
         showNotification("Perfil salvo neste celular.")
+        if (insightPolicy.manualRequests) insightReview.request()
     }
     val profileSaveState = profileSave.state
 
