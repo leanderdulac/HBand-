@@ -51,6 +51,7 @@ struct StorageStartupView: View {
             .frame(maxWidth: 720, alignment: .leading)
         }
         .background(palette.background.ignoresSafeArea())
+        .preferredColorScheme(.light)
         .accessibilityIdentifier("storage_startup_screen")
     }
 }

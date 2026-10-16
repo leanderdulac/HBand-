@@ -46,6 +46,7 @@ enum ResolvedAppTheme {
     case lightAzul, darkAzul, darkIndigo, darkGrafite
 
     var isDark: Bool { self != .lightAzul }
+    var colorScheme: ColorScheme { isDark ? .dark : .light }
 }
 
 struct PatientPalette {
@@ -184,9 +185,47 @@ private struct PaletteKey: EnvironmentKey {
     static let defaultValue = PatientTheme.palette(.lightAzul)
 }
 
+private struct SchemeKey: EnvironmentKey {
+    static let defaultValue: ColorScheme = .light
+}
+
 extension EnvironmentValues {
     var patientPalette: PatientPalette {
         get { self[PaletteKey.self] }
         set { self[PaletteKey.self] = newValue }
+    }
+
+    var patientColorScheme: ColorScheme {
+        get { self[SchemeKey.self] }
+        set { self[SchemeKey.self] = newValue }
+    }
+}
+
+extension View {
+    /// Navigation chrome and typed fields follow the patient theme, not only the system scheme.
+    func patientChrome() -> some View {
+        modifier(PatientChrome())
+    }
+
+    func patientFieldInk(_ palette: PatientPalette) -> some View {
+        foregroundStyle(palette.onSurface)
+            .tint(palette.primary)
+    }
+}
+
+private struct PatientChrome: ViewModifier {
+    @Environment(\.patientPalette) private var palette
+    @Environment(\.patientColorScheme) private var scheme
+
+    func body(content: Content) -> some View {
+        content
+            .preferredColorScheme(scheme)
+            .tint(palette.primary)
+            .toolbarBackground(palette.background, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbarColorScheme(scheme, for: .navigationBar)
+            .toolbarBackground(palette.background, for: .tabBar)
+            .toolbarBackground(.visible, for: .tabBar)
+            .toolbarColorScheme(scheme, for: .tabBar)
     }
 }

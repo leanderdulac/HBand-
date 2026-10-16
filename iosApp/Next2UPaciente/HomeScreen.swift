@@ -47,6 +47,7 @@ struct HomeScreen: View {
             }
             .background(palette.background.ignoresSafeArea())
             .navigationBarTitleDisplayMode(.inline)
+            .patientChrome()
             .onAppear {
                 renameDraft = session.displayWatchName
                 insight.appear()
@@ -115,20 +116,25 @@ struct HomeScreen: View {
             if showWatchDetails {
                 Toggle(isOn: $autoIngest) {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Guardar novas leituras").font(.system(size: 17, weight: .semibold))
+                        Text("Guardar novas leituras")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(palette.onSurface)
                         Text("Salvar neste aparelho as leituras recebidas do relógio.")
                             .font(.system(size: 15))
                             .foregroundStyle(palette.onSurfaceVariant)
                     }
                 }
                 .tint(palette.primary)
+                .foregroundStyle(palette.onSurface)
                 .accessibilityIdentifier("auto_ingest_switch")
                 if connected {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Nome do relógio")
                             .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(palette.onSurface)
                         TextField("Nome do relógio", text: $renameDraft)
                             .font(.system(size: 17))
+                            .patientFieldInk(palette)
                             .frame(minHeight: PatientTheme.minTouch)
                             .accessibilityIdentifier("input_watch_name")
                         Button("Renomear relógio") { session.renameWatch(renameDraft) }
@@ -146,6 +152,7 @@ struct HomeScreen: View {
                 }
             }
         }
+        .foregroundStyle(palette.onSurface)
         .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(palette.surface)
