@@ -19,37 +19,36 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
-/** Visão geral order: highlighted AI summary right after "Meu relógio" only when the flag is on. */
+/** Visão geral: highlighted AI summary always sits right after "Meu relógio". */
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @Config(qualifiers = "w393dp-h852dp-xhdpi", sdk = [36], application = android.app.Application::class)
 class DashboardAiInsightOrderTest {
     @get:Rule val compose = createComposeRule()
 
-    private fun show(aiInsightEnabled: Boolean) = compose.setContent {
-        MyApplicationTheme {
-            Box(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
-                DashboardTab(
-                    syncDisplayStatus = SyncDisplayStatus.FULLY_SYNCED,
-                    pendingCount = 0, syncedCount = 0, failedCount = 0,
-                    syncLogs = emptyList(), apiHealth = ApiHealthState(),
-                    connectedDevice = null, latestTelemetry = null, sensorMetrics = emptyList(),
-                    autoIngestLive = true,
-                    onTriggerSync = {}, onRefreshHealth = {}, onRetryQueueRead = {},
-                    onToggleAutoIngest = {}, onSpotCheck = {}, onShowNotification = {},
-                    onScanClick = {}, onDisconnect = {},
-                    geminiInsightText = "Nos últimos 7 dias, sua frequência cardíaca média foi de 72 BPM, dentro da faixa esperada.",
-                    aiInsightEnabled = aiInsightEnabled,
-                )
+    private fun show(insightText: String = "Nos últimos 7 dias, sua frequência cardíaca média foi de 72 BPM, dentro da faixa esperada.") =
+        compose.setContent {
+            MyApplicationTheme {
+                Box(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
+                    DashboardTab(
+                        syncDisplayStatus = SyncDisplayStatus.FULLY_SYNCED,
+                        pendingCount = 0, syncedCount = 0, failedCount = 0,
+                        syncLogs = emptyList(), apiHealth = ApiHealthState(),
+                        connectedDevice = null, latestTelemetry = null, sensorMetrics = emptyList(),
+                        autoIngestLive = true,
+                        onTriggerSync = {}, onRefreshHealth = {}, onRetryQueueRead = {},
+                        onToggleAutoIngest = {}, onSpotCheck = {}, onShowNotification = {},
+                        onScanClick = {}, onDisconnect = {},
+                        geminiInsightText = insightText,
+                    )
+                }
             }
         }
-    }
 
-    private fun top(tag: String) = compose.onNodeWithTag(tag).fetchSemanticsNode().positionInRoot.y // unclipped, also below the fold
-    private fun topOfText(text: String) = compose.onNodeWithText(text).fetchSemanticsNode().positionInRoot.y // unclipped, also below the fold
+    private fun top(tag: String) = compose.onNodeWithTag(tag).fetchSemanticsNode().positionInRoot.y
 
-    @Test fun flag_on_places_highlight_after_watch_and_before_readings() {
-        show(aiInsightEnabled = true)
+    @Test fun highlight_is_after_watch_and_before_readings() {
+        show()
         val watch = top("device_control_card")
         val insight = top("ai_insight_highlight_card")
         val latest = top("latest_watch_reading")
@@ -57,22 +56,21 @@ class DashboardAiInsightOrderTest {
         assertTrue("watch=$watch insight=$insight", watch < insight)
         assertTrue("insight=$insight latest=$latest", insight < latest)
         assertTrue("latest=$latest today=$today", latest < today)
-        // Always expanded, not collapsible: no section header, text visible without a tap.
         compose.onNodeWithText("Resumo com inteligência artificial").assertDoesNotExist()
         compose.onNodeWithTag("gemini_insight_text").assertIsDisplayed()
         compose.onNodeWithText("Resumo automático em validação").assertDoesNotExist()
+        compose.onNodeWithText("Resumo com IA").assertExists()
+        compose.onNodeWithText("Atualizar resumo").assertExists()
         compose.onRoot().captureRoboImage(filePath = "build/patient-ui/dashboard_ai_insight_on.png")
     }
 
-    @Test fun flag_off_keeps_collapsed_section_after_the_other_sections() {
-        show(aiInsightEnabled = false)
-        compose.onNodeWithTag("ai_insight_highlight_card").assertDoesNotExist()
-        val today = top("daily_health_summary_card")
-        val share = topOfText("Compartilhar registros")
-        val section = topOfText("Resumo com inteligência artificial")
-        assertTrue("today=$today section=$section", today < section)
-        assertTrue("share=$share section=$section", share < section)
-        compose.onNodeWithTag("gemini_health_insight_card").assertDoesNotExist() // collapsed as today
-        compose.onRoot().captureRoboImage(filePath = "build/patient-ui/dashboard_ai_insight_off.png")
+    @Test fun empty_state_keeps_the_card_visible() {
+        show(insightText = "")
+        compose.onNodeWithTag("ai_insight_highlight_card").assertExists()
+        compose.onNodeWithTag("ai_insight_empty").assertExists()
+        compose.onNodeWithText("Resumo com IA").assertExists()
+        compose.onNodeWithTag("ai_insight_review_label").assertExists()
+        compose.onNodeWithTag("refresh_gemini_insight_button").assertExists()
+        compose.onRoot().captureRoboImage(filePath = "build/patient-ui/dashboard_ai_insight_empty.png")
     }
 }
