@@ -106,6 +106,11 @@ Ver `docs/ios-port/BACKGROUND-BLE.md`. Resumo no aparelho:
    iPhone mesmo se o firmware recusar (`veepooSDKSettingDeviceNameWithString`).
 6. Envios: o JSON usa `patient_id` do perfil salvo (não um valor fixo no Swift).
 
+## 12. TestFlight
+
+Ver `docs/ios-port/TESTFLIGHT.md`. Archive sem upload:
+`./iosApp/Scripts/archive-testflight.sh`.
+
 Rebuild `shared.framework` after pulling this branch (`./iosApp/Scripts/embed-shared.sh`).
 
 ## O que este ambiente Linux não verificou

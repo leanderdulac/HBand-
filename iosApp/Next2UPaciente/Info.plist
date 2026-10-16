@@ -24,14 +24,16 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSBluetoothAlwaysUsageDescription</key>
-	<string>O next2u SAÚDE usa o Bluetooth para conectar o relógio e receber suas medições de saúde.</string>
+	<string>O next2u SAÚDE usa o Bluetooth para conectar o relógio e receber suas medições de saúde, inclusive quando o app está em segundo plano.</string>
 	<key>NSBluetoothPeripheralUsageDescription</key>
 	<string>O next2u SAÚDE usa o Bluetooth para conectar o relógio e receber suas medições de saúde.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>O next2u SAÚDE usa a localização apenas se o iOS exigir para encontrar o relógio por Bluetooth.</string>
+	<string>O next2u SAÚDE não registra GPS. A permissão de localização só é pedida se este iPhone exigir para encontrar o relógio por Bluetooth.</string>
 	<key>Next2UCoreBaseUrl</key>
 	<string>$(NEXT2U_CORE_BASE_URL)</string>
 	<key>Next2UIngestApiKey</key>
