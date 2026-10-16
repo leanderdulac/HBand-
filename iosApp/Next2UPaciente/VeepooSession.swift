@@ -76,6 +76,8 @@ final class VeepooSession: NSObject, ObservableObject {
         UserDefaults.standard.object(forKey: "auto_reconnect_ble") as? Bool ?? true
     }
     private var userRequestedDisconnect = false
+    /// One pending backoff retry at a time (503/429 from the Core).
+    private var scheduledRetry: Task<Void, Never>?
     private var heartRunning = false
     private var spo2Running = false
     private var heartSamplesThisBurst = 0
@@ -329,6 +331,8 @@ final class VeepooSession: NSObject, ObservableObject {
         bleConnectionLabel = "Relógio pronto"
         sessionMessage = "Relógio pronto. Lendo dados do dia e depois a frequência cardíaca."
         note("Handshake. Reinscreve serviços e inicia FC.")
+        // Link (re)established, e.g. after state restoration: push what queued meanwhile.
+        flushQueueOnly()
         readBattery()
         manager.peripheralManage.veepooSdkStartReadDeviceAllData { [weak self] state, _, _, _ in
             Task { @MainActor in
@@ -430,6 +434,32 @@ final class VeepooSession: NSObject, ObservableObject {
         }
     }
 
+    /// Flush the durable queue without recording a new reading.
+    func flushQueueOnly() {
+        guard PatientStore.shared.status == .ready else { return }
+        configureIngest()
+        let task = beginIngestTask()
+        Task {
+            defer { self.endIngestTask(task) }
+            guard let flush = try? await IngestRuntime.shared.flush() else { return }
+            applyFlush(flush)
+        }
+    }
+
+    /// Honors the shared backoff (exponential + jitter, Retry-After floor).
+    private func scheduleBackoffRetry(after ms: Int64) {
+        scheduledRetry?.cancel()
+        scheduledRetry = nil
+        guard ms > 0 else { return }
+        // If iOS suspends us first, the next BLE wake-up or BGTask flushes instead.
+        scheduledRetry = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(ms) * 1_000_000)
+            guard !Task.isCancelled, let self else { return }
+            self.scheduledRetry = nil
+            self.flushQueueOnly()
+        }
+    }
+
     func retryFailed(_ clientReadingId: String) {
         IngestRuntime.shared.retryFailed(clientReadingId: clientReadingId)
         configureIngest()
@@ -461,6 +491,7 @@ final class VeepooSession: NSObject, ObservableObject {
         lastUploadLabel = "HTTP \(flush.lastHttpCode) · \(flush.message)"
         refreshLocalStore()
         IngestBackground.schedule()
+        scheduleBackoffRetry(after: flush.pendingCount > 0 ? flush.retryInMs : 0)
         bleLog.info("upload http=\(flush.lastHttpCode, privacy: .public) pending=\(flush.pendingCount, privacy: .public)")
     }
 

@@ -51,6 +51,8 @@ data class FlushOutcome(
     val pendingCount: Int = 0,
     val lastHttpCode: Int = 0,
     val message: String,
+    /** > 0 when automatic sends are paused by backoff; the host should flush again after this. */
+    val retryInMs: Long = 0L,
 )
 
 /**
@@ -64,6 +66,9 @@ object IngestRuntime {
     internal var store: QueueStore = FileQueueStore
     internal var engineOverride: HttpClientEngine? = null
     private val mutex = Mutex()
+    private val backoff = IngestBackoffWindow()
+    /** Small flushes: a 503 mid-outage costs at most this many items of work. */
+    const val FLUSH_CHUNK_ITEMS = 10
     private var deduper = IngestDeduper()
     private val json = Json { ignoreUnknownKeys = true }
     private var configuration: IngestConfiguration =
@@ -98,12 +103,14 @@ object IngestRuntime {
     }
 
     fun retryFailed(clientReadingId: String) {
+        backoff.recordSuccess() // explicit patient retry goes out now
         val items = load().toMutableList()
         mark(items, clientReadingId, "PENDING")
         persist(items)
     }
 
     fun retryAllFailed() {
+        backoff.recordSuccess() // explicit patient retry goes out now
         val items = load().map { if (it.status == "FAILED") it.copy(status = "PENDING") else it }
         persist(items)
     }
@@ -117,6 +124,7 @@ object IngestRuntime {
     }
 
     fun useStore(next: QueueStore) {
+        backoff.recordSuccess()
         store = next
         deduper = IngestDeduper()
         _lastHttpCode = 0
@@ -191,6 +199,15 @@ object IngestRuntime {
         if (pending.isEmpty()) {
             return FlushOutcome(message = "Fila vazia.", lastHttpCode = _lastHttpCode)
         }
+        val waitMs = backoff.remainingMs(nowMillis())
+        if (waitMs > 0) {
+            return FlushOutcome(
+                pendingCount = pending.size,
+                lastHttpCode = _lastHttpCode,
+                message = "O serviço pediu para aguardar. Nova tentativa em ${(waitMs + 999) / 1000} s.",
+                retryInMs = waitMs,
+            )
+        }
         val prepared = mutableListOf<PreparedReading>()
         val kept = load().toMutableList()
         for (item in pending) {
@@ -216,7 +233,9 @@ object IngestRuntime {
         var synced = 0
         var failed = 0
         var lastCode = 0
-        for (chunk in IngestReconciler.chunks(prepared)) {
+        var transient = false
+        var retryAfterMs: Long? = null
+        for (chunk in IngestReconciler.chunks(prepared, FLUSH_CHUNK_ITEMS)) {
             val body = IngestReconciler.batchBody(chunk)
             val key = IngestReconciler.flushIdempotencyKey(chunk)
             val call = client.batchIngestWearableData(body, key)
@@ -234,10 +253,19 @@ object IngestRuntime {
                         mark(latest, reading.item.clientReadingId, "FAILED")
                         failed++
                     }
-                    IngestItemOutcome.TRANSIENT -> { /* stay PENDING */ }
+                    IngestItemOutcome.TRANSIENT -> { transient = true /* stay PENDING */ }
                 }
             }
             persist(latest)
+            call.retryAfterMs?.let { retryAfterMs = maxOf(retryAfterMs ?: 0L, it) }
+            // 503/429/network: the Core needs room; stop this flush and back off.
+            if (decisions.any { it.outcome == IngestItemOutcome.TRANSIENT }) break
+        }
+        val retryInMs = if (transient) {
+            backoff.recordTransientFailure(nowMillis(), retryAfterMs)
+        } else {
+            if (synced > 0) backoff.recordSuccess()
+            0L
         }
         FlushOutcome(
             syncedCount = synced,
@@ -245,6 +273,7 @@ object IngestRuntime {
             pendingCount = pendingUnlocked(),
             lastHttpCode = lastCode,
             message = "Nesta tentativa: concluídos $synced, falha $failed, aguardando ${pendingUnlocked()}. HTTP $lastCode.",
+            retryInMs = retryInMs,
         )
     }
 
