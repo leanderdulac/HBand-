@@ -57,6 +57,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         apiService = RetrofitClient.apiService,
         ingestTransportProvider = { RetrofitClient.captureIngestTransport() },
             backoffGate = com.example.data.ingest.IngestBackoffGate.shared(application),
+        deviceLabelProvider = { com.example.data.ingest.DeviceLabel.current(application) },
         localWriteTransaction = db.localWriteTransaction(),
         advancedMeasurementDao = db.advancedMeasurementDao(),
     )
@@ -431,6 +432,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun setBandHealthRemind(enabled: Boolean) = bleManager.setHealthRemindEnabled(enabled)
 
     fun saveUserProfile(token: String, profile: com.example.data.local.UserProfileEntity) = profileSave.save(token, profile)
+
+    // "Nome da pulseira" (Meu perfil): local only, sent as device_label on each ingest.
+    private val _savedDeviceLabel = MutableStateFlow(com.example.data.ingest.DeviceLabel.read(application))
+    val savedDeviceLabel: StateFlow<String?> = _savedDeviceLabel.asStateFlow()
+
+    fun saveDeviceLabel(raw: String) {
+        val app = getApplication<Application>()
+        com.example.data.ingest.DeviceLabel.save(app, raw)
+        _savedDeviceLabel.value = com.example.data.ingest.DeviceLabel.read(app)
+    }
 
     fun setAutoIngestLiveReadings(enabled: Boolean) {
         _autoIngestLiveReadings.value = enabled

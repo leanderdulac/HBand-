@@ -43,7 +43,11 @@ object IngestReconciler {
         return parsed != null && position.index == seconds.length
     }
 
-    fun prepare(item: IngestQueueEntity): PreparedReading {
+    /**
+     * [deviceLabel] is the current "Nome da pulseira" (already resolved, see [DeviceLabel]).
+     * It is applied at send time, so readings queued before a rename carry the new name too.
+     */
+    fun prepare(item: IngestQueueEntity, deviceLabel: String? = null): PreparedReading {
         val original = JSONObject(item.payloadJson)
         val patient = requireNotNull(string(original, "patient_id")) { INVALID_LOCAL }
         require(string(original, "timestamp")?.let(::validMeasurementTime) == true) { INVALID_LOCAL }
@@ -60,6 +64,7 @@ object IngestReconciler {
         normalized.put("device_id", device)
         normalized.put("timestamp", original.getString("timestamp"))
         normalized.put("client_reading_id", item.clientReadingId)
+        DeviceLabel.normalize(deviceLabel)?.let { normalized.put("device_label", it) }
         return PreparedReading(item, patient, normalized.toString())
     }
 

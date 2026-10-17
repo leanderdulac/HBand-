@@ -26,6 +26,39 @@ class PatientProfileTest {
         compose.runOnIdle { assertEquals(original.copy(fullName = "Nome corrigido"), saved) }
     }
 
+    @Test fun device_label_prefills_from_patient_name_and_is_saved_with_profile() {
+        val original = UserProfileEntity(id = "profile-fixture", patientId = "patient-fixture", fullName = "Ana Souza")
+        var label: String? = null
+        compose.setContent { MyApplicationTheme { UserProfileDialog(original, {}, { _, _ -> },
+            onSaveDeviceLabel = { label = it }) } }
+        compose.onNodeWithText("Nome da pulseira").assertExists()
+        compose.onNodeWithTag("input_device_label").assert(hasText("Ana Souza"))
+        // Untouched, it follows the name typed above.
+        compose.onNodeWithTag("input_profile_name").performTextReplacement("Ana Souza Lima")
+        compose.onNodeWithTag("input_device_label").assert(hasText("Ana Souza Lima"))
+        compose.onNodeWithTag("btn_save_profile").performClick()
+        compose.runOnIdle { assertEquals("Ana Souza Lima", label) }
+    }
+
+    @Test fun edited_device_label_is_kept_and_saved() {
+        val original = UserProfileEntity(id = "profile-fixture", patientId = "patient-fixture", fullName = "Ana Souza")
+        var label: String? = null
+        compose.setContent { MyApplicationTheme { UserProfileDialog(original, {}, { _, _ -> },
+            savedDeviceLabel = "Pulseira 3", onSaveDeviceLabel = { label = it }) } }
+        compose.onNodeWithTag("input_device_label").assert(hasText("Pulseira 3"))
+        compose.onNodeWithTag("input_profile_name").performTextReplacement("Ana S.")
+        compose.onNodeWithTag("input_device_label").assert(hasText("Pulseira 3"))
+        compose.onNodeWithTag("input_device_label").performTextReplacement("Pulseira da Ana")
+        compose.onNodeWithTag("btn_save_profile").performClick()
+        compose.runOnIdle { assertEquals("Pulseira da Ana", label) }
+    }
+
+    @Test fun missing_profile_starts_with_blank_device_label() {
+        compose.setContent { MyApplicationTheme { UserProfileDialog(null, {}, { _, _ -> }) } }
+        compose.onNodeWithTag("input_device_label").assert(SemanticsMatcher.expectValue(
+            androidx.compose.ui.semantics.SemanticsProperties.EditableText, androidx.compose.ui.text.AnnotatedString("")))
+    }
+
     @Test fun invalid_input_does_not_silently_save_example_values() {
         var saves = 0
         compose.setContent { MyApplicationTheme { UserProfileDialog(UserProfileEntity(), {}, { _, _ -> saves++ }) } }

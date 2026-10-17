@@ -103,6 +103,27 @@ class WearableBatchIngestTest {
             else Response.error(422, "synthetic-whole-batch-source-validation".toResponseBody())
     }
 
+    @Test fun every_reading_carries_the_current_device_label_at_send_time() = runBlocking {
+        var label: String? = "Pulseira da Ana"
+        val repository = WearableRepository(db.ingestQueueDao(), db.sensorMetricDao(), api, db.localWriteTransaction(),
+            db.advancedMeasurementDao(), deviceLabelProvider = { label })
+        insert(1); insert(2)
+        repository.processQueueDetailed()
+        val first = JSONObject(requests.last().second).getJSONArray("readings")
+        assertEquals(2, first.length())
+        for (i in 0 until first.length()) assertEquals("Pulseira da Ana", first.getJSONObject(i).getString("device_label"))
+        // A queued reading sent after a rename carries the new name; no label sends none.
+        label = "Pulseira do Bruno"
+        insert(3)
+        repository.processQueueDetailed()
+        assertEquals("Pulseira do Bruno", JSONObject(requests.last().second).getJSONArray("readings")
+            .getJSONObject(0).getString("device_label"))
+        label = null
+        insert(4)
+        repository.processQueueDetailed()
+        assertFalse(JSONObject(requests.last().second).getJSONArray("readings").getJSONObject(0).has("device_label"))
+    }
+
     @Test fun incompatible_sources_stay_local_while_flat_and_legacy_neighbors_sync() = runBlocking {
         val allowed = listOf(null, JSONObject.NULL, "", "companion_manual", "ble_sim", "ble_hband", "http")
         val incompatible = listOf("wifi_watch", " ble_hband", "BLE_HBAND", " ", 32, true,

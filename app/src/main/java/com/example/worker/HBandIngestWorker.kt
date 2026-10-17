@@ -24,6 +24,7 @@ class HBandIngestWorker(
             apiService = RetrofitClient.apiService,
             ingestTransportProvider = { RetrofitClient.captureIngestTransport() },
             backoffGate = com.example.data.ingest.IngestBackoffGate.shared(applicationContext),
+        deviceLabelProvider = { com.example.data.ingest.DeviceLabel.current(applicationContext) },
             localWriteTransaction = database.localWriteTransaction(),
         )
 
