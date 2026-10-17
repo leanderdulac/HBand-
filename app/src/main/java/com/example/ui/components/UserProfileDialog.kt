@@ -35,6 +35,8 @@ fun UserProfileDialog(
     readAvailable: Boolean = true,
     readFailed: Boolean = false,
     onRetryRead: () -> Unit = {},
+    savedDeviceLabel: String? = null,
+    onSaveDeviceLabel: (label: String, profileName: String) -> Unit = { _, _ -> },
 ) {
     // A phone that never saved a profile (fresh install, e.g. Galaxy A6s) has no row.
     // Since PR5 that showed only an error text instead of the form; start a blank form.
@@ -53,41 +55,65 @@ fun UserProfileDialog(
     }
     // Saveable inputs alone are not validated against a restored registry.
     // Put the editor under its identity so a different patient cannot inherit its draft.
-    key(editable.id, editable.patientId) {
-        ProfileEditor(editable, onDismissRequest, onSaveProfile, saveState, readAvailable, readFailed, onRetryRead)
+    // Exception: the one-time default -> generated ID assignment (first save with a name, or the
+    // launch migration) is the same patient, so that draft and its save receipt are kept.
+    var identityKey by remember(editable.id) { mutableStateOf(editable.patientId) }
+    if (editable.patientId != identityKey && !(com.example.data.ingest.PatientIdentity.isDefault(identityKey) &&
+            com.example.data.ingest.PatientIdentity.isGenerated(editable.patientId))) {
+        identityKey = editable.patientId
+    }
+    key(editable.id, identityKey) {
+        ProfileEditor(editable, identityKey, onDismissRequest, onSaveProfile, saveState, readAvailable, readFailed, onRetryRead,
+            savedDeviceLabel, onSaveDeviceLabel)
     }
 }
 
 @Composable
 private fun ProfileEditor(
     currentProfile: UserProfileEntity,
+    identityKey: String,
     onDismissRequest: () -> Unit,
     onSaveProfile: (String, UserProfileEntity) -> Unit,
     saveState: ProfileSaveState?,
     readAvailable: Boolean,
     readFailed: Boolean,
     onRetryRead: () -> Unit,
+    savedDeviceLabel: String?,
+    onSaveDeviceLabel: (label: String, profileName: String) -> Unit,
 ) {
     val initial = currentProfile
-    var name by rememberSaveable(initial.id, initial.patientId) { mutableStateOf(initial.fullName) }
-    var age by rememberSaveable(initial.id, initial.patientId) { mutableStateOf(initial.age.toString()) }
-    var gender by rememberSaveable(initial.id, initial.patientId) { mutableStateOf(initial.gender) }
-    var height by rememberSaveable(initial.id, initial.patientId) { mutableStateOf(initial.heightCm.toString().replace('.', ',')) }
-    var weight by rememberSaveable(initial.id, initial.patientId) { mutableStateOf(initial.weightKg.toString().replace('.', ',')) }
-    var steps by rememberSaveable(initial.id, initial.patientId) { mutableStateOf(initial.dailyStepGoal.toString()) }
-    var water by rememberSaveable(initial.id, initial.patientId) { mutableStateOf(initial.targetWaterMl.toString()) }
-    var contact by rememberSaveable(initial.id, initial.patientId) { mutableStateOf(initial.emergencyContact) }
-    var notes by rememberSaveable(initial.id, initial.patientId) { mutableStateOf(initial.medicalNotes) }
-    var confirmDiscard by rememberSaveable(initial.id, initial.patientId) { mutableStateOf(false) }
-    var goalsExpanded by rememberSaveable(initial.id, initial.patientId) { mutableStateOf(false) }
-    var identityExpanded by rememberSaveable(initial.id, initial.patientId) { mutableStateOf(false) }
-    val editorScroll = rememberSaveable(initial.id, initial.patientId, saver = ScrollState.Saver) { ScrollState(0) }
-    var requestToken by rememberSaveable(initial.id, initial.patientId) { mutableStateOf<String?>(null) }
+    // "Nome da pulseira": starts as the saved name, else "Pulseira de <nome>". Until the patient
+    // edits it, it follows the name typed above (a fresh profile starts blank, see A6s).
+    val initialLabel = remember(initial.id, identityKey, savedDeviceLabel) {
+        com.example.data.ingest.DeviceLabel.prefill(savedDeviceLabel, initial.fullName)
+    }
+    var deviceLabel by rememberSaveable(initial.id, identityKey) { mutableStateOf(initialLabel) }
+    var deviceLabelEdited by rememberSaveable(initial.id, identityKey) {
+        mutableStateOf(com.example.data.ingest.DeviceLabel.normalize(savedDeviceLabel) != null)
+    }
+    var name by rememberSaveable(initial.id, identityKey) { mutableStateOf(initial.fullName) }
+    var age by rememberSaveable(initial.id, identityKey) { mutableStateOf(initial.age.toString()) }
+    var gender by rememberSaveable(initial.id, identityKey) { mutableStateOf(initial.gender) }
+    var height by rememberSaveable(initial.id, identityKey) { mutableStateOf(initial.heightCm.toString().replace('.', ',')) }
+    var weight by rememberSaveable(initial.id, identityKey) { mutableStateOf(initial.weightKg.toString().replace('.', ',')) }
+    var steps by rememberSaveable(initial.id, identityKey) { mutableStateOf(initial.dailyStepGoal.toString()) }
+    var water by rememberSaveable(initial.id, identityKey) { mutableStateOf(initial.targetWaterMl.toString()) }
+    var contact by rememberSaveable(initial.id, identityKey) { mutableStateOf(initial.emergencyContact) }
+    var notes by rememberSaveable(initial.id, identityKey) { mutableStateOf(initial.medicalNotes) }
+    var confirmDiscard by rememberSaveable(initial.id, identityKey) { mutableStateOf(false) }
+    var goalsExpanded by rememberSaveable(initial.id, identityKey) { mutableStateOf(false) }
+    var identityExpanded by rememberSaveable(initial.id, identityKey) { mutableStateOf(false) }
+    val editorScroll = rememberSaveable(initial.id, identityKey, saver = ScrollState.Saver) { ScrollState(0) }
+    var requestToken by rememberSaveable(initial.id, identityKey) { mutableStateOf<String?>(null) }
+    var submittedPatientId by rememberSaveable(initial.id, identityKey) { mutableStateOf<String?>(null) }
+    // Patient ID: a profile still on the shared default gets its own once a name is entered.
+    // The random part is drawn once per editor; the first-name part follows the name until saved.
+    val idSuffix = rememberSaveable(initial.id, identityKey) { com.example.data.ingest.PatientIdentity.randomSuffix() }
     // A live callback can be pending before collection observes the controller receipt.
     // After restoration, a missing receipt is uncertain, never replayed automatically.
-    var submissionPending by remember(initial.id, initial.patientId) { mutableStateOf(false) }
+    var submissionPending by remember(initial.id, identityKey) { mutableStateOf(false) }
     val receipt = saveState?.takeIf {
-        it.token == requestToken && it.profileId == initial.id && it.patientId == initial.patientId
+        it.token == requestToken && it.profileId == initial.id && it.patientId == (submittedPatientId ?: initial.patientId)
     }
     val anySaving = saveState?.status == ProfileSaveStatus.SAVING
     val pending = submissionPending || anySaving
@@ -107,7 +133,10 @@ private fun ProfileEditor(
         gender != initial.gender || height != initial.heightCm.toString().replace('.', ',') ||
         weight != initial.weightKg.toString().replace('.', ',') ||
         steps != initial.dailyStepGoal.toString() || water != initial.targetWaterMl.toString() ||
-        contact != initial.emergencyContact || notes != initial.medicalNotes
+        contact != initial.emergencyContact || notes != initial.medicalNotes ||
+        deviceLabel != initialLabel
+    val shownPatientId = if (com.example.data.ingest.PatientIdentity.isDefault(initial.patientId))
+        com.example.data.ingest.PatientIdentity.build(name, idSuffix) ?: initial.patientId else initial.patientId
     val focusManager = LocalFocusManager.current
     val requestClose: () -> Unit = {
         if (submissionPending || anySaving || receipt?.status == ProfileSaveStatus.SAVED) {
@@ -146,7 +175,14 @@ private fun ProfileEditor(
                     style = MaterialTheme.typography.bodyLarge,
                 )
                 PatientSummaryLayout(first = {
-                    ProfileField(name, { name = it }, "Nome completo", "input_profile_name", error = name.isBlank(), enabled = editingEnabled)
+                    ProfileField(name, {
+                        name = it
+                        if (!deviceLabelEdited) deviceLabel = com.example.data.ingest.DeviceLabel.prefill(null, it)
+                    }, "Nome completo", "input_profile_name", error = name.isBlank(), enabled = editingEnabled)
+                    DeviceLabelField(deviceLabel, {
+                        deviceLabel = it.take(com.example.data.ingest.DeviceLabel.MAX_LENGTH)
+                        deviceLabelEdited = true
+                    }, editingEnabled)
                     ProfileField(age, { age = it }, "Idade em anos", "input_age", KeyboardType.Number, parsedAge == null, enabled = editingEnabled)
                     ProfileField(gender, { gender = it }, "Gênero", "input_gender", enabled = editingEnabled)
                     ProfileField(height, { height = it }, "Altura em centímetros", "input_height", KeyboardType.Decimal, parsedHeight == null, enabled = editingEnabled)
@@ -164,10 +200,11 @@ private fun ProfileEditor(
                     }
                     PatientSection("Identificação do cadastro", identityExpanded, { identityExpanded = it }) {
                         OutlinedTextField(
-                            value = initial.patientId, onValueChange = {}, readOnly = true,
+                            value = shownPatientId, onValueChange = {}, readOnly = true,
                             label = { Text("Identificação do paciente") },
                             modifier = Modifier.fillMaxWidth().testTag("input_patient_id"),
                         )
+                        if (shownPatientId != initial.patientId) Text("Esta identificação será gravada quando você salvar o perfil.", style = MaterialTheme.typography.bodyMedium)
                         Text("Esta identificação vincula os registros ao cadastro. Se precisar corrigi-la, fale com a equipe responsável.", style = MaterialTheme.typography.bodyMedium)
                     }
                 })
@@ -182,7 +219,10 @@ private fun ProfileEditor(
                         val token = UUID.randomUUID().toString()
                         requestToken = token
                         submissionPending = true
+                        submittedPatientId = shownPatientId
+                        onSaveDeviceLabel(deviceLabel, name.trim())
                         onSaveProfile(token, initial.copy(
+                            patientId = shownPatientId,
                             fullName = name.trim(), age = parsedAge!!, gender = gender,
                             heightCm = parsedHeight!!, weightKg = parsedWeight!!,
                             dailyStepGoal = parsedSteps!!, targetWaterMl = parsedWater!!,
@@ -309,6 +349,21 @@ private fun ProfileField(
     )
 }
 
+
+/** Editable name shown to the care team for this watch; plain wording for patients. */
+@Composable
+private fun DeviceLabelField(value: String, onValueChange: (String) -> Unit, enabled: Boolean) {
+    val focusManager = LocalFocusManager.current
+    OutlinedTextField(
+        value = value, onValueChange = onValueChange, enabled = enabled,
+        label = { Text("Nome da pulseira") },
+        supportingText = { Text("Ajuda a equipe a saber de quem é esta pulseira. Se ficar em branco, usamos \"Pulseira de\" e o seu nome.") },
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text, imeAction = ImeAction.Next),
+        keyboardActions = KeyboardActions(onNext = { focusManager.moveFocus(FocusDirection.Next) }),
+        modifier = Modifier.fillMaxWidth().testTag("input_device_label"),
+    )
+}
 
 /** Blank first profile: no invented clinical data; keeps the ingest patient id unchanged. */
 internal fun blankPatientProfile(): UserProfileEntity = UserProfileEntity(

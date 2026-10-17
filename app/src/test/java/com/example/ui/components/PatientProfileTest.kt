@@ -26,6 +26,66 @@ class PatientProfileTest {
         compose.runOnIdle { assertEquals(original.copy(fullName = "Nome corrigido"), saved) }
     }
 
+    @Test fun device_label_prefills_from_patient_name_and_is_saved_with_profile() {
+        val original = UserProfileEntity(id = "profile-fixture", patientId = "patient-fixture", fullName = "Ana Souza")
+        var label: String? = null
+        compose.setContent { MyApplicationTheme { UserProfileDialog(original, {}, { _, _ -> },
+            onSaveDeviceLabel = { l, _ -> label = l }) } }
+        compose.onNodeWithText("Nome da pulseira").assertExists()
+        compose.onNodeWithTag("input_device_label").assert(hasText("Pulseira de Ana Souza"))
+        // Untouched, it follows the name typed above.
+        compose.onNodeWithTag("input_profile_name").performTextReplacement("Ana Souza Lima")
+        compose.onNodeWithTag("input_device_label").assert(hasText("Pulseira de Ana Souza Lima"))
+        compose.onNodeWithTag("btn_save_profile").performClick()
+        compose.runOnIdle { assertEquals("Pulseira de Ana Souza Lima", label) }
+    }
+
+    @Test fun edited_device_label_is_kept_and_saved() {
+        val original = UserProfileEntity(id = "profile-fixture", patientId = "patient-fixture", fullName = "Ana Souza")
+        var label: String? = null
+        compose.setContent { MyApplicationTheme { UserProfileDialog(original, {}, { _, _ -> },
+            savedDeviceLabel = "Pulseira 3", onSaveDeviceLabel = { l, _ -> label = l }) } }
+        compose.onNodeWithTag("input_device_label").assert(hasText("Pulseira 3"))
+        compose.onNodeWithTag("input_profile_name").performTextReplacement("Ana S.")
+        compose.onNodeWithTag("input_device_label").assert(hasText("Pulseira 3"))
+        compose.onNodeWithTag("input_device_label").performTextReplacement("Pulseira da Ana")
+        compose.onNodeWithTag("btn_save_profile").performClick()
+        compose.runOnIdle { assertEquals("Pulseira da Ana", label) }
+    }
+
+    @Test fun missing_profile_starts_with_blank_device_label() {
+        compose.setContent { MyApplicationTheme { UserProfileDialog(null, {}, { _, _ -> }) } }
+        compose.onNodeWithTag("input_device_label").assert(SemanticsMatcher.expectValue(
+            androidx.compose.ui.semantics.SemanticsProperties.EditableText, androidx.compose.ui.text.AnnotatedString("")))
+    }
+
+    @Test fun new_profile_gets_its_own_patient_id_when_name_is_entered() {
+        var saved: UserProfileEntity? = null
+        compose.setContent { MyApplicationTheme { UserProfileDialog(blankPatientProfile(), {}, { _, p -> saved = p }) } }
+        compose.onNodeWithTag("input_profile_name").performTextReplacement("João da Silva")
+        compose.onNodeWithTag("input_age").performScrollTo().performTextReplacement("40")
+        compose.onNodeWithTag("input_height").performScrollTo().performTextReplacement("170")
+        compose.onNodeWithTag("input_weight").performScrollTo().performTextReplacement("70")
+        compose.onNodeWithText("Identificação do cadastro").performScrollTo().performClick()
+        val shown = compose.onNodeWithTag("input_patient_id").fetchSemanticsNode()
+            .config[androidx.compose.ui.semantics.SemanticsProperties.EditableText].text
+        assertTrue(shown, Regex("^PAT-JOAO-[0-9A-F]{4}$").matches(shown))
+        // The random part is fixed for this form; only the name part follows the typing.
+        compose.onNodeWithTag("input_profile_name").performScrollTo().performTextReplacement("Joana")
+        compose.onNodeWithTag("input_patient_id").performScrollTo().assert(hasText("PAT-JOANA-" + shown.takeLast(4)))
+        compose.onNodeWithTag("btn_save_profile").performClick()
+        compose.runOnIdle { assertEquals("PAT-JOANA-" + shown.takeLast(4), saved!!.patientId) }
+    }
+
+    @Test fun generated_patient_id_stays_after_name_edit() {
+        val original = UserProfileEntity(patientId = "PAT-ANA-1B2C", fullName = "Ana Souza")
+        var saved: UserProfileEntity? = null
+        compose.setContent { MyApplicationTheme { UserProfileDialog(original, {}, { _, p -> saved = p }) } }
+        compose.onNodeWithTag("input_profile_name").performTextReplacement("Beatriz Lima")
+        compose.onNodeWithTag("btn_save_profile").performClick()
+        compose.runOnIdle { assertEquals("PAT-ANA-1B2C", saved!!.patientId) }
+    }
+
     @Test fun invalid_input_does_not_silently_save_example_values() {
         var saves = 0
         compose.setContent { MyApplicationTheme { UserProfileDialog(UserProfileEntity(), {}, { _, _ -> saves++ }) } }

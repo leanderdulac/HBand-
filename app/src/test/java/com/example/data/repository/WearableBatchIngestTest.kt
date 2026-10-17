@@ -103,6 +103,43 @@ class WearableBatchIngestTest {
             else Response.error(422, "synthetic-whole-batch-source-validation".toResponseBody())
     }
 
+    @Test fun queued_default_patient_readings_are_sent_and_confirmed_under_the_current_id() = runBlocking {
+        val default = com.example.data.ingest.IngestPayloadMapper.DEFAULT_PATIENT_ID
+        val repository = WearableRepository(db.ingestQueueDao(), db.sensorMetricDao(), api, db.localWriteTransaction(),
+            db.advancedMeasurementDao(), patientIdProvider = { "PAT-ANA-1B2C" })
+        insert(1, patient = default); insert(2, patient = default); insert(3, patient = "OTHER-PATIENT")
+        repository.processQueueDetailed()
+        val patients = requests.map { JSONObject(it.second).getString("patient_id") }.sorted()
+        assertEquals(listOf("OTHER-PATIENT", "PAT-ANA-1B2C"), patients)
+        val ana = requests.map { JSONObject(it.second) }.first { it.getString("patient_id") == "PAT-ANA-1B2C" }
+        val rows = ana.getJSONArray("readings")
+        assertEquals(2, rows.length())
+        for (i in 0 until rows.length()) assertEquals("PAT-ANA-1B2C", rows.getJSONObject(i).getString("patient_id"))
+        // Receipts echo the new patient, so both readings are confirmed, not left pending.
+        assertTrue(db.ingestQueueDao().getAllItemsSync().all { it.status == QueueStatus.SYNCED.name })
+    }
+
+    @Test fun every_reading_carries_the_current_device_label_at_send_time() = runBlocking {
+        var label: String? = "Pulseira da Ana"
+        val repository = WearableRepository(db.ingestQueueDao(), db.sensorMetricDao(), api, db.localWriteTransaction(),
+            db.advancedMeasurementDao(), deviceLabelProvider = { label })
+        insert(1); insert(2)
+        repository.processQueueDetailed()
+        val first = JSONObject(requests.last().second).getJSONArray("readings")
+        assertEquals(2, first.length())
+        for (i in 0 until first.length()) assertEquals("Pulseira da Ana", first.getJSONObject(i).getString("device_label"))
+        // A queued reading sent after a rename carries the new name; no label sends none.
+        label = "Pulseira do Bruno"
+        insert(3)
+        repository.processQueueDetailed()
+        assertEquals("Pulseira do Bruno", JSONObject(requests.last().second).getJSONArray("readings")
+            .getJSONObject(0).getString("device_label"))
+        label = null
+        insert(4)
+        repository.processQueueDetailed()
+        assertFalse(JSONObject(requests.last().second).getJSONArray("readings").getJSONObject(0).has("device_label"))
+    }
+
     @Test fun incompatible_sources_stay_local_while_flat_and_legacy_neighbors_sync() = runBlocking {
         val allowed = listOf(null, JSONObject.NULL, "", "companion_manual", "ble_sim", "ble_hband", "http")
         val incompatible = listOf("wifi_watch", " ble_hband", "BLE_HBAND", " ", 32, true,

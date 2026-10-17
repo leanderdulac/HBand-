@@ -57,6 +57,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         apiService = RetrofitClient.apiService,
         ingestTransportProvider = { RetrofitClient.captureIngestTransport() },
             backoffGate = com.example.data.ingest.IngestBackoffGate.shared(application),
+        deviceLabelProvider = { com.example.data.ingest.DeviceLabel.current(application, db.userProfileDao()) },
+        patientIdProvider = { db.userProfileDao().getUserProfile()?.patientId },
         localWriteTransaction = db.localWriteTransaction(),
         advancedMeasurementDao = db.advancedMeasurementDao(),
     )
@@ -302,7 +304,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         checkHealth()
 
         viewModelScope.launch {
-            profileRead.firstConfirmed()?.let { bleManager.setPatientId(it.patientId) }
+            // Follow every confirmed read: the launch migration may assign the ID after this starts.
+            profileRead.state.collect { read ->
+                (read as? LocalReadState.Ready<com.example.data.local.UserProfileEntity?>)?.value
+                    ?.let { bleManager.setPatientId(it.patientId) }
+            }
         }
 
         viewModelScope.launch {
@@ -431,6 +437,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun setBandHealthRemind(enabled: Boolean) = bleManager.setHealthRemindEnabled(enabled)
 
     fun saveUserProfile(token: String, profile: com.example.data.local.UserProfileEntity) = profileSave.save(token, profile)
+
+    // "Nome da pulseira" (Meu perfil): local only, sent as device_label on each ingest.
+    private val _savedDeviceLabel = MutableStateFlow(com.example.data.ingest.DeviceLabel.read(application))
+    val savedDeviceLabel: StateFlow<String?> = _savedDeviceLabel.asStateFlow()
+
+    fun saveDeviceLabel(raw: String, profileName: String) {
+        val app = getApplication<Application>()
+        com.example.data.ingest.DeviceLabel.save(app, raw, profileName)
+        _savedDeviceLabel.value = com.example.data.ingest.DeviceLabel.read(app)
+    }
 
     fun setAutoIngestLiveReadings(enabled: Boolean) {
         _autoIngestLiveReadings.value = enabled

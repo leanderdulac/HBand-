@@ -30,6 +30,6 @@ class ReconnectWatchdogPolicyTest {
 
     @Test fun versionLabelFormat() {
         org.junit.Assert.assertEquals("Versão 1.7.4 (12)", com.example.ui.components.appVersionLabel("1.7.4", 12))
-        org.junit.Assert.assertEquals("Versão 1.7.4 (13)", com.example.ui.components.appVersionLabel())
+        org.junit.Assert.assertEquals("Versão 1.7.4 (16)", com.example.ui.components.appVersionLabel())
     }
 }
