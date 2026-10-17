@@ -58,6 +58,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         ingestTransportProvider = { RetrofitClient.captureIngestTransport() },
             backoffGate = com.example.data.ingest.IngestBackoffGate.shared(application),
         deviceLabelProvider = { com.example.data.ingest.DeviceLabel.current(application, db.userProfileDao()) },
+        patientIdProvider = { db.userProfileDao().getUserProfile()?.patientId },
         localWriteTransaction = db.localWriteTransaction(),
         advancedMeasurementDao = db.advancedMeasurementDao(),
     )
@@ -303,7 +304,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         checkHealth()
 
         viewModelScope.launch {
-            profileRead.firstConfirmed()?.let { bleManager.setPatientId(it.patientId) }
+            // Follow every confirmed read: the launch migration may assign the ID after this starts.
+            profileRead.state.collect { read ->
+                (read as? LocalReadState.Ready<com.example.data.local.UserProfileEntity?>)?.value
+                    ?.let { bleManager.setPatientId(it.patientId) }
+            }
         }
 
         viewModelScope.launch {

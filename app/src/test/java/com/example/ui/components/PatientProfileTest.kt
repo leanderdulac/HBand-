@@ -59,6 +59,33 @@ class PatientProfileTest {
             androidx.compose.ui.semantics.SemanticsProperties.EditableText, androidx.compose.ui.text.AnnotatedString("")))
     }
 
+    @Test fun new_profile_gets_its_own_patient_id_when_name_is_entered() {
+        var saved: UserProfileEntity? = null
+        compose.setContent { MyApplicationTheme { UserProfileDialog(blankPatientProfile(), {}, { _, p -> saved = p }) } }
+        compose.onNodeWithTag("input_profile_name").performTextReplacement("João da Silva")
+        compose.onNodeWithTag("input_age").performScrollTo().performTextReplacement("40")
+        compose.onNodeWithTag("input_height").performScrollTo().performTextReplacement("170")
+        compose.onNodeWithTag("input_weight").performScrollTo().performTextReplacement("70")
+        compose.onNodeWithText("Identificação do cadastro").performScrollTo().performClick()
+        val shown = compose.onNodeWithTag("input_patient_id").fetchSemanticsNode()
+            .config[androidx.compose.ui.semantics.SemanticsProperties.EditableText].text
+        assertTrue(shown, Regex("^PAT-JOAO-[0-9A-F]{4}$").matches(shown))
+        // The random part is fixed for this form; only the name part follows the typing.
+        compose.onNodeWithTag("input_profile_name").performScrollTo().performTextReplacement("Joana")
+        compose.onNodeWithTag("input_patient_id").performScrollTo().assert(hasText("PAT-JOANA-" + shown.takeLast(4)))
+        compose.onNodeWithTag("btn_save_profile").performClick()
+        compose.runOnIdle { assertEquals("PAT-JOANA-" + shown.takeLast(4), saved!!.patientId) }
+    }
+
+    @Test fun generated_patient_id_stays_after_name_edit() {
+        val original = UserProfileEntity(patientId = "PAT-ANA-1B2C", fullName = "Ana Souza")
+        var saved: UserProfileEntity? = null
+        compose.setContent { MyApplicationTheme { UserProfileDialog(original, {}, { _, p -> saved = p }) } }
+        compose.onNodeWithTag("input_profile_name").performTextReplacement("Beatriz Lima")
+        compose.onNodeWithTag("btn_save_profile").performClick()
+        compose.runOnIdle { assertEquals("PAT-ANA-1B2C", saved!!.patientId) }
+    }
+
     @Test fun invalid_input_does_not_silently_save_example_values() {
         var saves = 0
         compose.setContent { MyApplicationTheme { UserProfileDialog(UserProfileEntity(), {}, { _, _ -> saves++ }) } }

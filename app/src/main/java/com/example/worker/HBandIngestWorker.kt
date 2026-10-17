@@ -25,6 +25,7 @@ class HBandIngestWorker(
             ingestTransportProvider = { RetrofitClient.captureIngestTransport() },
             backoffGate = com.example.data.ingest.IngestBackoffGate.shared(applicationContext),
         deviceLabelProvider = { com.example.data.ingest.DeviceLabel.current(applicationContext, database.userProfileDao()) },
+        patientIdProvider = { database.userProfileDao().getUserProfile()?.patientId },
             localWriteTransaction = database.localWriteTransaction(),
         )
 

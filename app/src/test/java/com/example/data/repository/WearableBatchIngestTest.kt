@@ -103,6 +103,22 @@ class WearableBatchIngestTest {
             else Response.error(422, "synthetic-whole-batch-source-validation".toResponseBody())
     }
 
+    @Test fun queued_default_patient_readings_are_sent_and_confirmed_under_the_current_id() = runBlocking {
+        val default = com.example.data.ingest.IngestPayloadMapper.DEFAULT_PATIENT_ID
+        val repository = WearableRepository(db.ingestQueueDao(), db.sensorMetricDao(), api, db.localWriteTransaction(),
+            db.advancedMeasurementDao(), patientIdProvider = { "PAT-ANA-1B2C" })
+        insert(1, patient = default); insert(2, patient = default); insert(3, patient = "OTHER-PATIENT")
+        repository.processQueueDetailed()
+        val patients = requests.map { JSONObject(it.second).getString("patient_id") }.sorted()
+        assertEquals(listOf("OTHER-PATIENT", "PAT-ANA-1B2C"), patients)
+        val ana = requests.map { JSONObject(it.second) }.first { it.getString("patient_id") == "PAT-ANA-1B2C" }
+        val rows = ana.getJSONArray("readings")
+        assertEquals(2, rows.length())
+        for (i in 0 until rows.length()) assertEquals("PAT-ANA-1B2C", rows.getJSONObject(i).getString("patient_id"))
+        // Receipts echo the new patient, so both readings are confirmed, not left pending.
+        assertTrue(db.ingestQueueDao().getAllItemsSync().all { it.status == QueueStatus.SYNCED.name })
+    }
+
     @Test fun every_reading_carries_the_current_device_label_at_send_time() = runBlocking {
         var label: String? = "Pulseira da Ana"
         val repository = WearableRepository(db.ingestQueueDao(), db.sensorMetricDao(), api, db.localWriteTransaction(),

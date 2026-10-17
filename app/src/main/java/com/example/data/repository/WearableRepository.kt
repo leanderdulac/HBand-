@@ -80,6 +80,8 @@ class WearableRepository(
         com.example.data.ingest.IngestBackoffGate.Disabled,
     /** Current "Nome da pulseira" sent as `device_label` (see DeviceLabel.resolve); null sends none. */
     private val deviceLabelProvider: suspend () -> String? = { null },
+    /** Current patient ID from Meu perfil; replaces the default ID on queued readings. */
+    private val patientIdProvider: suspend () -> String? = { null },
 ) {
     val allQueueItems: Flow<List<IngestQueueEntity>> = queueDao.getAllItems()
     val allSensorMetrics: Flow<List<HBandSensorMetricEntity>> = sensorMetricDao.getAllMetrics()
@@ -440,8 +442,11 @@ class WearableRepository(
             val deviceLabel = try { deviceLabelProvider() } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) { null }
+            val currentPatientId = try { patientIdProvider() } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) { null }
             for (item in pendingList) {
-                val reading = runCatching { IngestReconciler.prepare(item, deviceLabel) }.getOrNull()
+                val reading = runCatching { IngestReconciler.prepare(item, deviceLabel, currentPatientId) }.getOrNull()
                 val localError = when {
                     reading == null -> IngestReconciler.INVALID_LOCAL
                     !IngestPayloadMapper.isIngestibleJson(reading.json) -> IngestPayloadMapper.MISSING_HR_ERROR

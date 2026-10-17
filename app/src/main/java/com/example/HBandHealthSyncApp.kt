@@ -92,6 +92,7 @@ class HBandHealthSyncApp : Application() {
             ingestTransportProvider = { RetrofitClient.captureIngestTransport() },
             backoffGate = com.example.data.ingest.IngestBackoffGate.shared(this),
         deviceLabelProvider = { com.example.data.ingest.DeviceLabel.current(this, db.userProfileDao()) },
+        patientIdProvider = { db.userProfileDao().getUserProfile()?.patientId },
             localWriteTransaction = db.localWriteTransaction(),
             advancedMeasurementDao = db.advancedMeasurementDao(),
         )
@@ -129,6 +130,26 @@ class HBandHealthSyncApp : Application() {
                 }
             },
         ))
+        // Patient ID: existing installs with a saved name but PAT-HBAND-001 get their own ID
+        // now, and every later profile change reaches the watch runtime (history samples).
+        bleScope.launch(Dispatchers.IO) {
+            try {
+                com.example.data.ingest.PatientIdentity.migrate(db.userProfileDao())
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                Log.e(TAG, "Falha ao gerar a identificação do paciente; nova tentativa no próximo início.", error)
+            }
+            try {
+                db.userProfileDao().getUserProfileFlow().collect { profile ->
+                    profile?.let { bleManager.setPatientId(it.patientId) }
+                }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                Log.e(TAG, "Falha ao acompanhar o perfil salvo.", error)
+            }
+        }
         uploadNow = {
             bleScope.launch(Dispatchers.IO) {
                 runCatching { historyRepository.processQueueDetailed() }

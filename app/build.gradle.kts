@@ -60,7 +60,7 @@ android {
     applicationId = "com.aistudio.hbandhealthtech.pxq97m"
     minSdk = 24
     targetSdk = 36
-    versionCode = 15
+    versionCode = 16
     versionName = "1.7.4"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
