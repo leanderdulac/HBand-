@@ -56,6 +56,11 @@ final class VeepooSession: NSObject, ObservableObject {
     @Published var watchPhotoDialCount: Int = UserDefaults.standard.integer(forKey: "watch_photo_dial_count")
     @Published var watchScreenTypes: Int = UserDefaults.standard.integer(forKey: "watch_screen_types")
     var watchSupportsPhotoDial: Bool { watchPhotoDialCount > 0 }
+    private var watchTimeAttempt: UUID?
+    private static var is24HourClock: Bool {
+        let f = DateFormatter.dateFormat(fromTemplate: "j", options: 0, locale: .current) ?? "HH"
+        return !f.contains("a")
+    }
 
     private let manager = VPBleCentralManage.sharedBleManager()!
     private let forwarder = VeepooCentralForwarder()
@@ -407,13 +412,14 @@ final class VeepooSession: NSObject, ObservableObject {
         // Link (re)established, e.g. after state restoration: push what queued meanwhile.
         flushQueueOnly()
         recordDialCapabilities()
-        syncWatchTime(manual: false)
         readBattery()
         manager.peripheralManage.veepooSdkStartReadDeviceAllData { [weak self] state, _, _, _ in
             Task { @MainActor in
                 if state.rawValue == 2 {
                     self?.sessionMessage = "Histórico do relógio lido. Medindo batimentos…"
                     self?.note("Histórico do band lido. FC.")
+                    // Acerta a hora depois do histórico (como no Android): no handshake o VE30 ignora o comando.
+                    self?.syncWatchTime(manual: false)
                     self?.startHeart()
                 }
             }
@@ -431,9 +437,26 @@ final class VeepooSession: NSObject, ObservableObject {
         guard !watchTimeSyncing else { return }
         watchTimeSyncing = true
         note("Hora: enviando hora do iPhone ao relógio (manual=\(manual)).")
-        manager.peripheralManage.veepooSDKSettingTime { [weak self] success in
+        let attempt = UUID()
+        watchTimeAttempt = attempt
+        // Alguns firmwares não respondem: libera o botão e registra falha após 10 s.
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 10_000_000_000)
+            guard let self, self.watchTimeAttempt == attempt, self.watchTimeSyncing else { return }
+            self.watchTimeSyncing = false
+            self.watchTimeAttempt = nil
+            self.watchTimeStatus = "O relógio não confirmou o acerto da hora."
+            NSLog("[Next2U] Hora: sem resposta do relógio em 10 s (manual=%@)", manual ? "sim" : "não")
+        }
+        let c = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute, .second], from: Date())
+        manager.peripheralManage.veepooSDKSettingTime(
+            withYear: Int32(c.year ?? 2026), month: Int32(c.month ?? 1), day: Int32(c.day ?? 1),
+            hour: Int32(c.hour ?? 0), minute: Int32(c.minute ?? 0), second: Int32(c.second ?? 0),
+            timeSystem: Self.is24HourClock ? 2 : 1
+        ) { [weak self] success in
             Task { @MainActor in
-                guard let self else { return }
+                guard let self, self.watchTimeAttempt == attempt else { return }
+                self.watchTimeAttempt = nil
                 self.watchTimeSyncing = false
                 if success {
                     let now = Date()
@@ -441,9 +464,11 @@ final class VeepooSession: NSObject, ObservableObject {
                     UserDefaults.standard.set(now, forKey: "watch_time_sync_at")
                     self.watchTimeStatus = WatchClockText.success(now)
                     self.note("Hora do relógio sincronizada.")
+                    NSLog("[Next2U] Hora do relógio sincronizada (manual=%@)", manual ? "sim" : "não")
                 } else {
                     self.watchTimeStatus = "Não foi possível acertar a hora do relógio."
                     self.note("Hora: falha ao sincronizar.")
+                    NSLog("[Next2U] Hora: falha ao sincronizar (manual=%@)", manual ? "sim" : "não")
                 }
             }
         }
