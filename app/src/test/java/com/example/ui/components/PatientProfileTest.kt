@@ -30,21 +30,21 @@ class PatientProfileTest {
         val original = UserProfileEntity(id = "profile-fixture", patientId = "patient-fixture", fullName = "Ana Souza")
         var label: String? = null
         compose.setContent { MyApplicationTheme { UserProfileDialog(original, {}, { _, _ -> },
-            onSaveDeviceLabel = { label = it }) } }
+            onSaveDeviceLabel = { l, _ -> label = l }) } }
         compose.onNodeWithText("Nome da pulseira").assertExists()
-        compose.onNodeWithTag("input_device_label").assert(hasText("Ana Souza"))
+        compose.onNodeWithTag("input_device_label").assert(hasText("Pulseira de Ana Souza"))
         // Untouched, it follows the name typed above.
         compose.onNodeWithTag("input_profile_name").performTextReplacement("Ana Souza Lima")
-        compose.onNodeWithTag("input_device_label").assert(hasText("Ana Souza Lima"))
+        compose.onNodeWithTag("input_device_label").assert(hasText("Pulseira de Ana Souza Lima"))
         compose.onNodeWithTag("btn_save_profile").performClick()
-        compose.runOnIdle { assertEquals("Ana Souza Lima", label) }
+        compose.runOnIdle { assertEquals("Pulseira de Ana Souza Lima", label) }
     }
 
     @Test fun edited_device_label_is_kept_and_saved() {
         val original = UserProfileEntity(id = "profile-fixture", patientId = "patient-fixture", fullName = "Ana Souza")
         var label: String? = null
         compose.setContent { MyApplicationTheme { UserProfileDialog(original, {}, { _, _ -> },
-            savedDeviceLabel = "Pulseira 3", onSaveDeviceLabel = { label = it }) } }
+            savedDeviceLabel = "Pulseira 3", onSaveDeviceLabel = { l, _ -> label = l }) } }
         compose.onNodeWithTag("input_device_label").assert(hasText("Pulseira 3"))
         compose.onNodeWithTag("input_profile_name").performTextReplacement("Ana S.")
         compose.onNodeWithTag("input_device_label").assert(hasText("Pulseira 3"))

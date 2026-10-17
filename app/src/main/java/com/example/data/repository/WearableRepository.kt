@@ -78,8 +78,8 @@ class WearableRepository(
     },
     private val backoffGate: com.example.data.ingest.IngestBackoffGate =
         com.example.data.ingest.IngestBackoffGate.Disabled,
-    /** Current "Nome da pulseira" sent as `device_label`; null sends none. */
-    private val deviceLabelProvider: () -> String? = { null },
+    /** Current "Nome da pulseira" sent as `device_label` (see DeviceLabel.resolve); null sends none. */
+    private val deviceLabelProvider: suspend () -> String? = { null },
 ) {
     val allQueueItems: Flow<List<IngestQueueEntity>> = queueDao.getAllItems()
     val allSensorMetrics: Flow<List<HBandSensorMetricEntity>> = sensorMetricDao.getAllMetrics()
@@ -437,7 +437,9 @@ class WearableRepository(
             }
 
             val prepared = mutableListOf<PreparedReading>()
-            val deviceLabel = runCatching { deviceLabelProvider() }.getOrNull()
+            val deviceLabel = try { deviceLabelProvider() } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) { null }
             for (item in pendingList) {
                 val reading = runCatching { IngestReconciler.prepare(item, deviceLabel) }.getOrNull()
                 val localError = when {

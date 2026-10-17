@@ -26,27 +26,59 @@ class DeviceLabelTest {
         assertEquals("a".repeat(63), cut)
     }
 
-    @Test fun resolve_prefers_saved_name_and_falls_back_to_phone_model() {
-        assertEquals("Pulseira da Ana", DeviceLabel.resolve(" Pulseira da Ana ", "SM-G996B"))
-        assertEquals("SM-G996B", DeviceLabel.resolve("", "SM-G996B"))
-        assertEquals("SM-G996B", DeviceLabel.resolve(null, "SM-G996B"))
-        assertNull(DeviceLabel.resolve(null, " "))
+    @Test fun suggestion_is_pulseira_de_profile_name_capped_at_core_limit() {
+        assertEquals("Pulseira de Ana Souza", DeviceLabel.suggestion("  Ana Souza "))
+        assertNull(DeviceLabel.suggestion("  "))
+        assertNull(DeviceLabel.suggestion(null))
+        val long = DeviceLabel.suggestion("A".repeat(80))!!
+        assertEquals(64, long.length)
+        assertTrue(long.startsWith("Pulseira de "))
     }
 
-    @Test fun prefill_uses_saved_name_else_patient_name() {
-        assertEquals("Pulseira da Ana", DeviceLabel.prefill("Pulseira da Ana", "Ana Souza"))
-        assertEquals("Ana Souza", DeviceLabel.prefill(null, " Ana Souza "))
+    @Test fun resolve_order_is_saved_then_profile_name_then_phone_model() {
+        assertEquals("Pulseira 3", DeviceLabel.resolve(" Pulseira 3 ", "Ana Souza", "SM-G996B"))
+        assertEquals("Pulseira de Ana Souza", DeviceLabel.resolve(null, "Ana Souza", "SM-G996B"))
+        assertEquals("Pulseira de Ana Souza", DeviceLabel.resolve("  ", " Ana Souza ", "SM-G996B"))
+        assertEquals("SM-G996B", DeviceLabel.resolve(null, "", "SM-G996B"))
+        assertEquals("SM-G996B", DeviceLabel.resolve(null, null, "SM-G996B"))
+        assertNull(DeviceLabel.resolve(null, null, " "))
+    }
+
+    @Test fun prefill_uses_saved_name_else_pulseira_de_patient_name() {
+        assertEquals("Pulseira 3", DeviceLabel.prefill("Pulseira 3", "Ana Souza"))
+        assertEquals("Pulseira de Ana Souza", DeviceLabel.prefill(null, " Ana Souza "))
         assertEquals("", DeviceLabel.prefill(null, ""))
     }
 
-    @Test fun save_is_local_and_blank_clears_so_model_is_used() {
+    @Test fun save_is_local_and_blank_or_suggestion_follows_profile_name() {
         val app = RuntimeEnvironment.getApplication()
-        DeviceLabel.save(app, "  Pulseira da Ana ")
-        assertEquals("Pulseira da Ana", DeviceLabel.read(app))
-        assertEquals("Pulseira da Ana", DeviceLabel.current(app))
-        DeviceLabel.save(app, "  ")
+        DeviceLabel.save(app, "  Pulseira 3 ", "Ana Souza")
+        assertEquals("Pulseira 3", DeviceLabel.read(app))
+        assertEquals("Pulseira 3", DeviceLabel.current(app, "Ana Souza"))
+        // Equal to the suggestion: not pinned, so a later name change is followed.
+        DeviceLabel.save(app, "Pulseira de Ana Souza", "Ana Souza")
         assertNull(DeviceLabel.read(app))
-        assertEquals(DeviceLabel.normalize(android.os.Build.MODEL), DeviceLabel.current(app))
+        assertEquals("Pulseira de Ana Lima", DeviceLabel.current(app, "Ana Lima"))
+        DeviceLabel.save(app, "  ", "Ana Souza")
+        assertNull(DeviceLabel.read(app))
+        assertEquals("Pulseira de Ana Souza", DeviceLabel.current(app, "Ana Souza"))
+        assertEquals(DeviceLabel.normalize(android.os.Build.MODEL), DeviceLabel.current(app, null as String?))
+    }
+
+    @Test fun send_time_label_reads_saved_profile_name_from_database() = kotlinx.coroutines.runBlocking {
+        val app = RuntimeEnvironment.getApplication()
+        val db = androidx.room.Room.inMemoryDatabaseBuilder(app, com.example.data.local.AppDatabase::class.java)
+            .allowMainThreadQueries().build()
+        try {
+            DeviceLabel.save(app, "", null)
+            assertEquals(DeviceLabel.normalize(android.os.Build.MODEL), DeviceLabel.current(app, db.userProfileDao()))
+            db.userProfileDao().saveUserProfile(com.example.data.local.UserProfileEntity(fullName = " Bruno Lima "))
+            assertEquals("Pulseira de Bruno Lima", DeviceLabel.current(app, db.userProfileDao()))
+            DeviceLabel.save(app, "Pulseira 7", "Bruno Lima")
+            assertEquals("Pulseira 7", DeviceLabel.current(app, db.userProfileDao()))
+        } finally {
+            db.close()
+        }
     }
 
     @Test fun prepare_adds_device_label_only_when_present_and_keeps_identity() {

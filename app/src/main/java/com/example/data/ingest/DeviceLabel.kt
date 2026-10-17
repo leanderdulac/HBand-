@@ -25,22 +25,36 @@ object DeviceLabel {
         return value.ifEmpty { null }
     }
 
-    /** What goes on the wire: the saved name, else the phone model (Build.MODEL). */
-    fun resolve(saved: String?, phoneModel: String?): String? = normalize(saved) ?: normalize(phoneModel)
+    /** Suggested name from the profile: "Pulseira de <nome>" (same as iOS build 11). */
+    fun suggestion(profileName: String?): String? {
+        val name = profileName?.trim().orEmpty()
+        return if (name.isEmpty()) null else normalize("Pulseira de $name")
+    }
 
-    /** What the form shows first: the saved name, else the patient's own name. */
-    fun prefill(saved: String?, patientName: String?): String = normalize(saved) ?: patientName?.trim().orEmpty()
+    /** On the wire: saved name > "Pulseira de <nome do perfil>" > phone model (Build.MODEL). */
+    fun resolve(saved: String?, profileName: String?, phoneModel: String?): String? =
+        normalize(saved) ?: suggestion(profileName) ?: normalize(phoneModel)
+
+    /** What the form shows first: the saved name, else the suggestion from the patient's name. */
+    fun prefill(saved: String?, patientName: String?): String = normalize(saved) ?: suggestion(patientName).orEmpty()
 
     fun read(context: Context): String? =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY, null)
 
-    /** Blank clears the saved name, so sends fall back to the phone model. */
-    fun save(context: Context, raw: String?) {
+    /**
+     * Blank, or equal to the suggestion, clears the saved name so the label keeps
+     * following the profile name (like iOS). Anything else is kept as typed.
+     */
+    fun save(context: Context, raw: String?, profileName: String?) {
         val editor = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
         val value = normalize(raw)
-        if (value == null) editor.remove(KEY) else editor.putString(KEY, value)
+        if (value == null || value == suggestion(profileName)) editor.remove(KEY) else editor.putString(KEY, value)
         editor.apply()
     }
 
-    fun current(context: Context): String? = resolve(read(context), Build.MODEL)
+    fun current(context: Context, profileName: String?): String? = resolve(read(context), profileName, Build.MODEL)
+
+    /** Send-time label: reads the saved profile name from the local database. */
+    suspend fun current(context: Context, profiles: com.example.data.local.UserProfileDao): String? =
+        current(context, runCatching { profiles.getUserProfile()?.fullName }.getOrNull())
 }

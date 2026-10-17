@@ -57,7 +57,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         apiService = RetrofitClient.apiService,
         ingestTransportProvider = { RetrofitClient.captureIngestTransport() },
             backoffGate = com.example.data.ingest.IngestBackoffGate.shared(application),
-        deviceLabelProvider = { com.example.data.ingest.DeviceLabel.current(application) },
+        deviceLabelProvider = { com.example.data.ingest.DeviceLabel.current(application, db.userProfileDao()) },
         localWriteTransaction = db.localWriteTransaction(),
         advancedMeasurementDao = db.advancedMeasurementDao(),
     )
@@ -437,9 +437,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _savedDeviceLabel = MutableStateFlow(com.example.data.ingest.DeviceLabel.read(application))
     val savedDeviceLabel: StateFlow<String?> = _savedDeviceLabel.asStateFlow()
 
-    fun saveDeviceLabel(raw: String) {
+    fun saveDeviceLabel(raw: String, profileName: String) {
         val app = getApplication<Application>()
-        com.example.data.ingest.DeviceLabel.save(app, raw)
+        com.example.data.ingest.DeviceLabel.save(app, raw, profileName)
         _savedDeviceLabel.value = com.example.data.ingest.DeviceLabel.read(app)
     }
 

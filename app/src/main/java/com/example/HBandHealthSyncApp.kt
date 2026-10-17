@@ -91,7 +91,7 @@ class HBandHealthSyncApp : Application() {
             apiService = RetrofitClient.apiService,
             ingestTransportProvider = { RetrofitClient.captureIngestTransport() },
             backoffGate = com.example.data.ingest.IngestBackoffGate.shared(this),
-        deviceLabelProvider = { com.example.data.ingest.DeviceLabel.current(this) },
+        deviceLabelProvider = { com.example.data.ingest.DeviceLabel.current(this, db.userProfileDao()) },
             localWriteTransaction = db.localWriteTransaction(),
             advancedMeasurementDao = db.advancedMeasurementDao(),
         )

@@ -36,7 +36,7 @@ fun UserProfileDialog(
     readFailed: Boolean = false,
     onRetryRead: () -> Unit = {},
     savedDeviceLabel: String? = null,
-    onSaveDeviceLabel: (String) -> Unit = {},
+    onSaveDeviceLabel: (label: String, profileName: String) -> Unit = { _, _ -> },
 ) {
     // A phone that never saved a profile (fresh install, e.g. Galaxy A6s) has no row.
     // Since PR5 that showed only an error text instead of the form; start a blank form.
@@ -71,10 +71,10 @@ private fun ProfileEditor(
     readFailed: Boolean,
     onRetryRead: () -> Unit,
     savedDeviceLabel: String?,
-    onSaveDeviceLabel: (String) -> Unit,
+    onSaveDeviceLabel: (label: String, profileName: String) -> Unit,
 ) {
     val initial = currentProfile
-    // "Nome da pulseira": starts as the saved name, else the patient's name. Until the patient
+    // "Nome da pulseira": starts as the saved name, else "Pulseira de <nome>". Until the patient
     // edits it, it follows the name typed above (a fresh profile starts blank, see A6s).
     val initialLabel = remember(initial.id, initial.patientId, savedDeviceLabel) {
         com.example.data.ingest.DeviceLabel.prefill(savedDeviceLabel, initial.fullName)
@@ -163,7 +163,7 @@ private fun ProfileEditor(
                 PatientSummaryLayout(first = {
                     ProfileField(name, {
                         name = it
-                        if (!deviceLabelEdited) deviceLabel = it.take(com.example.data.ingest.DeviceLabel.MAX_LENGTH)
+                        if (!deviceLabelEdited) deviceLabel = com.example.data.ingest.DeviceLabel.prefill(null, it)
                     }, "Nome completo", "input_profile_name", error = name.isBlank(), enabled = editingEnabled)
                     DeviceLabelField(deviceLabel, {
                         deviceLabel = it.take(com.example.data.ingest.DeviceLabel.MAX_LENGTH)
@@ -204,7 +204,7 @@ private fun ProfileEditor(
                         val token = UUID.randomUUID().toString()
                         requestToken = token
                         submissionPending = true
-                        onSaveDeviceLabel(deviceLabel)
+                        onSaveDeviceLabel(deviceLabel, name.trim())
                         onSaveProfile(token, initial.copy(
                             fullName = name.trim(), age = parsedAge!!, gender = gender,
                             heightCm = parsedHeight!!, weightKg = parsedWeight!!,
@@ -340,7 +340,7 @@ private fun DeviceLabelField(value: String, onValueChange: (String) -> Unit, ena
     OutlinedTextField(
         value = value, onValueChange = onValueChange, enabled = enabled,
         label = { Text("Nome da pulseira") },
-        supportingText = { Text("Ajuda a equipe a saber de quem é esta pulseira. Se ficar em branco, usamos o nome do celular.") },
+        supportingText = { Text("Ajuda a equipe a saber de quem é esta pulseira. Se ficar em branco, usamos \"Pulseira de\" e o seu nome.") },
         singleLine = true,
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text, imeAction = ImeAction.Next),
         keyboardActions = KeyboardActions(onNext = { focusManager.moveFocus(FocusDirection.Next) }),
