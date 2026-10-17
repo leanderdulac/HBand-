@@ -41,6 +41,7 @@ struct HomeScreen: View {
                     if !insight.highlightEnabled {
                         GeminiValidationCard()
                     }
+                    AppVersionFooter()
                 }
                 .frame(maxWidth: 720, alignment: .leading)
                 .padding(PatientTheme.margin)

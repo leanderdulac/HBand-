@@ -131,6 +131,14 @@ object IngestPayload {
         false
     }
 
+    /** Acrescenta `device_label` se ainda não houver (leituras antigas da fila também ganham). */
+    fun withDeviceLabel(json: String, label: String?): String {
+        if (label.isNullOrBlank()) return json
+        val obj = Json.parseToJsonElement(json).jsonObject
+        if (obj.containsKey("device_label")) return json
+        return pretty.encodeToString(JsonObject.serializer(), JsonObject(obj + ("device_label" to JsonPrimitive(label))))
+    }
+
     fun telemetryToJson(telemetry: HBandTelemetry, patientId: String): String {
         val obj = buildJsonObject {
             put("patient_id", resolvePatientId(patientId))
@@ -215,6 +223,7 @@ object IngestPayload {
             if (isReal != null) put("is_real_sensor_data", isReal)
             if (jsonObj.containsKey("ingest_source")) put("ingest_source", jsonObj.getValue("ingest_source"))
             if (jsonObj.containsKey("filter_type")) put("filter_type", jsonObj.getValue("filter_type"))
+            if (jsonObj.containsKey("device_label")) put("device_label", jsonObj.getValue("device_label"))
             put("service", SERVICE_NAME)
         }
         return pretty.encodeToString(JsonObject.serializer(), normalized)

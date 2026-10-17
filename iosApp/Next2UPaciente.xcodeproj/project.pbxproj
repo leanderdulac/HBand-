@@ -7,14 +7,19 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		4AEA9B3B71AF7B215896DB39 /* PatientIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5439AC7D5D09965F788A0827 /* PatientIdentity.swift */; };
+		958B6FEED8292AFC5901CCAC /* N2UBleRestore.m in Sources */ = {isa = PBXBuildFile; fileRef = C3DDEC20A79A1E7E1675E67D /* N2UBleRestore.m */; settings = {COMPILER_FLAGS = "-fno-objc-arc"; }; };
 		A10000000000000100000001 /* Next2UPacienteApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000100000001 /* Next2UPacienteApp.swift */; };
 		A10000000000000100000002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000100000002 /* ContentView.swift */; };
 		A10000000000000100000003 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000100000003 /* Theme.swift */; };
 		A10000000000000100000004 /* SigningPlaceholders.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000100000004 /* SigningPlaceholders.swift */; };
 		A10000000000000100000005 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000100000005 /* Assets.xcassets */; };
-		A10000000000000100000020 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000100000020 /* PrivacyInfo.xcprivacy */; };
 		A10000000000000100000006 /* VeepooSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000100000008 /* VeepooSession.swift */; };
 		A10000000000000100000007 /* WatchScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000100000009 /* WatchScreen.swift */; };
+		A10000000000000100000008 /* VeepooBleSDK.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A2000000000000010000000A /* VeepooBleSDK.framework */; };
+		A10000000000000100000009 /* CoreBluetooth.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A2000000000000010000000B /* CoreBluetooth.framework */; };
+		A1000000000000010000000A /* shared.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A2000000000000010000000C /* shared.framework */; };
+		A1000000000000010000000B /* shared.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = A2000000000000010000000C /* shared.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		A10000000000000100000010 /* PatientCrypto.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000100000010 /* PatientCrypto.swift */; };
 		A10000000000000100000011 /* StorageStartupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000100000011 /* StorageStartupView.swift */; };
 		A10000000000000100000012 /* BrandViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000100000012 /* BrandViews.swift */; };
@@ -25,58 +30,14 @@
 		A10000000000000100000017 /* QueueScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000100000017 /* QueueScreen.swift */; };
 		A10000000000000100000018 /* IngestBackground.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000100000018 /* IngestBackground.swift */; };
 		A10000000000000100000019 /* SettingsScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000100000019 /* SettingsScreen.swift */; };
-		A10000000000000100000008 /* VeepooBleSDK.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A2000000000000010000000A /* VeepooBleSDK.framework */; };
-		A10000000000000100000009 /* CoreBluetooth.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A2000000000000010000000B /* CoreBluetooth.framework */; };
-		A1000000000000010000000A /* shared.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A2000000000000010000000C /* shared.framework */; };
-		A1000000000000010000000B /* shared.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = A2000000000000010000000C /* shared.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		A10000000000000100000020 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000100000020 /* PrivacyInfo.xcprivacy */; };
 		A10000000000000100000100 /* JLDialUnit.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = A20000000000000100000100 /* JLDialUnit.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		A10000000000000100000101 /* ABParTool.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = A20000000000000100000101 /* ABParTool.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		A10000000000000100000102 /* ZipZap.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = A20000000000000100000102 /* ZipZap.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		A10000000000000100000103 /* GRDFUSDK.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = A20000000000000100000103 /* GRDFUSDK.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
-/* Begin PBXFileReference section */
-		A20000000000000100000001 /* Next2UPacienteApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Next2UPacienteApp.swift; sourceTree = "<group>"; };
-		A20000000000000100000002 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
-		A20000000000000100000003 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
-		A20000000000000100000004 /* SigningPlaceholders.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SigningPlaceholders.swift; sourceTree = "<group>"; };
-		A20000000000000100000005 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
-		A20000000000000100000006 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-		A20000000000000100000020 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
-		A20000000000000100000007 /* Next2UPaciente.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Next2UPaciente.xcconfig; sourceTree = "<group>"; };
-		A20000000000000100000008 /* VeepooSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VeepooSession.swift; sourceTree = "<group>"; };
-		A20000000000000100000009 /* WatchScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchScreen.swift; sourceTree = "<group>"; };
-		A20000000000000100000010 /* PatientCrypto.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PatientCrypto.swift; sourceTree = "<group>"; };
-		A20000000000000100000011 /* StorageStartupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StorageStartupView.swift; sourceTree = "<group>"; };
-		A20000000000000100000012 /* BrandViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrandViews.swift; sourceTree = "<group>"; };
-		A20000000000000100000013 /* PatientReadings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PatientReadings.swift; sourceTree = "<group>"; };
-		A20000000000000100000014 /* Charts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Charts.swift; sourceTree = "<group>"; };
-		A20000000000000100000015 /* HomeScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeScreen.swift; sourceTree = "<group>"; };
-		A20000000000000100000016 /* HistoryScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryScreen.swift; sourceTree = "<group>"; };
-		A20000000000000100000017 /* QueueScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueueScreen.swift; sourceTree = "<group>"; };
-		A20000000000000100000018 /* IngestBackground.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IngestBackground.swift; sourceTree = "<group>"; };
-		A20000000000000100000019 /* SettingsScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsScreen.swift; sourceTree = "<group>"; };
-		A2000000000000010000000A /* VeepooBleSDK.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = VeepooBleSDK.framework; path = Vendor/VeepooBleSDK.framework; sourceTree = "<group>"; };
-		A2000000000000010000000B /* CoreBluetooth.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreBluetooth.framework; path = System/Library/Frameworks/CoreBluetooth.framework; sourceTree = SDKROOT; };
-		A2000000000000010000000C /* shared.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = shared.framework; path = Vendor/shared.framework; sourceTree = "<group>"; };
-		A30000000000000100000001 /* Next2UPaciente.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Next2U Paciente.app"; sourceTree = BUILT_PRODUCTS_DIR; };
-		A20000000000000100000100 /* JLDialUnit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = JLDialUnit.framework; path = Vendor/JLDialUnit.framework; sourceTree = "<group>"; };
-		A20000000000000100000101 /* ABParTool.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = ABParTool.framework; path = Vendor/ABParTool.framework; sourceTree = "<group>"; };
-		A20000000000000100000102 /* ZipZap.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = ZipZap.framework; path = Vendor/ZipZap.framework; sourceTree = "<group>"; };
-		A20000000000000100000103 /* GRDFUSDK.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = GRDFUSDK.framework; path = Vendor/GRDFUSDK.framework; sourceTree = "<group>"; };
-/* End PBXFileReference section */
-
-/* Begin PBXFrameworksBuildPhase section */
-		A40000000000000100000001 /* Frameworks */ = {
-			isa = PBXFrameworksBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				A10000000000000100000008 /* VeepooBleSDK.framework in Frameworks */,
-				A10000000000000100000009 /* CoreBluetooth.framework in Frameworks */,
-				A1000000000000010000000A /* shared.framework in Frameworks */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
+/* Begin PBXCopyFilesBuildPhase section */
 		A40000000000000100000002 /* Embed Frameworks */ = {
 			isa = PBXCopyFilesBuildPhase;
 			buildActionMask = 2147483647;
@@ -90,6 +51,52 @@
 				A10000000000000100000103 /* GRDFUSDK.framework in Embed Frameworks */,
 			);
 			name = "Embed Frameworks";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		5439AC7D5D09965F788A0827 /* PatientIdentity.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PatientIdentity.swift; sourceTree = "<group>"; };
+		A20000000000000100000001 /* Next2UPacienteApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Next2UPacienteApp.swift; sourceTree = "<group>"; };
+		A20000000000000100000002 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		A20000000000000100000003 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
+		A20000000000000100000004 /* SigningPlaceholders.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SigningPlaceholders.swift; sourceTree = "<group>"; };
+		A20000000000000100000005 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		A20000000000000100000006 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		A20000000000000100000007 /* Next2UPaciente.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Next2UPaciente.xcconfig; sourceTree = "<group>"; };
+		A20000000000000100000008 /* VeepooSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VeepooSession.swift; sourceTree = "<group>"; };
+		A20000000000000100000009 /* WatchScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchScreen.swift; sourceTree = "<group>"; };
+		A2000000000000010000000A /* VeepooBleSDK.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = VeepooBleSDK.framework; path = Vendor/VeepooBleSDK.framework; sourceTree = "<group>"; };
+		A2000000000000010000000B /* CoreBluetooth.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreBluetooth.framework; path = System/Library/Frameworks/CoreBluetooth.framework; sourceTree = SDKROOT; };
+		A2000000000000010000000C /* shared.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = shared.framework; path = Vendor/shared.framework; sourceTree = "<group>"; };
+		A20000000000000100000010 /* PatientCrypto.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PatientCrypto.swift; sourceTree = "<group>"; };
+		A20000000000000100000011 /* StorageStartupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StorageStartupView.swift; sourceTree = "<group>"; };
+		A20000000000000100000012 /* BrandViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrandViews.swift; sourceTree = "<group>"; };
+		A20000000000000100000013 /* PatientReadings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PatientReadings.swift; sourceTree = "<group>"; };
+		A20000000000000100000014 /* Charts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Charts.swift; sourceTree = "<group>"; };
+		A20000000000000100000015 /* HomeScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeScreen.swift; sourceTree = "<group>"; };
+		A20000000000000100000016 /* HistoryScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryScreen.swift; sourceTree = "<group>"; };
+		A20000000000000100000017 /* QueueScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueueScreen.swift; sourceTree = "<group>"; };
+		A20000000000000100000018 /* IngestBackground.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IngestBackground.swift; sourceTree = "<group>"; };
+		A20000000000000100000019 /* SettingsScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsScreen.swift; sourceTree = "<group>"; };
+		A20000000000000100000020 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		A20000000000000100000100 /* JLDialUnit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = JLDialUnit.framework; path = Vendor/JLDialUnit.framework; sourceTree = "<group>"; };
+		A20000000000000100000101 /* ABParTool.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = ABParTool.framework; path = Vendor/ABParTool.framework; sourceTree = "<group>"; };
+		A20000000000000100000102 /* ZipZap.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = ZipZap.framework; path = Vendor/ZipZap.framework; sourceTree = "<group>"; };
+		A20000000000000100000103 /* GRDFUSDK.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = GRDFUSDK.framework; path = Vendor/GRDFUSDK.framework; sourceTree = "<group>"; };
+		A30000000000000100000001 /* Next2U Paciente.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Next2U Paciente.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		C3DDEC20A79A1E7E1675E67D /* N2UBleRestore.m */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.objc; path = N2UBleRestore.m; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		A40000000000000100000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A10000000000000100000008 /* VeepooBleSDK.framework in Frameworks */,
+				A10000000000000100000009 /* CoreBluetooth.framework in Frameworks */,
+				A1000000000000010000000A /* shared.framework in Frameworks */,
+			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXFrameworksBuildPhase section */
@@ -132,6 +139,8 @@
 				A20000000000000100000005 /* Assets.xcassets */,
 				A20000000000000100000006 /* Info.plist */,
 				A20000000000000100000020 /* PrivacyInfo.xcprivacy */,
+				C3DDEC20A79A1E7E1675E67D /* N2UBleRestore.m */,
+				5439AC7D5D09965F788A0827 /* PatientIdentity.swift */,
 			);
 			path = Next2UPaciente;
 			sourceTree = "<group>";
@@ -147,7 +156,7 @@
 		A50000000000000100000004 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				A30000000000000100000001 /* Next2UPaciente.app */,
+				A30000000000000100000001 /* Next2U Paciente.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -170,7 +179,7 @@
 			);
 			name = Next2UPaciente;
 			productName = Next2UPaciente;
-			productReference = A30000000000000100000001 /* Next2UPaciente.app */;
+			productReference = A30000000000000100000001 /* Next2U Paciente.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -240,6 +249,8 @@
 				A10000000000000100000017 /* QueueScreen.swift in Sources */,
 				A10000000000000100000018 /* IngestBackground.swift in Sources */,
 				A10000000000000100000019 /* SettingsScreen.swift in Sources */,
+				958B6FEED8292AFC5901CCAC /* N2UBleRestore.m in Sources */,
+				4AEA9B3B71AF7B215896DB39 /* PatientIdentity.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

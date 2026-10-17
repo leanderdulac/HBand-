@@ -64,7 +64,14 @@ object IngestReconciler {
 
     fun prepare(item: QueuedReading): PreparedReading {
         val original = Json.parseToJsonElement(item.payloadJson).jsonObject
-        val patient = requireNotNull(string(original, "patient_id")) { INVALID_LOCAL }
+        val queuedPatient = string(original, "patient_id")?.trim().orEmpty()
+        val patient = requireNotNull(
+            if (queuedPatient.isEmpty() || queuedPatient == IngestPayload.DEFAULT_PATIENT_ID) {
+                IngestRuntime.patientId ?: queuedPatient.ifEmpty { null }
+            } else {
+                queuedPatient
+            },
+        ) { INVALID_LOCAL }
         require(string(original, "timestamp")?.let(::validMeasurementTime) == true) { INVALID_LOCAL }
         val device = requireNotNull(
             if (original.containsKey("device_id")) string(original, "device_id")
@@ -75,7 +82,9 @@ object IngestReconciler {
         if (original.containsKey("client_reading_id")) {
             require(string(original, "client_reading_id") == item.clientReadingId) { INVALID_LOCAL }
         }
-        val normalized = Json.parseToJsonElement(IngestPayload.normalizeQueuePayload(item.payloadJson)).jsonObject
+        val normalized = Json.parseToJsonElement(
+            IngestPayload.withDeviceLabel(IngestPayload.normalizeQueuePayload(item.payloadJson), IngestRuntime.deviceLabel),
+        ).jsonObject
         val withIdentity = JsonObject(
             normalized + mapOf(
                 "patient_id" to JsonPrimitive(patient),

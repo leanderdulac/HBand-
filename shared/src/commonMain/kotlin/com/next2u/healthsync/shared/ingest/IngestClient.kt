@@ -15,6 +15,8 @@ data class IngestHttpCall(
     val statusCode: Int,
     val body: String?,
     val kind: IngestHttpKind,
+    /** Server Retry-After in ms (delta-seconds form), when present. */
+    val retryAfterMs: Long? = null,
 )
 
 /**
@@ -58,7 +60,12 @@ class IngestClient(
                 }
             }
             val text = response.bodyAsText().ifBlank { null }
-            IngestHttpCall(response.status.value, text, IngestPayload.classifyHttp(response.status.value))
+            IngestHttpCall(
+                response.status.value,
+                text,
+                IngestPayload.classifyHttp(response.status.value),
+                IngestBackoff.parseRetryAfterSeconds(response.headers["Retry-After"]),
+            )
         } catch (_: Exception) {
             IngestHttpCall(0, null, IngestHttpKind.NETWORK)
         }

@@ -20,6 +20,8 @@ if [ ! -d "$ROOT/iosApp/Vendor/shared.framework" ]; then
   exit 1
 fi
 
+"$ROOT/iosApp/Scripts/check-secrets.sh"
+
 mkdir -p "$ROOT/iosApp/build"
 rm -rf "$ARCHIVE" "$EXPORT"
 

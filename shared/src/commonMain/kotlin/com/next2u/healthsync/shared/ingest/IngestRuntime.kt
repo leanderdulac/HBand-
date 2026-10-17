@@ -51,6 +51,8 @@ data class FlushOutcome(
     val pendingCount: Int = 0,
     val lastHttpCode: Int = 0,
     val message: String,
+    /** > 0 when automatic sends are paused by backoff; the host should flush again after this. */
+    val retryInMs: Long = 0L,
 )
 
 /**
@@ -64,6 +66,9 @@ object IngestRuntime {
     internal var store: QueueStore = FileQueueStore
     internal var engineOverride: HttpClientEngine? = null
     private val mutex = Mutex()
+    private val backoff = IngestBackoffWindow()
+    /** Small flushes: a 503 mid-outage costs at most this many items of work. */
+    const val FLUSH_CHUNK_ITEMS = 10
     private var deduper = IngestDeduper()
     private val json = Json { ignoreUnknownKeys = true }
     private var configuration: IngestConfiguration =
@@ -72,9 +77,54 @@ object IngestRuntime {
     val lastHttpCode: Int get() = _lastHttpCode
     private var _lastHttpCode: Int = 0
 
+    /**
+     * Nome deste aparelho (ex.: "iPhone de LFM"), enviado como `device_label` em cada leitura.
+     * O Core aceita campos extras (extra="allow") e guarda em `extra`/`frame`; não entra na
+     * identidade de deduplicação nem na assinatura da métrica.
+     */
+    var deviceLabel: String? = null
+        private set
+
+    fun setDeviceLabel(raw: String?) {
+        deviceLabel = sanitizeDeviceLabel(raw)
+    }
+
+    /**
+     * Identificação do paciente gerada no app (ex.: "PAT-LEANDRO-7F3A"). Leituras na fila com o
+     * padrão antigo (PAT-HBAND-001) ou sem paciente saem com esta identificação no envio.
+     */
+    var patientId: String? = null
+        private set
+
+    fun setPatientId(raw: String?) {
+        patientId = raw?.trim()?.takeIf { it.isNotEmpty() && it != IngestPayload.DEFAULT_PATIENT_ID }
+    }
+
+    fun sanitizeDeviceLabel(raw: String?): String? =
+        raw?.trim()?.replace(Regex("\\s+"), " ")?.take(DEVICE_LABEL_MAX)?.takeIf { it.isNotEmpty() }
+
+    const val DEVICE_LABEL_MAX = 64
+
+    /** Credencial válida já aplicada ao store atual; null = ainda não houve configuração válida. */
+    private var appliedKey: String? = null
+
     fun configure(baseUrl: String, overrideKey: String?, builtInKey: String) {
         configuration = IngestConfiguration.resolve(baseUrl, overrideKey, builtInKey)
+        val transport = configuration.transport()
+        if (transport.configurationError == null && transport.apiKey != appliedKey) {
+            // Nova chave (ou primeira válida após abrir o app/atualizar): registros que falharam
+            // por acesso (401/403) voltam para a fila em vez de ficarem presos como FAILED.
+            appliedKey = transport.apiKey
+            val items = load()
+            if (items.any { it.status == "FAILED" }) {
+                backoff.recordSuccess()
+                persist(items.map { if (it.status == "FAILED") it.copy(status = "PENDING") else it })
+            }
+        }
     }
+
+    /** Fila pendente + falhas: a mesma contagem em todas as telas. */
+    fun waitingCount(): Int = load().count { it.status == "PENDING" || it.status == "FAILED" }
 
     fun configurationError(): String? = configuration.status.configurationError
 
@@ -98,12 +148,14 @@ object IngestRuntime {
     }
 
     fun retryFailed(clientReadingId: String) {
+        backoff.recordSuccess() // explicit patient retry goes out now
         val items = load().toMutableList()
         mark(items, clientReadingId, "PENDING")
         persist(items)
     }
 
     fun retryAllFailed() {
+        backoff.recordSuccess() // explicit patient retry goes out now
         val items = load().map { if (it.status == "FAILED") it.copy(status = "PENDING") else it }
         persist(items)
     }
@@ -117,6 +169,8 @@ object IngestRuntime {
     }
 
     fun useStore(next: QueueStore) {
+        backoff.recordSuccess()
+        appliedKey = null
         store = next
         deduper = IngestDeduper()
         _lastHttpCode = 0
@@ -169,7 +223,7 @@ object IngestRuntime {
         if (!deduper.shouldEnqueue(telemetry)) {
             return RecordOutcome(false, message = "Leitura repetida no intervalo de 30s; gravada localmente, sem novo envio.")
         }
-        val payload = IngestPayload.telemetryToJson(telemetry, patientId)
+        val payload = IngestPayload.withDeviceLabel(IngestPayload.telemetryToJson(telemetry, patientId), deviceLabel)
         val id = IngestReadingIdentity.forPayload(payload)
         val items = load().toMutableList()
         items += StoredQueueItem(
@@ -190,6 +244,15 @@ object IngestRuntime {
         val pending = load().filter { it.status == "PENDING" }
         if (pending.isEmpty()) {
             return FlushOutcome(message = "Fila vazia.", lastHttpCode = _lastHttpCode)
+        }
+        val waitMs = backoff.remainingMs(nowMillis())
+        if (waitMs > 0) {
+            return FlushOutcome(
+                pendingCount = pending.size,
+                lastHttpCode = _lastHttpCode,
+                message = "O serviço pediu para aguardar. Nova tentativa em ${(waitMs + 999) / 1000} s.",
+                retryInMs = waitMs,
+            )
         }
         val prepared = mutableListOf<PreparedReading>()
         val kept = load().toMutableList()
@@ -216,7 +279,9 @@ object IngestRuntime {
         var synced = 0
         var failed = 0
         var lastCode = 0
-        for (chunk in IngestReconciler.chunks(prepared)) {
+        var transient = false
+        var retryAfterMs: Long? = null
+        for (chunk in IngestReconciler.chunks(prepared, FLUSH_CHUNK_ITEMS)) {
             val body = IngestReconciler.batchBody(chunk)
             val key = IngestReconciler.flushIdempotencyKey(chunk)
             val call = client.batchIngestWearableData(body, key)
@@ -234,10 +299,19 @@ object IngestRuntime {
                         mark(latest, reading.item.clientReadingId, "FAILED")
                         failed++
                     }
-                    IngestItemOutcome.TRANSIENT -> { /* stay PENDING */ }
+                    IngestItemOutcome.TRANSIENT -> { transient = true /* stay PENDING */ }
                 }
             }
             persist(latest)
+            call.retryAfterMs?.let { retryAfterMs = maxOf(retryAfterMs ?: 0L, it) }
+            // 503/429/network: the Core needs room; stop this flush and back off.
+            if (decisions.any { it.outcome == IngestItemOutcome.TRANSIENT }) break
+        }
+        val retryInMs = if (transient) {
+            backoff.recordTransientFailure(nowMillis(), retryAfterMs)
+        } else {
+            if (synced > 0) backoff.recordSuccess()
+            0L
         }
         FlushOutcome(
             syncedCount = synced,
@@ -245,6 +319,7 @@ object IngestRuntime {
             pendingCount = pendingUnlocked(),
             lastHttpCode = lastCode,
             message = "Nesta tentativa: concluídos $synced, falha $failed, aguardando ${pendingUnlocked()}. HTTP $lastCode.",
+            retryInMs = retryInMs,
         )
     }
 
