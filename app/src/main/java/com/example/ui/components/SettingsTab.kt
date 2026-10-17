@@ -90,6 +90,8 @@ fun SettingsTab(
     onSpo2AutoChange: (Boolean) -> Unit = {},
     onWearDetectChange: (Boolean) -> Unit = {},
     onSyncHistory: () -> Unit = {},
+    watchClockState: com.example.data.hband.WatchClockUiState = com.example.data.hband.WatchClockUiState(),
+    onSyncWatchTime: () -> Unit = {},
     alarmState: com.example.data.hband.AlarmUiState = com.example.data.hband.AlarmUiState(),
     heartWarningState: com.example.data.hband.HeartWarningUiState = com.example.data.hband.HeartWarningUiState(),
     longSeatState: com.example.data.hband.LongSeatUiState = com.example.data.hband.LongSeatUiState(),
@@ -188,6 +190,10 @@ fun SettingsTab(
         }
 
         ThemeSelectorCard(themeOption = themeOption, onThemeOptionChange = onThemeOptionChange)
+
+        PatientSection(title = "Relógio", forceExpanded = watchClockState.syncing) {
+            WatchClockCard(state = watchClockState, enabled = actionsEnabled, onSyncTime = onSyncWatchTime)
+        }
 
         PatientSection(title = "Opções do relógio", forceExpanded = historySyncState.isRunning || findDeviceState.finding) {
             BandSdkSettingsCard(

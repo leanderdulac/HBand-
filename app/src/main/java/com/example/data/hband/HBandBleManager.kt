@@ -70,6 +70,9 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlin.coroutines.resume
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -155,6 +158,14 @@ class HBandBleManager(
         WearDetectUiState(enabled = prefs.getBoolean(PREF_WEAR_DETECT, true))
     )
     val wearDetectState: StateFlow<WearDetectUiState> = _wearDetectState.asStateFlow()
+
+    private val _watchClockState = MutableStateFlow(
+        WatchClockUiState(lastSyncEpochMs = prefs.getLong(PREF_WATCH_TIME_SYNC_AT, 0L))
+    )
+    val watchClockState: StateFlow<WatchClockUiState> = _watchClockState.asStateFlow()
+
+    private val _watchDialCapabilities = MutableStateFlow(loadWatchDialCapabilities())
+    val watchDialCapabilities: StateFlow<WatchDialCapabilities> = _watchDialCapabilities.asStateFlow()
 
     private val _historySyncState = MutableStateFlow(HistorySyncUiState())
     val historySyncState: StateFlow<HistorySyncUiState> = _historySyncState.asStateFlow()
@@ -310,6 +321,14 @@ class HBandBleManager(
         const val PREF_AUTO_MEASURE = "auto_measure_hr"
         const val PREF_SPO2_AUTO = "spo2_night_auto"
         const val PREF_WEAR_DETECT = "wear_detect_enabled"
+        const val PREF_WATCH_TIME_SYNC_AT = "watch_time_sync_at"
+        const val PREF_DIAL_KNOWN = "watch_dial_caps_known"
+        const val PREF_DIAL_CUSTOM = "watch_dial_custom_count"
+        const val PREF_DIAL_SERVER = "watch_dial_server_count"
+        const val PREF_DIAL_SCREEN_TYPE = "watch_dial_screen_type"
+        const val PREF_DIAL_SCREEN_TAG = "watch_dial_screen_tag"
+        const val PREF_DIAL_SCREEN_DES = "watch_dial_screen_des"
+        const val WATCH_TIME_TIMEOUT_MS = 8_000L
         private const val MAX_RECONNECT_ATTEMPTS = 8
 
         // Duração de cada estágio do revezamento de sensores PPG (FC/SpO2/PA) antes de
@@ -760,6 +779,7 @@ class HBandBleManager(
             object : IDeviceFuctionDataListener {
                 override fun onFunctionSupportDataChange(functionSupport: FunctionDeviceSupportData) {
                     lastFunctionSupport = functionSupport
+                    recordWatchDialCapabilities(functionSupport)
                     val probed = VeepooCapabilityProbe.fromManager(vpManager, functionSupport)
                     _capabilities.value = probed
                     applyP1CapabilityFlags(probed)
@@ -2106,6 +2126,108 @@ class HBandBleManager(
         _latestTelemetry.value = null
     }
 
+    /** Botão "Sincronizar hora" em Ajustes > Relógio. */
+    fun requestWatchTimeSync() {
+        if (_watchClockState.value.syncing) return
+        if (!hasLiveHardwareSession() || !isVeepooConnection) {
+            _watchClockState.value = _watchClockState.value.copy(
+                lastResultOk = false, message = "Conecte o relógio para sincronizar a hora.",
+            )
+            return
+        }
+        scope.launch(Dispatchers.Main) {
+            watchSettingsMutex.withLock {
+                if (hasLiveHardwareSession()) writeWatchTime(manual = true)
+            }
+        }
+    }
+
+    /** Chamar com watchSettingsMutex adquirido: não interrompe medições, só enfileira a escrita. */
+    private suspend fun writeWatchTime(manual: Boolean) {
+        val now = java.time.LocalDateTime.now()
+        val f = WatchClock.fields(now, android.text.format.DateFormat.is24HourFormat(context))
+        _watchClockState.value = _watchClockState.value.copy(syncing = true, message = null)
+        Log.i(TAG, "VE30 hora: enviando settingTime $f (manual=$manual)")
+        val code = withTimeoutOrNull(WATCH_TIME_TIMEOUT_MS) {
+            suspendCancellableCoroutine<Int> { cont ->
+                try {
+                    vpManager.settingTime(
+                        IBleWriteResponse { w ->
+                            if (w != Constants.REQUEST_SUCCESS && cont.isActive) cont.resume(w)
+                        },
+                        com.veepoo.protocol.listener.data.IResponseListener { r ->
+                            if (cont.isActive) cont.resume(r)
+                        },
+                        com.veepoo.protocol.model.settings.DeviceTimeSetting(
+                            f.year, f.month, f.day, f.hour, f.minute, f.second,
+                            if (f.is24h) com.veepoo.protocol.model.enums.ETimeMode.MODE_24
+                            else com.veepoo.protocol.model.enums.ETimeMode.MODE_12,
+                        ),
+                    )
+                } catch (e: Exception) {
+                    Log.w(TAG, "VE30 hora: settingTime falhou ao iniciar: ${e.message}")
+                    if (cont.isActive) cont.resume(-1)
+                }
+            }
+        }
+        // Falhas de escrita GATT chegam como códigos negativos; timeout como null.
+        val ok = code != null && code >= 0
+        if (ok) {
+            val at = System.currentTimeMillis()
+            prefs.edit().putLong(PREF_WATCH_TIME_SYNC_AT, at).apply()
+            _watchClockState.value = WatchClockUiState(
+                syncing = false, lastSyncEpochMs = at, lastResultOk = true,
+                message = WatchClock.successMessage(now),
+            )
+            Log.i(TAG, "VE30 hora: sincronizada (resposta=$code)")
+        } else {
+            _watchClockState.value = _watchClockState.value.copy(
+                syncing = false, lastResultOk = false,
+                message = "Não foi possível acertar a hora do relógio.",
+            )
+            Log.w(TAG, "VE30 hora: falhou (resposta=$code)")
+        }
+    }
+
+    private fun recordWatchDialCapabilities(fs: FunctionDeviceSupportData) {
+        val caps = runCatching {
+            WatchDialCapabilities(
+                known = true,
+                watchUiCustomCount = fs.watchUiCoustomCount,
+                watchUiServerCount = fs.watchUiServerCount,
+                screenType = fs.screenType,
+                screenTypeTag = fs.screenTypeTag,
+                screenTypeDes = fs.screenTypeDes,
+                screenStyle = fs.screenstyle,
+                photoAlbum = fs.photoAlbum?.name,
+            )
+        }.getOrElse {
+            Log.w(TAG, "Mostrador VE30: leitura de capacidades falhou: ${it.message}")
+            return
+        }
+        Log.i(TAG, caps.logLine())
+        _watchDialCapabilities.value = caps
+        prefs.edit()
+            .putBoolean(PREF_DIAL_KNOWN, true)
+            .putInt(PREF_DIAL_CUSTOM, caps.watchUiCustomCount)
+            .putInt(PREF_DIAL_SERVER, caps.watchUiServerCount)
+            .putInt(PREF_DIAL_SCREEN_TYPE, caps.screenType)
+            .putInt(PREF_DIAL_SCREEN_TAG, caps.screenTypeTag)
+            .putString(PREF_DIAL_SCREEN_DES, caps.screenTypeDes)
+            .apply()
+    }
+
+    private fun loadWatchDialCapabilities(): WatchDialCapabilities =
+        if (!prefs.getBoolean(PREF_DIAL_KNOWN, false)) WatchDialCapabilities()
+        else WatchDialCapabilities(
+            known = true,
+            watchUiCustomCount = prefs.getInt(PREF_DIAL_CUSTOM, 0),
+            watchUiServerCount = prefs.getInt(PREF_DIAL_SERVER, 0),
+            screenType = prefs.getInt(PREF_DIAL_SCREEN_TYPE, 0),
+            screenTypeTag = prefs.getInt(PREF_DIAL_SCREEN_TAG, 0),
+            screenTypeDes = prefs.getString(PREF_DIAL_SCREEN_DES, null),
+        )
+
     fun requestHistorySync() {
         if (!hasLiveHardwareSession() || !isVeepooConnection) {
             _sessionMessage.value = "Conecte uma pulseira Veepoo para sincronizar o histórico."
@@ -2510,6 +2632,13 @@ class HBandBleManager(
                     // Never re-emit interval counters or old vitals as live measurements.
                 }
                 Log.i(TAG, "Histórico Veepoo: ${historyReadStatusText(pull.state)}")
+                // Acerta a hora do VE30 a cada conexão: depois do histórico (não atrasa a leitura)
+                // e antes dos sensores ao vivo, serializado com as demais escritas de ajustes.
+                watchSettingsMutex.withLock {
+                    if (historySync === sync && !sync.cancelled && !userRequestedDisconnect && isVeepooConnection) {
+                        writeWatchTime(manual = false)
+                    }
+                }
             } catch (e: CancellationException) {
                 // An abandoned query must not overwrite a newer session or restart its sensors.
                 if (historySync === sync && _historySyncState.value.isRunning) {

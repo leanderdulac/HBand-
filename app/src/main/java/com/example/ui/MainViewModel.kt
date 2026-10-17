@@ -91,6 +91,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val deviceCapabilities: StateFlow<DeviceCapabilities> = bleManager.capabilities
     val autoMeasureState: StateFlow<AutoMeasureUiState> = bleManager.autoMeasureState
     val wearDetectState: StateFlow<WearDetectUiState> = bleManager.wearDetectState
+    val watchClockState = bleManager.watchClockState
+    val watchDialCapabilities = bleManager.watchDialCapabilities
+
+    fun syncWatchTime() = bleManager.requestWatchTimeSync()
     val historySyncState: StateFlow<HistorySyncUiState> = bleManager.historySyncState
     val isHardwareConnected: StateFlow<Boolean> = bleManager.isHardwareConnected
     val ecgState: StateFlow<DetectSessionUiState> = bleManager.ecgState
