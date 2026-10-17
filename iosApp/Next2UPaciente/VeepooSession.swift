@@ -49,6 +49,13 @@ final class VeepooSession: NSObject, ObservableObject {
     @Published var profileRevision = 0
     @Published var watchAlias = UserDefaults.standard.string(forKey: "last_veepoo_name") ?? ""
     @Published var renameStatus = ""
+    @Published var watchTimeSyncing = false
+    @Published var watchTimeStatus = ""
+    @Published var watchTimeLastSync: Date? = UserDefaults.standard.object(forKey: "watch_time_sync_at") as? Date
+    /// Capacidades de mostrador reportadas pelo firmware; usadas depois para liberar "Trocar foto do mostrador".
+    @Published var watchPhotoDialCount: Int = UserDefaults.standard.integer(forKey: "watch_photo_dial_count")
+    @Published var watchScreenTypes: Int = UserDefaults.standard.integer(forKey: "watch_screen_types")
+    var watchSupportsPhotoDial: Bool { watchPhotoDialCount > 0 }
 
     private let manager = VPBleCentralManage.sharedBleManager()!
     private let forwarder = VeepooCentralForwarder()
@@ -399,6 +406,8 @@ final class VeepooSession: NSObject, ObservableObject {
         note("Handshake. Reinscreve serviços e inicia FC.")
         // Link (re)established, e.g. after state restoration: push what queued meanwhile.
         flushQueueOnly()
+        recordDialCapabilities()
+        syncWatchTime(manual: false)
         readBattery()
         manager.peripheralManage.veepooSdkStartReadDeviceAllData { [weak self] state, _, _, _ in
             Task { @MainActor in
@@ -410,6 +419,47 @@ final class VeepooSession: NSObject, ObservableObject {
             }
         }
         startHeart()
+    }
+
+    /// Envia a hora do iPhone ao relógio (automático a cada handshake e pelo botão em Ajustes).
+    /// O SDK enfileira a escrita com os demais comandos BLE; não interrompe a medição em curso.
+    func syncWatchTime(manual: Bool = true) {
+        guard hardwareReady else {
+            watchTimeStatus = "Conecte o relógio para sincronizar a hora."
+            return
+        }
+        guard !watchTimeSyncing else { return }
+        watchTimeSyncing = true
+        note("Hora: enviando hora do iPhone ao relógio (manual=\(manual)).")
+        manager.peripheralManage.veepooSDKSettingTime { [weak self] success in
+            Task { @MainActor in
+                guard let self else { return }
+                self.watchTimeSyncing = false
+                if success {
+                    let now = Date()
+                    self.watchTimeLastSync = now
+                    UserDefaults.standard.set(now, forKey: "watch_time_sync_at")
+                    self.watchTimeStatus = WatchClockText.success(now)
+                    self.note("Hora do relógio sincronizada.")
+                } else {
+                    self.watchTimeStatus = "Não foi possível acertar a hora do relógio."
+                    self.note("Hora: falha ao sincronizar.")
+                }
+            }
+        }
+    }
+
+    private func recordDialCapabilities() {
+        guard let model = manager.peripheralModel else { return }
+        let photo = Int(model.photoDialCount)
+        let screens = Int(model.screenTypes)
+        watchPhotoDialCount = photo
+        watchScreenTypes = screens
+        UserDefaults.standard.set(photo, forKey: "watch_photo_dial_count")
+        UserDefaults.standard.set(screens, forKey: "watch_screen_types")
+        let line = "Mostrador VE30: photoDialCount=\(photo) screenTypes=\(screens) aiDialType=\(model.aiDialType)"
+        NSLog("[Next2U] %@", line)
+        note(line)
     }
 
     private func readBattery() {

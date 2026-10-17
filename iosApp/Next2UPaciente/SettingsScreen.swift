@@ -28,6 +28,7 @@ struct SettingsScreen: View {
                         .accessibilityAddTraits(.isHeader)
                     profileCard
                     continuityCard
+                    watchClockCard
                     BleDiagnosticsCard(session: session)
                     reconnectCard
                     themeCard
@@ -62,6 +63,33 @@ struct SettingsScreen: View {
             }
         }
         .accessibilityIdentifier("theme_selector")
+    }
+
+    private var watchClockCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Relógio").font(.system(size: 22, weight: .semibold))
+                .accessibilityAddTraits(.isHeader)
+            if !session.watchTimeStatus.isEmpty {
+                Text(session.watchTimeStatus)
+                    .font(.system(size: 17))
+                    .accessibilityIdentifier("watch_clock_message")
+            }
+            Text(WatchClockText.lastSync(session.watchTimeLastSync))
+                .font(.system(size: 15))
+                .foregroundStyle(palette.onSurfaceVariant)
+                .accessibilityIdentifier("watch_clock_last_sync")
+            Button(session.watchTimeSyncing ? "Sincronizando…" : "Sincronizar hora") {
+                session.syncWatchTime(manual: true)
+            }
+            .buttonStyle(PatientPrimaryButton())
+            .disabled(!session.hardwareReady || session.watchTimeSyncing)
+            .accessibilityIdentifier("watch_clock_sync_button")
+        }
+        .foregroundStyle(palette.onSurface)
+        .padding(20)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(palette.surface)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
     private var profileCard: some View {
@@ -547,5 +575,19 @@ enum HeartAlertDelivery {
             trigger: nil
         )
         UNUserNotificationCenter.current().add(request)
+    }
+}
+
+enum WatchClockText {
+    private static func fmt(_ pattern: String, _ date: Date) -> String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "pt_BR")
+        f.dateFormat = pattern
+        return f.string(from: date)
+    }
+    static func success(_ date: Date) -> String { "Hora do relógio atualizada às \(fmt("HH:mm", date))" }
+    static func lastSync(_ date: Date?) -> String {
+        guard let date else { return "Última sincronização: nunca" }
+        return "Última sincronização: \(fmt("dd/MM HH:mm", date))"
     }
 }
