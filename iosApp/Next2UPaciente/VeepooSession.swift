@@ -953,6 +953,7 @@ final class VeepooSession: NSObject, ObservableObject {
         handshakeRetries = 0
         passwordSentAt = nil
         note("didDisconnect \(reason)")
+        stopSdkScanIfIdle()
         keepPendingConnect(peripheral)
     }
 
@@ -980,6 +981,14 @@ final class VeepooSession: NSObject, ObservableObject {
     }
 
     private func connectRetrieved(_ peripheral: CBPeripheral) {
+        guard peripheral.state == .connected else {
+            // veepooSDKConnectDevice num relógio desligado/fora de alcance faz o SDK escanear
+            // 1x/s indefinidamente (connectionTimeout = .max). Basta o connect pendente do iOS;
+            // quando o relógio voltar, didConnect → resumeSession abre a sessão Veepoo.
+            stopSdkScanIfIdle()
+            keepPendingConnect(peripheral)
+            return
+        }
         guard let model = VPPeripheralModel(peripher: peripheral) else { return }
         guard beginSessionAttempt("retrieve") else { return }
         let watch = ScannedWatch(
@@ -1068,6 +1077,12 @@ final class VeepooSession: NSObject, ObservableObject {
                 self.scheduleBackoffScan(reason: "backoff")
             }
         }
+    }
+
+    /// Encerra qualquer scan interno do SDK quando nem o usuário nem o backoff pediram scan.
+    private func stopSdkScanIfIdle() {
+        guard !isScanning else { return }
+        manager.veepooSDKStopScanDevice()
     }
 
     private func resetBackoffScan() {
