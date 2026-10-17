@@ -17,7 +17,9 @@ struct QueueScreen: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     Next2uBrandLogo()
-                    BleDiagnosticsCard(session: session)
+                    if DeveloperFlags.showTechnicalUI {
+                        BleDiagnosticsCard(session: session)
+                    }
                     Text("Envios")
                         .font(.system(size: 28, weight: .bold))
                         .foregroundStyle(palette.onSurface)
@@ -102,9 +104,11 @@ struct QueueScreen: View {
         return VStack(alignment: .leading, spacing: 12) {
             Text(title).font(.system(size: 17, weight: .bold))
             Text(body).font(.system(size: 17))
-            Text("Aparelho: \(session.deviceLabel)")
-                .font(.system(size: 15))
-                .accessibilityIdentifier("queue_device_label")
+            if DeveloperFlags.showTechnicalUI {
+                Text("Aparelho: \(session.deviceLabel)")
+                    .font(.system(size: 15))
+                    .accessibilityIdentifier("queue_device_label")
+            }
             if pending > 0 {
                 Text("Aguardando envio: \(pending)").font(.system(size: 17))
             }
@@ -142,9 +146,11 @@ struct QueueScreen: View {
                     .buttonStyle(PatientPrimaryButton())
                     .accessibilityIdentifier("retry_queue_\(item.clientReadingId)")
             }
-            Button("Ver dados técnicos do registro") { inspect = item }
-                .font(.system(size: 17, weight: .semibold))
-                .frame(maxWidth: .infinity, minHeight: PatientTheme.primaryButton)
+            if DeveloperFlags.showTechnicalUI {
+                Button("Ver dados técnicos do registro") { inspect = item }
+                    .font(.system(size: 17, weight: .semibold))
+                    .frame(maxWidth: .infinity, minHeight: PatientTheme.primaryButton)
+            }
             Button("Apagar registro da fila") { removal = .one(item.clientReadingId) }
                 .font(.system(size: 17, weight: .semibold))
                 .frame(maxWidth: .infinity, minHeight: PatientTheme.primaryButton)

@@ -30,7 +30,9 @@ struct SettingsScreen: View {
                     profileCard
                     continuityCard
                     watchClockCard
-                    BleDiagnosticsCard(session: session)
+                    if DeveloperFlags.showTechnicalUI {
+                        BleDiagnosticsCard(session: session)
+                    }
                     reconnectCard
                     themeCard
                     hrAlertsCard
@@ -85,6 +87,7 @@ struct SettingsScreen: View {
             .buttonStyle(PatientPrimaryButton())
             .disabled(!session.hardwareReady || session.watchTimeSyncing)
             .accessibilityIdentifier("watch_clock_sync_button")
+            if DeveloperFlags.showTechnicalUI {
             Divider()
             Text("Nome deste aparelho").font(.system(size: 17, weight: .semibold))
             Text("Identifica este iPhone nos envios ao serviço de saúde.")
@@ -100,6 +103,7 @@ struct SettingsScreen: View {
                 .disabled(deviceLabelDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                           || deviceLabelDraft == session.deviceLabel)
                 .accessibilityIdentifier("device_label_save")
+            }
         }
         .foregroundStyle(palette.onSurface)
         .padding(20)

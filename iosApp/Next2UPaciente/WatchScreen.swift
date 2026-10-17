@@ -26,7 +26,11 @@ struct WatchScreen: View {
                         renameCard
                     }
                     deviceList
-                    ingestCard
+                    if DeveloperFlags.showTechnicalUI {
+                        ingestCard
+                    } else {
+                        PatientSyncStatusCard(session: session)
+                    }
                 }
                 .frame(maxWidth: 720, alignment: .leading)
                 .padding(PatientTheme.margin)
@@ -39,7 +43,7 @@ struct WatchScreen: View {
 
     private var vitalsCard: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(session.connected.map { "\($0.name) · \($0.address)" } ?? "Nenhum relógio ligado")
+            Text(session.connected.map { DeveloperFlags.showTechnicalUI ? "\($0.name) · \($0.address)" : $0.name } ?? "Nenhum relógio conectado")
                 .font(.system(size: 17, weight: .semibold))
             Text("Batimentos: \(session.heartRate > 0 ? "\(session.heartRate) bpm" : "—")")
                 .font(.system(size: 40, weight: .bold))
@@ -51,7 +55,9 @@ struct WatchScreen: View {
                 Text("Bateria do relógio: \(battery)%")
                     .font(.system(size: 17))
             }
-            Text(session.hardwareReady ? "Sessão Veepoo pronta (senha 0000)." : "Aguardando ligação e senha.")
+            Text(DeveloperFlags.showTechnicalUI
+                 ? (session.hardwareReady ? "Sessão Veepoo pronta (senha 0000)." : "Aguardando ligação e senha.")
+                 : (session.hardwareReady ? "Relógio conectado." : (session.connected == nil ? "Relógio desconectado." : "Conectando ao relógio…")))
                 .font(.system(size: 15))
                 .foregroundStyle(palette.onSurfaceVariant)
         }
@@ -109,10 +115,16 @@ struct WatchScreen: View {
                     HStack {
                         VStack(alignment: .leading) {
                             Text(watch.name).font(.system(size: 17, weight: .semibold))
-                            Text(watch.address).font(.system(size: 15))
+                            if DeveloperFlags.showTechnicalUI {
+                                Text(watch.address).font(.system(size: 15))
+                            } else {
+                                Text("Toque para conectar").font(.system(size: 15))
+                            }
                         }
                         Spacer()
-                        Text("\(watch.rssi) dBm").font(.system(size: 15))
+                        if DeveloperFlags.showTechnicalUI {
+                            Text("\(watch.rssi) dBm").font(.system(size: 15))
+                        }
                     }
                     .foregroundStyle(palette.onSurface)
                     .frame(minHeight: PatientTheme.primaryButton)
@@ -172,5 +184,46 @@ struct PatientPrimaryButton: ButtonStyle {
             .foregroundStyle(palette.onPrimary)
             .background(palette.primary.opacity(configuration.isPressed ? 0.7 : 1))
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+}
+
+/// Status de envio para o paciente: sem URL, chave, IDs nem códigos HTTP.
+struct PatientSyncStatusCard: View {
+    @Environment(\.patientPalette) private var palette
+    @ObservedObject var session: VeepooSession
+
+    var body: some View {
+        let waiting = session.pendingCount + session.failedCount
+        VStack(alignment: .leading, spacing: 12) {
+            Text(waiting > 0 ? "Aguardando envio: \(waiting)" : "Dados enviados")
+                .font(.system(size: 22, weight: .semibold))
+                .accessibilityIdentifier("patient_sync_status")
+            Text(waiting > 0
+                 ? "As medições ficam guardadas neste celular até serem enviadas."
+                 : "Não há medições aguardando envio.")
+                .font(.system(size: 17))
+                .foregroundStyle(palette.onSurfaceVariant)
+            Button(session.isFlushing ? "Enviando…" : "Enviar agora") { session.flushNow() }
+                .buttonStyle(PatientPrimaryButton())
+                .disabled(session.isFlushing)
+                .accessibilityIdentifier("patient_send_now")
+        }
+        .foregroundStyle(palette.onSurface)
+        .padding(PatientTheme.margin)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(palette.surface)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+}
+
+/// Telas técnicas (URL/chave do Core, IDs, HTTP, diagnóstico BLE, UUID/dBm, nome do aparelho)
+/// só existem em builds Debug. Release/TestFlight nunca mostram nada disso ao paciente.
+enum DeveloperFlags {
+    static var showTechnicalUI: Bool {
+        #if DEBUG
+        return true
+        #else
+        return false
+        #endif
     }
 }
