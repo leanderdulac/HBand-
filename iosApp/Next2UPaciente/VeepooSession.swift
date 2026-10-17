@@ -145,7 +145,11 @@ final class VeepooSession: NSObject, ObservableObject {
         super.init()
         manager.isLogEnable = true
         manager.is24HourFormat = true
-        manager.automaticConnection = autoReconnectEnabled
+        // O reconectar automático do SDK fazia, com o relógio fora de alcance, um scan e duas
+        // buscas de periféricos ligados POR SEGUNDO (dreno de bateria). Fica sempre desligado:
+        // a reconexão é um único connect pendente do iOS (sem timeout, baixo consumo) +
+        // scan ocasional com backoff só quando o periférico é desconhecido (ver backoffScan).
+        manager.automaticConnection = false
         // Veepoo's 30s timer cancelled pending iOS connects. Keep the system
         // pending-connect until the VE30 advertises again.
         manager.connectionTimeout = .max
@@ -331,12 +335,16 @@ final class VeepooSession: NSObject, ObservableObject {
         reconnectLastKnown(reason: "primeiro plano")
     }
 
-    func startScan() {
-        userRequestedDisconnect = false
+    func startScan(automatic: Bool = false) {
+        if !automatic {
+            userRequestedDisconnect = false
+            backoffScanTask?.cancel()
+            backoffScanTask = nil
+        }
         devices = []
         isScanning = true
         sessionMessage = "Procurando o relógio…"
-        note("Scan Veepoo iniciado.")
+        note(automatic ? "Scan Veepoo automático (10 s)." : "Scan Veepoo iniciado.")
         manager.veepooSDKStartScanDeviceAndReceiveScanningDevice { [weak self] model in
             guard let self, let model else { return }
             Task { @MainActor in
@@ -362,6 +370,8 @@ final class VeepooSession: NSObject, ObservableObject {
     func stopScan() {
         manager.veepooSDKStopScanDevice()
         isScanning = false
+        autoScanStopTask?.cancel()
+        autoScanStopTask = nil
     }
 
     func connect(_ watch: ScannedWatch) {
@@ -374,7 +384,7 @@ final class VeepooSession: NSObject, ObservableObject {
         rememberPeripheral(watch.model.peripheral)
         keepPendingConnect(watch.model.peripheral)
         manager.deviceShowConfirm = true
-        manager.automaticConnection = autoReconnectEnabled
+        manager.automaticConnection = false
         note("Connect Veepoo \(watch.name) \(watch.address)")
         manager.veepooSDKConnectDevice(watch.model, deviceConnect: { [weak self] state in
             Task { @MainActor in
@@ -422,7 +432,7 @@ final class VeepooSession: NSObject, ObservableObject {
     }
 
     func setAutoReconnect(_ enabled: Bool) {
-        manager.automaticConnection = enabled
+        manager.automaticConnection = false
         note("Reconectar automático: \(enabled ? "ligado" : "desligado")")
         if enabled { reconnectLastKnown(reason: "ajuste") }
     }
@@ -925,6 +935,7 @@ final class VeepooSession: NSObject, ObservableObject {
         lastPeripheralUUID = peripheral.identifier.uuidString
         rememberPeripheral(peripheral)
         bleConnectionLabel = "GATT ligado"
+        resetBackoffScan()
         if gattUpSince == nil { gattUpSince = Date() }
         note("didConnect \(peripheral.identifier.uuidString)")
         if !hardwareReady {
@@ -982,7 +993,7 @@ final class VeepooSession: NSObject, ObservableObject {
         lastName = watch.name
         lastPeripheralUUID = peripheral.identifier.uuidString
         manager.deviceShowConfirm = false
-        manager.automaticConnection = autoReconnectEnabled
+        manager.automaticConnection = false
         note("Reconnect UUID \(peripheral.identifier.uuidString)")
         manager.veepooSDKConnectDevice(model, deviceConnect: { [weak self] state in
             Task { @MainActor in
@@ -1016,8 +1027,56 @@ final class VeepooSession: NSObject, ObservableObject {
             }
         }
         if lastAddress != nil {
-            startScan()
+            scheduleBackoffScan(reason: reason)
         }
+    }
+
+    // MARK: - Scan ocasional (só sem periférico conhecido, só em primeiro plano)
+
+    /// Espera antes de cada scan automático: 10 s, 30 s, 60 s, 2 min, depois 5 min.
+    static let backoffScanDelays: [TimeInterval] = [10, 30, 60, 120, 300]
+    static let backoffScanWindow: TimeInterval = 10
+    private var backoffScanStep = 0
+    private var backoffScanTask: Task<Void, Never>?
+    private var autoScanStopTask: Task<Void, Never>?
+
+    private func scheduleBackoffScan(reason: String) {
+        guard backoffScanTask == nil, !isScanning else { return }
+        let delay = Self.backoffScanDelays[min(backoffScanStep, Self.backoffScanDelays.count - 1)]
+        backoffScanStep += 1
+        note("Scan automático em \(Int(delay)) s (\(reason)).")
+        backoffScanTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            guard let self, !Task.isCancelled else { return }
+            self.backoffScanTask = nil
+            guard self.autoReconnectEnabled, !self.userRequestedDisconnect,
+                  self.connected == nil || !self.hardwareReady,
+                  self.manager.centralManager.state == .poweredOn,
+                  UIApplication.shared.applicationState == .active else { return }
+            // Periférico apareceu entretanto (restore/retrieve): basta o connect pendente.
+            if let uuid = self.lastPeripheralUUID.flatMap(UUID.init(uuidString:)),
+               let p = self.manager.centralManager.retrievePeripherals(withIdentifiers: [uuid]).first {
+                self.keepPendingConnect(p)
+                return
+            }
+            self.startScan(automatic: true)
+            self.autoScanStopTask = Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: UInt64(Self.backoffScanWindow * 1_000_000_000))
+                guard let self, !Task.isCancelled, self.isScanning else { return }
+                self.stopScan()
+                self.note("Scan automático encerrado sem achar o relógio.")
+                self.scheduleBackoffScan(reason: "backoff")
+            }
+        }
+    }
+
+    private func resetBackoffScan() {
+        backoffScanTask?.cancel()
+        backoffScanTask = nil
+        autoScanStopTask?.cancel()
+        autoScanStopTask = nil
+        backoffScanStep = 0
+        if isScanning { stopScan() }
     }
 
     private func rememberPeripheral(_ peripheral: CBPeripheral?) {
