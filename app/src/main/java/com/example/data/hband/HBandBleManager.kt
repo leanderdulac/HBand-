@@ -2144,7 +2144,7 @@ class HBandBleManager(
 
     /** Chamar com watchSettingsMutex adquirido: não interrompe medições, só enfileira a escrita. */
     private suspend fun writeWatchTime(manual: Boolean) {
-        val now = java.time.LocalDateTime.now()
+        val now = System.currentTimeMillis()
         val f = WatchClock.fields(now, android.text.format.DateFormat.is24HourFormat(context))
         _watchClockState.value = _watchClockState.value.copy(syncing = true, message = null)
         Log.i(TAG, "VE30 hora: enviando settingTime $f (manual=$manual)")
@@ -2173,7 +2173,7 @@ class HBandBleManager(
         // Falhas de escrita GATT chegam como códigos negativos; timeout como null.
         val ok = code != null && code >= 0
         if (ok) {
-            val at = System.currentTimeMillis()
+            val at = now
             prefs.edit().putLong(PREF_WATCH_TIME_SYNC_AT, at).apply()
             _watchClockState.value = WatchClockUiState(
                 syncing = false, lastSyncEpochMs = at, lastResultOk = true,

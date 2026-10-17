@@ -1,7 +1,8 @@
 package com.example.data.hband
 
-import java.time.LocalDateTime
-import java.time.format.DateTimeFormatter
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import java.util.Locale
 
 /** Estado do acerto de hora do relógio (seção "Relógio" em Ajustes). */
 data class WatchClockUiState(
@@ -41,15 +42,21 @@ data class WatchTimeFields(
 )
 
 object WatchClock {
-    private val HHMM: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
-    private val FULL: DateTimeFormatter = DateTimeFormatter.ofPattern("dd/MM HH:mm")
+    // minSdk 24: java.util em vez de java.time.
+    private fun fmt(pattern: String, epochMs: Long) =
+        SimpleDateFormat(pattern, Locale("pt", "BR")).format(java.util.Date(epochMs))
 
-    fun fields(now: LocalDateTime, is24h: Boolean) = WatchTimeFields(
-        now.year, now.monthValue, now.dayOfMonth, now.hour, now.minute, now.second, is24h,
-    )
+    fun fields(epochMs: Long, is24h: Boolean): WatchTimeFields {
+        val c = Calendar.getInstance().apply { timeInMillis = epochMs }
+        return WatchTimeFields(
+            c.get(Calendar.YEAR), c.get(Calendar.MONTH) + 1, c.get(Calendar.DAY_OF_MONTH),
+            c.get(Calendar.HOUR_OF_DAY), c.get(Calendar.MINUTE), c.get(Calendar.SECOND), is24h,
+        )
+    }
 
-    fun successMessage(at: LocalDateTime): String = "Hora do relógio atualizada às ${at.format(HHMM)}"
+    fun successMessage(epochMs: Long): String = "Hora do relógio atualizada às ${fmt("HH:mm", epochMs)}"
 
-    fun lastSyncLabel(at: LocalDateTime?): String =
-        if (at == null) "Última sincronização: nunca" else "Última sincronização: ${at.format(FULL)}"
+    fun lastSyncLabel(epochMs: Long?): String =
+        if (epochMs == null || epochMs <= 0) "Última sincronização: nunca"
+        else "Última sincronização: ${fmt("dd/MM HH:mm", epochMs)}"
 }

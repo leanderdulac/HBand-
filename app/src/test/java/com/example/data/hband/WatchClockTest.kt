@@ -4,10 +4,10 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import java.time.LocalDateTime
+import java.util.Calendar
 
 class WatchClockTest {
-    private val t = LocalDateTime.of(2026, 10, 16, 22, 5, 9)
+    private val t = Calendar.getInstance().apply { set(2026, Calendar.OCTOBER, 16, 22, 5, 9) }.timeInMillis
 
     @Test fun fieldsCopyPhoneTime() {
         assertEquals(WatchTimeFields(2026, 10, 16, 22, 5, 9, true), WatchClock.fields(t, true))
