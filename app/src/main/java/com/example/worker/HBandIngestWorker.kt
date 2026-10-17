@@ -23,6 +23,7 @@ class HBandIngestWorker(
             sensorMetricDao = database.sensorMetricDao(),
             apiService = RetrofitClient.apiService,
             ingestTransportProvider = { RetrofitClient.captureIngestTransport() },
+            backoffGate = com.example.data.ingest.IngestBackoffGate.shared(applicationContext),
             localWriteTransaction = database.localWriteTransaction(),
         )
 

@@ -72,10 +72,12 @@ class WearableRepository(
     private val apiService: HealthTechApiService,
     private val localWriteTransaction: LocalWriteTransaction,
     private val advancedMeasurementDao: AdvancedMeasurementDao? = null,
-    private val maxBatchItems: Int = IngestReconciler.BATCH_MAX_ITEMS,
+    private val maxBatchItems: Int = IngestReconciler.DEFAULT_FLUSH_ITEMS,
     private val ingestTransportProvider: () -> com.example.data.remote.IngestTransport = {
         com.example.data.remote.IngestTransport(service = apiService)
     },
+    private val backoffGate: com.example.data.ingest.IngestBackoffGate =
+        com.example.data.ingest.IngestBackoffGate.Disabled,
 ) {
     val allQueueItems: Flow<List<IngestQueueEntity>> = queueDao.getAllItems()
     val allSensorMetrics: Flow<List<HBandSensorMetricEntity>> = sensorMetricDao.getAllMetrics()
@@ -387,6 +389,16 @@ class WearableRepository(
                 _lastSyncResult.value = result.patientMessage()
                 return@withContext result.copy(message = result.patientMessage())
             }
+            // Automatic sends honor the shared backoff window (503/429/Retry-After).
+            // Explicit patient retries still go out right away.
+            val waitMs = backoffGate.waitRemainingMs(System.currentTimeMillis())
+            if (waitMs > 0 && !retryFailed) {
+                val result = QueueProcessResult(
+                    hadTransientFailure = true,
+                    message = "O serviço pediu para aguardar. Nova tentativa automática em ${'$'}{(waitMs + 999) / 1000} s.",
+                )
+                return@withContext result
+            }
             // Capture before changing any stored record; use this service for every chunk.
             val transport = ingestTransportProvider()
             if (transport.configurationError != null) {
@@ -448,6 +460,7 @@ class WearableRepository(
             }
             val mediaType = "application/json; charset=utf-8".toMediaTypeOrNull()
             var consecutiveNetworkErrors = 0
+            var retryAfterMs: Long? = null
             for (chunk in IngestReconciler.chunks(prepared, maxBatchItems)) {
                 if (consecutiveNetworkErrors >= 2 || authError != null) break
                 var responseCode: Int? = null
@@ -462,6 +475,9 @@ class WearableRepository(
                         IngestReconciler.flushIdempotencyKey(chunk),
                     )
                     responseCode = response.code()
+                    com.example.data.ingest.IngestBackoff.parseRetryAfter(
+                        response.headers()["Retry-After"], System.currentTimeMillis()
+                    )?.let { retryAfterMs = maxOf(retryAfterMs ?: 0L, it) }
                     response.errorBody()?.close()
                     IngestReconciler.batch(chunk, response.code(), response.body()?.use { it.string() })
                 } catch (cancelled: CancellationException) {
@@ -471,6 +487,8 @@ class WearableRepository(
                 }
                 if (decisions.any { it.outcome == IngestItemOutcome.TRANSIENT }) {
                     consecutiveNetworkErrors++
+                    // A 503/429 is the server asking for room: stop this flush now.
+                    if (responseCode == 503 || responseCode == 429) consecutiveNetworkErrors = 2
                 } else {
                     consecutiveNetworkErrors = 0
                 }
@@ -499,6 +517,11 @@ class WearableRepository(
                     if (transient) hadTransientFailure = true
                     if (denied) authError = decision.message
                 }
+            }
+            if (hadTransientFailure) {
+                backoffGate.recordTransientFailure(System.currentTimeMillis(), retryAfterMs)
+            } else if (syncedCount > 0) {
+                backoffGate.recordSuccess()
             }
             val result = QueueProcessResult(
                 syncedCount = syncedCount,

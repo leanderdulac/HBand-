@@ -116,6 +116,7 @@ fun HomeScreen(
     val deviceCapabilities by viewModel.deviceCapabilities.collectAsStateWithLifecycle()
     val autoMeasureState by viewModel.autoMeasureState.collectAsStateWithLifecycle()
     val wearDetectState by viewModel.wearDetectState.collectAsStateWithLifecycle()
+    val watchClockState by viewModel.watchClockState.collectAsStateWithLifecycle()
     val historySyncState by viewModel.historySyncState.collectAsStateWithLifecycle()
     val isHardwareConnected by viewModel.isHardwareConnected.collectAsStateWithLifecycle()
     val ecgState by viewModel.ecgState.collectAsStateWithLifecycle()
@@ -200,6 +201,7 @@ fun HomeScreen(
         ) {
             when (selectedTab) {
                 0 -> DashboardTab(
+                    autoReconnectEnabled = autoReconnectBle,
                     syncDisplayStatus = syncDisplayStatus,
                     onRetryQueueRead = viewModel::retryQueueRead,
                     pendingCount = pendingCount,
@@ -346,6 +348,8 @@ fun HomeScreen(
                     onSpo2AutoChange = { viewModel.setBandSpo2AutoDetect(it) },
                     onWearDetectChange = { viewModel.setBandWearDetect(it) },
                     onSyncHistory = { viewModel.requestHistorySync() },
+                    watchClockState = watchClockState,
+                    onSyncWatchTime = { viewModel.syncWatchTime() },
                     alarmState = alarmState,
                     heartWarningState = heartWarningState,
                     longSeatState = longSeatState,
@@ -460,6 +464,7 @@ internal fun DashboardTab(
     onStopFatigue: () -> Unit = {},
     onStartBreath: () -> Unit = {},
     onStopBreath: () -> Unit = {},
+    autoReconnectEnabled: Boolean = false,
 ) {
     Column(
         modifier = Modifier
@@ -468,6 +473,11 @@ internal fun DashboardTab(
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         com.example.ui.components.PatientSummaryLayout(first = {
+            com.example.ui.components.TelemetryStatusBanners(
+                pairedMac = connectedDevice?.macAddress,
+                hardwareConnected = hardwareConnected,
+                autoReconnect = autoReconnectEnabled,
+            )
             com.example.ui.components.IncompatibleWatchCard(
                 device = incompatibleDevice,
                 onForget = onForgetIncompatible,
@@ -635,6 +645,7 @@ internal fun DashboardTab(
             }
         }
 
+        com.example.ui.components.AppVersionFooter()
         Spacer(modifier = Modifier.height(24.dp))
     }
 }

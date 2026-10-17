@@ -36,7 +36,10 @@ fun UserProfileDialog(
     readFailed: Boolean = false,
     onRetryRead: () -> Unit = {},
 ) {
-    if (currentProfile == null) {
+    // A phone that never saved a profile (fresh install, e.g. Galaxy A6s) has no row.
+    // Since PR5 that showed only an error text instead of the form; start a blank form.
+    val editable = currentProfile ?: if (readAvailable && !readFailed) blankPatientProfile() else null
+    if (editable == null) {
         AlertDialog(
             onDismissRequest = onDismissRequest,
             title = { Text("Meu perfil") },
@@ -50,8 +53,8 @@ fun UserProfileDialog(
     }
     // Saveable inputs alone are not validated against a restored registry.
     // Put the editor under its identity so a different patient cannot inherit its draft.
-    key(currentProfile.id, currentProfile.patientId) {
-        ProfileEditor(currentProfile, onDismissRequest, onSaveProfile, saveState, readAvailable, readFailed, onRetryRead)
+    key(editable.id, editable.patientId) {
+        ProfileEditor(editable, onDismissRequest, onSaveProfile, saveState, readAvailable, readFailed, onRetryRead)
     }
 }
 
@@ -305,3 +308,16 @@ private fun ProfileField(
         modifier = Modifier.fillMaxWidth().testTag(tag),
     )
 }
+
+
+/** Blank first profile: no invented clinical data; keeps the ingest patient id unchanged. */
+internal fun blankPatientProfile(): UserProfileEntity = UserProfileEntity(
+    patientId = com.example.data.ingest.IngestPayloadMapper.DEFAULT_PATIENT_ID,
+    fullName = "",
+    age = 0,
+    gender = "",
+    heightCm = 0f,
+    weightKg = 0f,
+    emergencyContact = "",
+    medicalNotes = "",
+)

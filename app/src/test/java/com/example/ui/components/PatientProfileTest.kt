@@ -34,10 +34,16 @@ class PatientProfileTest {
         compose.runOnIdle { assertEquals(0, saves) }
     }
 
-    @Test fun missing_profile_cannot_save_a_fabricated_identity() {
+    @Test fun missing_profile_opens_blank_form_without_fabricated_data() {
         compose.setContent { MyApplicationTheme { UserProfileDialog(null, {}, { _, _ -> error("Unexpected profile creation") }) } }
-        compose.onNodeWithTag("btn_save_profile").assertDoesNotExist()
+        // Fresh install (e.g. Galaxy A6s): the form opens, blank, and cannot save until filled.
+        compose.onNodeWithTag("btn_save_profile").assertIsNotEnabled()
         compose.onNodeWithText("Alex Rivera").assertDoesNotExist()
+    }
+
+    @Test fun missing_profile_while_loading_shows_no_form() {
+        compose.setContent { MyApplicationTheme { UserProfileDialog(null, {}, { _, _ -> error("Unexpected") }, readAvailable = false) } }
+        compose.onNodeWithTag("btn_save_profile").assertDoesNotExist()
         compose.onNodeWithText("Fechar").assertIsDisplayed()
     }
 

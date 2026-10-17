@@ -54,10 +54,12 @@ class HBandBleService : Service() {
         ensureForeground()
         if (intent?.action == ACTION_STOP) {
             (application as? HBandHealthSyncApp)?.requestBleSessionStop()
+            HBandReconnectWatchdog.cancel(this)
             stopSelfSafely()
             return START_NOT_STICKY
         }
         if (bleManager() == null) { stopSelfSafely(); return START_NOT_STICKY }
+        HBandReconnectWatchdog.schedule(this)
         when (intent?.action) {
             ACTION_RECONNECT -> bleManager()?.reconnectLastDevice()
             else -> {
@@ -81,11 +83,17 @@ class HBandBleService : Service() {
     private fun observeBleState() {
         val manager = bleManager() ?: return
         observeJob?.cancel()
+        var wasConnected = false
         observeJob = serviceScope.launch {
             combine(manager.connectedDevice, manager.isHardwareConnected) { device, hardware ->
                 device to hardware
             }.collect { (device, hardware) ->
                 val connected = device?.isConnected == true && hardware
+                if (connected && !wasConnected) {
+                    // Link (re)established: push anything queued while the watch was away.
+                    (application as? HBandHealthSyncApp)?.requestImmediateUpload()
+                }
+                wasConnected = connected
                 val text = when {
                     connected -> getString(
                         R.string.ble_session_connected,
@@ -219,6 +227,17 @@ class HBandBleService : Service() {
             val manager = app.readyBleManagerOrNull() ?: return
             if (manager.hasPersistedSession() && manager.isAutoReconnectEnabled) {
                 start(context)
+            }
+        }
+
+        fun reconnect(context: Context) {
+            if ((context.applicationContext as? HBandHealthSyncApp)?.readyBleManagerOrNull() == null) return
+            val intent = Intent(context, HBandBleService::class.java).apply { action = ACTION_RECONNECT }
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(intent)
+                else context.startService(intent)
+            } catch (error: Exception) {
+                android.util.Log.e("HBandBleService", "Unable to request BLE reconnect", error)
             }
         }
 
