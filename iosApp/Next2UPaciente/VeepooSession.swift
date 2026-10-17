@@ -49,7 +49,7 @@ final class VeepooSession: NSObject, ObservableObject {
     @Published var profileRevision = 0
     @Published var watchAlias = UserDefaults.standard.string(forKey: "last_veepoo_name") ?? ""
     @Published var renameStatus = ""
-    /// Nome deste aparelho enviado ao Core (`device_label`). Padrão: nome do iPhone.
+    /// Nome da pulseira enviado ao Core (`device_label`) em todo envio. Ver `resolvedDeviceLabel`.
     @Published var deviceLabel: String = VeepooSession.initialDeviceLabel()
     @Published var watchTimeSyncing = false
     @Published var watchTimeStatus = ""
@@ -294,27 +294,68 @@ final class VeepooSession: NSObject, ObservableObject {
     }
 
     private static var loggedIngestConfig = false
-    static let deviceLabelKey = "device_label"
+    /// Nome da pulseira escolhido pelo paciente em Meu perfil (vazio = segue o nome do perfil).
+    static let wristbandNameKey = "wristband_name"
+    /// Último `device_label` efetivo (cache para envios antes de o perfil abrir).
+    static let deviceLabelCacheKey = "device_label_effective"
+    /// Chave antiga (build 6-10, ex.: "iPhone de LFM" fixo); não é mais usada.
+    static let legacyDeviceLabelKey = "device_label"
 
-    /// Lê o rótulo salvo; um argumento de lançamento `-Next2UDeviceLabel "…"` (devicectl/Xcode)
-    /// define o valor sem apagar dados. Sem nada salvo, usa o nome do aparelho.
-    static func initialDeviceLabel() -> String {
-        let defaults = UserDefaults.standard
-        if let arg = defaults.volatileDomain(forName: UserDefaults.argumentDomain)["Next2UDeviceLabel"] as? String,
-           let clean = IngestRuntime.shared.sanitizeDeviceLabel(raw: arg) {
-            defaults.set(clean, forKey: deviceLabelKey)
-            return clean
-        }
-        if let saved = defaults.string(forKey: deviceLabelKey), !saved.isEmpty { return saved }
-        return IngestRuntime.shared.sanitizeDeviceLabel(raw: UIDevice.current.name) ?? "iPhone"
+    /// Sugestão a partir do nome do perfil: "Pulseira de <nome>".
+    static func defaultWristbandName(profileName: String) -> String? {
+        let name = profileName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return nil }
+        return IngestRuntime.shared.sanitizeDeviceLabel(raw: "Pulseira de \(name)")
     }
 
-    func saveDeviceLabel(_ proposed: String) {
-        guard let clean = IngestRuntime.shared.sanitizeDeviceLabel(raw: proposed) else { return }
-        deviceLabel = clean
-        UserDefaults.standard.set(clean, forKey: Self.deviceLabelKey)
-        IngestRuntime.shared.setDeviceLabel(raw: clean)
-        note("Nome do aparelho: \(clean)")
+    /// Nome salvo pelo paciente > "Pulseira de <nome do perfil>" > modelo do aparelho.
+    static func resolvedDeviceLabel(profileName: String?) -> String {
+        let defaults = UserDefaults.standard
+        if let saved = IngestRuntime.shared.sanitizeDeviceLabel(raw: defaults.string(forKey: wristbandNameKey)) {
+            return saved
+        }
+        if let profileName, let suggested = defaultWristbandName(profileName: profileName) {
+            return suggested
+        }
+        return IngestRuntime.shared.sanitizeDeviceLabel(raw: UIDevice.current.model) ?? "iPhone"
+    }
+
+    static func initialDeviceLabel() -> String {
+        let defaults = UserDefaults.standard
+        defaults.removeObject(forKey: legacyDeviceLabelKey)
+        // Teste (devicectl/Xcode): `-Next2UDeviceLabel "…"` define o nome da pulseira.
+        if let arg = defaults.volatileDomain(forName: UserDefaults.argumentDomain)["Next2UDeviceLabel"] as? String,
+           let clean = IngestRuntime.shared.sanitizeDeviceLabel(raw: arg) {
+            defaults.set(clean, forKey: wristbandNameKey)
+        }
+        if defaults.string(forKey: wristbandNameKey) == nil,
+           let cached = IngestRuntime.shared.sanitizeDeviceLabel(raw: defaults.string(forKey: deviceLabelCacheKey)) {
+            return cached
+        }
+        return resolvedDeviceLabel(profileName: nil)
+    }
+
+    /// Salva o nome da pulseira (vazio ou igual à sugestão = segue o nome do perfil).
+    func saveWristbandName(_ proposed: String, profileName: String) {
+        let clean = IngestRuntime.shared.sanitizeDeviceLabel(raw: proposed)
+        if clean == nil || clean == Self.defaultWristbandName(profileName: profileName) {
+            UserDefaults.standard.removeObject(forKey: Self.wristbandNameKey)
+        } else {
+            UserDefaults.standard.set(clean, forKey: Self.wristbandNameKey)
+        }
+        refreshDeviceLabel(profileName: profileName)
+    }
+
+    /// Recalcula o `device_label` (perfil aberto) e aplica nos próximos envios.
+    func refreshDeviceLabel(profileName: String? = nil) {
+        let name = profileName ?? PatientStore.shared.profile().fullName
+        let label = Self.resolvedDeviceLabel(profileName: name)
+        UserDefaults.standard.set(label, forKey: Self.deviceLabelCacheKey)
+        IngestRuntime.shared.setDeviceLabel(raw: label)
+        if label != deviceLabel {
+            deviceLabel = label
+            note("Nome da pulseira atualizado.")
+        }
     }
 
     func refreshLocalStore() {
@@ -324,6 +365,7 @@ final class VeepooSession: NSObject, ObservableObject {
 
     func onStoreReady() {
         note("Store cifrado pronto.")
+        refreshDeviceLabel()
         reconnectLastKnown(reason: "store pronto")
         flushNow()
     }
@@ -395,6 +437,7 @@ final class VeepooSession: NSObject, ObservableObject {
 
     func notifyProfileChanged() {
         profileRevision += 1
+        refreshDeviceLabel()
         refreshLocalStore()
     }
 

@@ -16,7 +16,6 @@ struct SettingsScreen: View {
     @State private var showProfile = false
     @State private var showContinuityHelp = false
     @State private var notifyOpenFailed = false
-    @State private var deviceLabelDraft = ""
 
     var body: some View {
         NavigationStack {
@@ -89,30 +88,12 @@ struct SettingsScreen: View {
             .buttonStyle(PatientPrimaryButton())
             .disabled(!session.hardwareReady || session.watchTimeSyncing)
             .accessibilityIdentifier("watch_clock_sync_button")
-            if DeveloperFlags.showTechnicalUI {
-            Divider()
-            Text("Nome deste aparelho").font(.system(size: 17, weight: .semibold))
-            Text("Identifica este iPhone nos envios ao serviço de saúde.")
-                .font(.system(size: 15))
-                .foregroundStyle(palette.onSurfaceVariant)
-            TextField("Nome deste aparelho", text: $deviceLabelDraft)
-                .font(.system(size: 17))
-                .patientFieldInk(palette)
-                .frame(minHeight: PatientTheme.minTouch)
-                .accessibilityIdentifier("device_label_input")
-            Button("Salvar nome do aparelho") { session.saveDeviceLabel(deviceLabelDraft) }
-                .buttonStyle(PatientPrimaryButton())
-                .disabled(deviceLabelDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                          || deviceLabelDraft == session.deviceLabel)
-                .accessibilityIdentifier("device_label_save")
-            }
         }
         .foregroundStyle(palette.onSurface)
         .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(palette.surface)
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .onAppear { deviceLabelDraft = session.deviceLabel }
     }
 
     private var profileCard: some View {
@@ -306,6 +287,8 @@ struct ProfileEditorSheet: View {
     @Environment(\.patientColorScheme) private var paletteScheme
     var onClose: () -> Void
     @State private var name = ""
+    @State private var wristbandName = ""
+    @State private var wristbandEdited = false
     @State private var age = ""
     @State private var gender = ""
     @State private var height = ""
@@ -339,6 +322,12 @@ struct ProfileEditorSheet: View {
                     Text("Este é o perfil salvo neste aparelho. Confira seus dados antes de salvar.")
                         .font(.system(size: 17))
                     field("Nome completo", $name, tag: "input_profile_name", error: !nameValid, kind: .text)
+                    VStack(alignment: .leading, spacing: 4) {
+                        field("Nome da pulseira", wristbandBinding, tag: "input_wristband_name", error: false, kind: .text)
+                        Text("Ajuda a equipe de saúde a reconhecer a sua pulseira. Até 64 letras.")
+                            .font(.system(size: 15))
+                            .foregroundStyle(palette.onSurfaceVariant)
+                    }
                     field("Idade em anos", $age, tag: "input_age", error: parsedAge == nil, kind: .number)
                     field("Gênero", $gender, tag: "input_gender", error: false, kind: .text)
                     field("Altura em centímetros", $height, tag: "input_height", error: parsedHeight == nil, kind: .decimal)
@@ -513,11 +502,28 @@ struct ProfileEditorSheet: View {
         String(value).replacingOccurrences(of: ".", with: ",")
     }
 
+    /// Enquanto o paciente não mexe no campo, a sugestão acompanha o nome completo.
+    private var wristbandBinding: Binding<String> {
+        Binding(
+            get: {
+                wristbandEdited ? wristbandName
+                    : (UserDefaults.standard.string(forKey: VeepooSession.wristbandNameKey)
+                        ?? VeepooSession.defaultWristbandName(profileName: name) ?? "")
+            },
+            set: { newValue in
+                wristbandEdited = true
+                wristbandName = String(newValue.prefix(64))
+            }
+        )
+    }
+
     private func load() {
         let profile = PatientStore.shared.profile()
         profileId = profile.id
         patientId = profile.patientId
         name = profile.fullName
+        wristbandEdited = false
+        wristbandName = ""
         age = "\(profile.age)"
         gender = profile.gender
         height = commaDecimal(profile.heightCm)
@@ -530,7 +536,7 @@ struct ProfileEditorSheet: View {
 
     private var hasChanges: Bool {
         let profile = PatientStore.shared.profile()
-        return name != profile.fullName ||
+        return name != profile.fullName || wristbandEdited ||
             age != "\(profile.age)" ||
             gender != profile.gender ||
             height != commaDecimal(profile.heightCm) ||
@@ -564,6 +570,10 @@ struct ProfileEditorSheet: View {
             )
         )
         if saved {
+            let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            if wristbandEdited {
+                VeepooSession.shared.saveWristbandName(wristbandName, profileName: trimmedName)
+            }
             VeepooSession.shared.notifyProfileChanged()
             onClose()
         } else {
