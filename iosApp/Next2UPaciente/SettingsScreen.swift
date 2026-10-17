@@ -16,6 +16,7 @@ struct SettingsScreen: View {
     @State private var showProfile = false
     @State private var showContinuityHelp = false
     @State private var notifyOpenFailed = false
+    @State private var deviceLabelDraft = ""
 
     var body: some View {
         NavigationStack {
@@ -84,12 +85,28 @@ struct SettingsScreen: View {
             .buttonStyle(PatientPrimaryButton())
             .disabled(!session.hardwareReady || session.watchTimeSyncing)
             .accessibilityIdentifier("watch_clock_sync_button")
+            Divider()
+            Text("Nome deste aparelho").font(.system(size: 17, weight: .semibold))
+            Text("Identifica este iPhone nos envios ao serviço de saúde.")
+                .font(.system(size: 15))
+                .foregroundStyle(palette.onSurfaceVariant)
+            TextField("Nome deste aparelho", text: $deviceLabelDraft)
+                .font(.system(size: 17))
+                .patientFieldInk(palette)
+                .frame(minHeight: PatientTheme.minTouch)
+                .accessibilityIdentifier("device_label_input")
+            Button("Salvar nome do aparelho") { session.saveDeviceLabel(deviceLabelDraft) }
+                .buttonStyle(PatientPrimaryButton())
+                .disabled(deviceLabelDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                          || deviceLabelDraft == session.deviceLabel)
+                .accessibilityIdentifier("device_label_save")
         }
         .foregroundStyle(palette.onSurface)
         .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(palette.surface)
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .onAppear { deviceLabelDraft = session.deviceLabel }
     }
 
     private var profileCard: some View {

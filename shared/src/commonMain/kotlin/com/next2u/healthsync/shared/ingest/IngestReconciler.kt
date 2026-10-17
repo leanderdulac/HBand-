@@ -75,7 +75,9 @@ object IngestReconciler {
         if (original.containsKey("client_reading_id")) {
             require(string(original, "client_reading_id") == item.clientReadingId) { INVALID_LOCAL }
         }
-        val normalized = Json.parseToJsonElement(IngestPayload.normalizeQueuePayload(item.payloadJson)).jsonObject
+        val normalized = Json.parseToJsonElement(
+            IngestPayload.withDeviceLabel(IngestPayload.normalizeQueuePayload(item.payloadJson), IngestRuntime.deviceLabel),
+        ).jsonObject
         val withIdentity = JsonObject(
             normalized + mapOf(
                 "patient_id" to JsonPrimitive(patient),

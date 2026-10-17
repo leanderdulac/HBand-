@@ -49,6 +49,8 @@ final class VeepooSession: NSObject, ObservableObject {
     @Published var profileRevision = 0
     @Published var watchAlias = UserDefaults.standard.string(forKey: "last_veepoo_name") ?? ""
     @Published var renameStatus = ""
+    /// Nome deste aparelho enviado ao Core (`device_label`). Padrão: nome do iPhone.
+    @Published var deviceLabel: String = VeepooSession.initialDeviceLabel()
     @Published var watchTimeSyncing = false
     @Published var watchTimeStatus = ""
     @Published var watchTimeLastSync: Date? = UserDefaults.standard.object(forKey: "watch_time_sync_at") as? Date
@@ -93,6 +95,9 @@ final class VeepooSession: NSObject, ObservableObject {
     private var heartRunning = false
     private var spo2Running = false
     private var heartSamplesThisBurst = 0
+    private var cycleGotReading = false
+    private var consecutiveEmptyCycles = 0
+    private var nextCycleAt = Date.distantPast
     /// Liveness of the measurement loop. The FC/SpO₂ rotation is driven only by BLE
     /// callbacks, so one missed callback used to freeze it forever (no readings, no POSTs).
     private var lastSampleAt = Date()
@@ -180,23 +185,79 @@ final class VeepooSession: NSObject, ObservableObject {
             }
             return
         }
-        if spo2Running, now.timeIntervalSince(measureStartedAt) > 60 {
-            note("Watchdog: SpO₂ sem resultado em 60 s. Volta para FC.")
-            stopOxygen()
-            startHeart()
+        advanceMeasurementCycle(now: now)
+    }
+
+    // MARK: - Ciclo de medição pontual (FC → SpO₂ → pausa), sem medição contínua
+
+    /// Pausa entre ciclos com leitura. Ciclos sem leitura dobram a pausa (até 30 min).
+    static let cycleIdleSeconds: TimeInterval = 5 * 60
+    static let maxIdleSeconds: TimeInterval = 30 * 60
+    static let heartStageTimeout: TimeInterval = 45
+    static let oxygenStageTimeout: TimeInterval = 40
+    static let heartSamplesPerCycle = 2
+
+    /// Primeira tentativa após ciclo vazio (fora do pulso/ocupado) em 2 min; depois 4, 8, 16, 30.
+    static let emptyRetrySeconds: TimeInterval = 2 * 60
+
+    static func idleSeconds(afterEmptyCycles empty: Int) -> TimeInterval {
+        guard empty > 0 else { return cycleIdleSeconds }
+        return min(maxIdleSeconds, emptyRetrySeconds * pow(2, Double(min(empty - 1, 4))))
+    }
+
+    /// Chamado pelo watchdog (30 s) e por eventos BLE: encerra estágio vencido e inicia o
+    /// próximo ciclo só quando a pausa terminou.
+    private func advanceMeasurementCycle(now: Date = Date()) {
+        guard hardwareReady else { return }
+        if heartRunning, now.timeIntervalSince(measureStartedAt) > Self.heartStageTimeout {
+            note("Ciclo: FC sem resultado completo em \(Int(Self.heartStageTimeout)) s.")
+            stopHeart()
+            if cycleGotReading { startOxygen() } else { finishCycle(reason: "FC sem leitura") }
             return
         }
-        if now.timeIntervalSince(lastSampleAt) > 120, now.timeIntervalSince(measureStartedAt) > 60 {
-            note("Watchdog: sem leitura há \(Int(now.timeIntervalSince(lastSampleAt))) s. Reinicia FC.")
-            stopSensors()
-            heartRunning = false
-            spo2Running = false
-            startHeart()
+        if spo2Running, now.timeIntervalSince(measureStartedAt) > Self.oxygenStageTimeout {
+            note("Ciclo: SpO₂ sem resultado em \(Int(Self.oxygenStageTimeout)) s.")
+            finishCycle(reason: "SpO₂ sem resultado")
+            return
+        }
+        if !heartRunning, !spo2Running, now >= nextCycleAt {
+            startCycle(reason: "pausa concluída")
+        }
+    }
+
+    private func startCycle(reason: String, force: Bool = false) {
+        guard hardwareReady, !heartRunning, !spo2Running else { return }
+        if !force, Date() < nextCycleAt { return }
+        cycleGotReading = false
+        note("Ciclo de medição: início (\(reason)).")
+        NSLog("[Next2U] Ciclo de medição: início (%@)", reason)
+        startHeart()
+    }
+
+    private func finishCycle(reason: String) {
+        stopSensors()
+        consecutiveEmptyCycles = cycleGotReading ? 0 : consecutiveEmptyCycles + 1
+        let idle = Self.idleSeconds(afterEmptyCycles: consecutiveEmptyCycles)
+        nextCycleAt = Date().addingTimeInterval(idle)
+        let msg = "Ciclo de medição: fim (\(reason)); leitura=\(cycleGotReading ? "sim" : "não"); próxima em \(Int(idle / 60)) min."
+        note(msg)
+        NSLog("[Next2U] %@", msg)
+        if cycleGotReading {
+            sessionMessage = "Medição concluída. Próxima em \(Int(idle / 60)) min."
         }
     }
 
     func configureIngest() {
         let key = ingestKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !Self.loggedIngestConfig {
+            Self.loggedIngestConfig = true
+            // Só presença/tamanho — nunca o valor.
+            let builtIn = VeepooSession.bundledString("Next2UIngestApiKey") ?? ""
+            NSLog("[Next2U] Configuração de envio: URL embutida=%@ chave embutida=%@ (len %d) aparelho=%@",
+                  VeepooSession.bundledString("Next2UCoreBaseUrl") == nil ? "não" : "sim",
+                  builtIn.isEmpty ? "não" : "sim", builtIn.count, deviceLabel)
+        }
+        IngestRuntime.shared.setDeviceLabel(raw: deviceLabel)
         IngestRuntime.shared.configure(
             baseUrl: ingestUrl,
             overrideKey: key.isEmpty ? nil : key,
@@ -205,6 +266,30 @@ final class VeepooSession: NSObject, ObservableObject {
         pendingCount = Int(IngestRuntime.shared.pendingCount())
         failedCount = Int(IngestRuntime.shared.failedCount())
         refreshLocalStore()
+    }
+
+    private static var loggedIngestConfig = false
+    static let deviceLabelKey = "device_label"
+
+    /// Lê o rótulo salvo; um argumento de lançamento `-Next2UDeviceLabel "…"` (devicectl/Xcode)
+    /// define o valor sem apagar dados. Sem nada salvo, usa o nome do aparelho.
+    static func initialDeviceLabel() -> String {
+        let defaults = UserDefaults.standard
+        if let arg = defaults.volatileDomain(forName: UserDefaults.argumentDomain)["Next2UDeviceLabel"] as? String,
+           let clean = IngestRuntime.shared.sanitizeDeviceLabel(raw: arg) {
+            defaults.set(clean, forKey: deviceLabelKey)
+            return clean
+        }
+        if let saved = defaults.string(forKey: deviceLabelKey), !saved.isEmpty { return saved }
+        return IngestRuntime.shared.sanitizeDeviceLabel(raw: UIDevice.current.name) ?? "iPhone"
+    }
+
+    func saveDeviceLabel(_ proposed: String) {
+        guard let clean = IngestRuntime.shared.sanitizeDeviceLabel(raw: proposed) else { return }
+        deviceLabel = clean
+        UserDefaults.standard.set(clean, forKey: Self.deviceLabelKey)
+        IngestRuntime.shared.setDeviceLabel(raw: clean)
+        note("Nome do aparelho: \(clean)")
     }
 
     func refreshLocalStore() {
@@ -220,6 +305,8 @@ final class VeepooSession: NSObject, ObservableObject {
 
     func handleBecameActive() {
         note("App em primeiro plano.")
+        configureIngest()
+        advanceMeasurementCycle()
         reconnectLastKnown(reason: "primeiro plano")
     }
 
@@ -399,7 +486,7 @@ final class VeepooSession: NSObject, ObservableObject {
 
     private func onHandshake(_ watch: ScannedWatch) {
         if hardwareReady {
-            startHeart()
+            advanceMeasurementCycle()
             return
         }
         hardwareReady = true
@@ -420,11 +507,11 @@ final class VeepooSession: NSObject, ObservableObject {
                     self?.note("Histórico do band lido. FC.")
                     // Acerta a hora depois do histórico (como no Android): no handshake o VE30 ignora o comando.
                     self?.syncWatchTime(manual: false)
-                    self?.startHeart()
+                    self?.advanceMeasurementCycle()
                 }
             }
         }
-        startHeart()
+        startCycle(reason: "relógio conectado", force: true)
     }
 
     /// Envia a hora do iPhone ao relógio (automático a cada handshake e pelo botão em Ajustes).
@@ -510,15 +597,24 @@ final class VeepooSession: NSObject, ObservableObject {
                     self.lastSampleAt = Date()
                     self.sessionMessage = "Batimentos: \(value) bpm (leitura do relógio)."
                     HeartAlertDelivery.evaluate(heartRate: Int(value))
+                    guard self.heartRunning else { return }
                     self.heartSamplesThisBurst += 1
+                    self.cycleGotReading = true
                     self.recordAndFlush()
-                    if self.heartSamplesThisBurst >= 4 {
+                    if self.heartSamplesThisBurst >= Self.heartSamplesPerCycle {
+                        self.stopHeart()
                         self.startOxygen()
                     }
                 }
+                // 2 = não está no pulso, 3 = relógio ocupado, 4 = encerrado: o teste já acabou.
                 if state.rawValue == 2 {
                     self.sessionMessage = "O relógio não está no pulso."
                     self.note("Relógio fora do pulso.")
+                }
+                if state.rawValue >= 2, self.heartRunning {
+                    self.heartRunning = false // o relógio já encerrou este teste
+                    let reason = state.rawValue == 2 ? "fora do pulso" : state.rawValue == 3 ? "relógio ocupado" : "FC encerrada pelo relógio"
+                    if self.cycleGotReading { self.startOxygen() } else { self.finishCycle(reason: reason) }
                 }
             }
         }
@@ -529,14 +625,22 @@ final class VeepooSession: NSObject, ObservableObject {
         stopHeart()
         spo2Running = true
         measureStartedAt = Date()
-        manager.peripheralManage.veepooSDKTestOxygenStart(true) { [weak self] _, value in
+        manager.peripheralManage.veepooSDKTestOxygenStart(true) { [weak self] state, value in
             Task { @MainActor in
                 guard let self else { return }
+                guard self.spo2Running else { return }
+                // 2 fora do pulso, 3 ocupado, 4 encerrado, 5 sem SpO₂: o teste já acabou.
+                if state.rawValue >= 2 {
+                    self.spo2Running = false
+                    self.finishCycle(reason: "SpO₂ encerrado pelo relógio (\(state.rawValue))")
+                    return
+                }
                 if value >= 50, value <= 100 {
                     self.spo2 = Int(value)
                     self.lastSampleAt = Date()
+                    self.cycleGotReading = true
                     self.recordAndFlush()
-                    self.startHeart()
+                    self.finishCycle(reason: "SpO₂ lido")
                 }
             }
         }
@@ -638,11 +742,14 @@ final class VeepooSession: NSObject, ObservableObject {
         IngestBackground.schedule()
         scheduleBackoffRetry(after: flush.pendingCount > 0 ? flush.retryInMs : 0)
         bleLog.notice("upload http=\(flush.lastHttpCode, privacy: .public) pending=\(flush.pendingCount, privacy: .public)")
+        NSLog("[Next2U] Envio ao Core: HTTP %d concluídos=%d fila=%d falhas=%d", Int(flush.lastHttpCode),
+              Int(flush.syncedCount), pendingCount, failedCount)
     }
 
     private func recordAndFlush() {
         guard PatientStore.shared.status == .ready else {
             note("Leitura recebida; store ainda não abriu.")
+            NSLog("[Next2U] Leitura NÃO gravada: store %@", "\(PatientStore.shared.status)")
             return
         }
         configureIngest()
@@ -663,7 +770,14 @@ final class VeepooSession: NSObject, ObservableObject {
                 distanceMeters: 0,
                 hrvScore: 0,
                 patientId: PatientStore.shared.profile().patientId
-            ) else { return }
+            ) else {
+                NSLog("[Next2U] Leitura: recordLive lançou erro")
+                return
+            }
+            NSLog("[Next2U] Leitura gravada: fc=%d spo2=%d enfileirada=%@ medições=%d fila=%d falhas=%d",
+                  self.heartRate, self.spo2, recorded.queued ? "sim" : "não",
+                  Int(PatientStore.shared.metricCount()), Int(IngestRuntime.shared.pendingCount()),
+                  Int(IngestRuntime.shared.failedCount()))
             if !recorded.queued { note("Leitura não enfileirada: \(recorded.message)") }
             lastClientReadingId = recorded.clientReadingId
             pendingCount = Int(IngestRuntime.shared.pendingCount())

@@ -77,9 +77,43 @@ object IngestRuntime {
     val lastHttpCode: Int get() = _lastHttpCode
     private var _lastHttpCode: Int = 0
 
+    /**
+     * Nome deste aparelho (ex.: "iPhone de LFM"), enviado como `device_label` em cada leitura.
+     * O Core aceita campos extras (extra="allow") e guarda em `extra`/`frame`; não entra na
+     * identidade de deduplicação nem na assinatura da métrica.
+     */
+    var deviceLabel: String? = null
+        private set
+
+    fun setDeviceLabel(raw: String?) {
+        deviceLabel = sanitizeDeviceLabel(raw)
+    }
+
+    fun sanitizeDeviceLabel(raw: String?): String? =
+        raw?.trim()?.replace(Regex("\\s+"), " ")?.take(DEVICE_LABEL_MAX)?.takeIf { it.isNotEmpty() }
+
+    const val DEVICE_LABEL_MAX = 64
+
+    /** Credencial válida já aplicada ao store atual; null = ainda não houve configuração válida. */
+    private var appliedKey: String? = null
+
     fun configure(baseUrl: String, overrideKey: String?, builtInKey: String) {
         configuration = IngestConfiguration.resolve(baseUrl, overrideKey, builtInKey)
+        val transport = configuration.transport()
+        if (transport.configurationError == null && transport.apiKey != appliedKey) {
+            // Nova chave (ou primeira válida após abrir o app/atualizar): registros que falharam
+            // por acesso (401/403) voltam para a fila em vez de ficarem presos como FAILED.
+            appliedKey = transport.apiKey
+            val items = load()
+            if (items.any { it.status == "FAILED" }) {
+                backoff.recordSuccess()
+                persist(items.map { if (it.status == "FAILED") it.copy(status = "PENDING") else it })
+            }
+        }
     }
+
+    /** Fila pendente + falhas: a mesma contagem em todas as telas. */
+    fun waitingCount(): Int = load().count { it.status == "PENDING" || it.status == "FAILED" }
 
     fun configurationError(): String? = configuration.status.configurationError
 
@@ -125,6 +159,7 @@ object IngestRuntime {
 
     fun useStore(next: QueueStore) {
         backoff.recordSuccess()
+        appliedKey = null
         store = next
         deduper = IngestDeduper()
         _lastHttpCode = 0
@@ -177,7 +212,7 @@ object IngestRuntime {
         if (!deduper.shouldEnqueue(telemetry)) {
             return RecordOutcome(false, message = "Leitura repetida no intervalo de 30s; gravada localmente, sem novo envio.")
         }
-        val payload = IngestPayload.telemetryToJson(telemetry, patientId)
+        val payload = IngestPayload.withDeviceLabel(IngestPayload.telemetryToJson(telemetry, patientId), deviceLabel)
         val id = IngestReadingIdentity.forPayload(payload)
         val items = load().toMutableList()
         items += StoredQueueItem(

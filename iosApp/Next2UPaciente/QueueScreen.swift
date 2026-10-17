@@ -87,7 +87,7 @@ struct QueueScreen: View {
             title = "Enviando registros"
             body = "Aguarde enquanto o aplicativo tenta enviar os registros."
         } else if IngestRuntime.shared.configurationError() != nil {
-            title = "Envios pausados: acesso não autorizado"
+            title = "Envios pausados: envio não configurado neste aparelho"
             body = IngestRuntime.shared.configurationError() ?? ""
         } else if failed > 0 {
             title = "Não foi possível enviar alguns registros"
@@ -102,6 +102,9 @@ struct QueueScreen: View {
         return VStack(alignment: .leading, spacing: 12) {
             Text(title).font(.system(size: 17, weight: .bold))
             Text(body).font(.system(size: 17))
+            Text("Aparelho: \(session.deviceLabel)")
+                .font(.system(size: 15))
+                .accessibilityIdentifier("queue_device_label")
             if pending > 0 {
                 Text("Aguardando envio: \(pending)").font(.system(size: 17))
             }

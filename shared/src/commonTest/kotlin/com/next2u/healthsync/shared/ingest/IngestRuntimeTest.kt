@@ -140,4 +140,45 @@ class IngestRuntimeTest {
         assertEquals(0, IngestRuntime.pendingCount())
         assertTrue(IngestRuntime.visibleItems().isEmpty())
     }
+
+    @Test
+    fun unauthorized_rows_return_to_queue_when_a_new_key_is_configured() = runTest {
+        IngestRuntime.recordLive(
+            deviceId = "C4:E3:42:AA:30:A4", deviceModel = "VE30", heartRate = 81, spo2 = 0,
+            systolic = 0, diastolic = 0, temperatureCelsius = 0f, steps = 0, calories = 0f,
+            distanceMeters = 0f, hrvScore = 0, patientId = "PAT-1",
+        )
+        IngestRuntime.useEngine(MockEngine { respond("""{"detail":"unauthorized"}""", HttpStatusCode.Unauthorized) })
+        IngestRuntime.flush()
+        assertEquals(1, IngestRuntime.failedCount())
+        assertEquals(1, IngestRuntime.waitingCount())
+        // Same key again: nothing changes (no retry storm on every configure call).
+        IngestRuntime.configure("https://service.invalid/", "synthetic-key", "")
+        assertEquals(1, IngestRuntime.failedCount())
+        // New key: unauthorized rows go back to PENDING.
+        IngestRuntime.configure("https://service.invalid/", "synthetic-key-2", "")
+        assertEquals(0, IngestRuntime.failedCount())
+        assertEquals(1, IngestRuntime.pendingCount())
+        assertEquals(1, IngestRuntime.waitingCount())
+    }
+
+    @Test
+    fun device_label_is_sent_with_every_reading_including_older_queue_rows() = runTest {
+        IngestRuntime.setDeviceLabel(null)
+        IngestRuntime.recordLive(
+            deviceId = "C4:E3:42:AA:30:A4", deviceModel = "VE30", heartRate = 70, spo2 = 0,
+            systolic = 0, diastolic = 0, temperatureCelsius = 0f, steps = 0, calories = 0f,
+            distanceMeters = 0f, hrvScore = 0, patientId = "PAT-1",
+        )
+        IngestRuntime.setDeviceLabel("  iPhone   de LFM ")
+        assertEquals("iPhone de LFM", IngestRuntime.deviceLabel)
+        var body = ""
+        IngestRuntime.useEngine(MockEngine { request ->
+            body = (request.body as io.ktor.http.content.TextContent).text
+            respond("""{"detail":"x"}""", HttpStatusCode.ServiceUnavailable)
+        })
+        IngestRuntime.flush()
+        assertTrue(body.contains("\"device_label\":\"iPhone de LFM\""), body)
+        IngestRuntime.setDeviceLabel(null)
+    }
 }
