@@ -164,6 +164,7 @@ final class VeepooSession: NSObject, ObservableObject {
     static let handshakeRetriesBeforeLinkReset = 2
     static let watchdogInterval: TimeInterval = 3
     private var handshakeRetries = 0
+    private var passwordSentAt: Date?
 
     /// Runs whenever the process is awake (foreground, or the ~10 s windows iOS grants on
     /// each GATT indication in background) and restarts a stuck handshake/measurement.
@@ -457,6 +458,9 @@ final class VeepooSession: NSObject, ObservableObject {
             bleConnectionLabel = "Ligado, senha"
             sessionMessage = "Ligação feita. Confirmando a senha 0000…"
             note("GATT ligado. Senha 0000.")
+            // Vários callbacks de "GATT ligado" chegam juntos; uma senha por vez basta.
+            if let at = passwordSentAt, Date().timeIntervalSince(at) < 5 { return }
+            passwordSentAt = Date()
             verifyPassword(watch)
         case 3, 6, 7:
             hardwareReady = false
@@ -623,6 +627,7 @@ final class VeepooSession: NSObject, ObservableObject {
                     HeartAlertDelivery.evaluate(heartRate: Int(value))
                     guard self.heartRunning else { return }
                     self.heartSamplesThisBurst += 1
+                    self.note("FC: amostra \(self.heartSamplesThisBurst) recebida.")
                     self.cycleGotReading = true
                     self.recordAndFlush()
                     if self.heartSamplesThisBurst >= Self.heartSamplesPerCycle {
@@ -935,6 +940,7 @@ final class VeepooSession: NSObject, ObservableObject {
         gattUpSince = nil
         sessionAttemptAt = nil
         handshakeRetries = 0
+        passwordSentAt = nil
         note("didDisconnect \(reason)")
         keepPendingConnect(peripheral)
     }
@@ -997,6 +1003,13 @@ final class VeepooSession: NSObject, ObservableObject {
         if let uuid = lastPeripheralUUID.flatMap(UUID.init(uuidString:)) {
             let found = manager.centralManager.retrievePeripherals(withIdentifiers: [uuid])
             if let peripheral = found.first {
+                if peripheral.state == .connected {
+                    // Já ligado: um novo connect fazia o SDK redescobrir serviços e repetir a
+                    // senha várias vezes no meio do handshake/medição. Só repõe a sessão
+                    // (beginSessionAttempt ignora se já há uma tentativa em curso).
+                    if !hardwareReady { resumeSession(peripheral) }
+                    return
+                }
                 keepPendingConnect(peripheral)
                 connectRetrieved(peripheral)
                 return
@@ -1019,6 +1032,8 @@ final class VeepooSession: NSObject, ObservableObject {
         guard autoReconnectEnabled, !userRequestedDisconnect else { return }
         lastPeripheralUUID = peripheral.identifier.uuidString
         guard manager.centralManager.state == .poweredOn else { return }
+        // connect num periférico já ligado/ligando gera didConnect extra → SDK reinicia o handshake.
+        guard peripheral.state != .connected, peripheral.state != .connecting else { return }
         manager.centralManager.connect(
             peripheral,
             options: [
