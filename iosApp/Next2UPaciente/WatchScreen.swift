@@ -15,7 +15,7 @@ struct WatchScreen: View {
                         .foregroundStyle(palette.onSurface)
                         .accessibilityAddTraits(.isHeader)
 
-                    Text(session.sessionMessage)
+                    Text(DeveloperFlags.showTechnicalUI ? session.sessionMessage : patientStatusMessage)
                         .font(.system(size: 17))
                         .foregroundStyle(palette.onSurfaceVariant)
                         .fixedSize(horizontal: false, vertical: true)
@@ -39,6 +39,18 @@ struct WatchScreen: View {
             .navigationBarTitleDisplayMode(.inline)
             .patientChrome()
         }
+    }
+
+    /// Mensagem amigável: sem senha, GATT, restore do iOS nem códigos.
+    private var patientStatusMessage: String {
+        guard session.connected != nil else {
+            return session.isScanning ? "Procurando o relógio…" : "Toque em Buscar relógio para conectar."
+        }
+        guard session.hardwareReady else { return "Conectando ao relógio…" }
+        let msg = session.sessionMessage
+        let friendlyPrefixes = ["Batimentos:", "Medição concluída", "O relógio não está no pulso", "Ligue o Bluetooth"]
+        if friendlyPrefixes.contains(where: { msg.hasPrefix($0) }) { return msg }
+        return "Relógio conectado. As medições são feitas automaticamente."
     }
 
     private var vitalsCard: some View {

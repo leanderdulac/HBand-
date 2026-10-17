@@ -36,12 +36,14 @@ struct SettingsScreen: View {
                     reconnectCard
                     themeCard
                     hrAlertsCard
+                    if DeveloperFlags.showTechnicalUI {
                     Text("Assinatura do piloto")
                         .font(.system(size: 22, weight: .semibold))
                         .foregroundStyle(palette.onSurface)
                     Text(SigningPlaceholders.summary)
                         .font(.system(size: 17))
                         .foregroundStyle(palette.onSurfaceVariant)
+                    }
                     Text(AppVersion.label)
                         .font(.system(size: 17, weight: .semibold))
                         .foregroundStyle(palette.onSurface)
