@@ -346,6 +346,31 @@ final class VeepooSession: NSObject, ObservableObject {
         refreshDeviceLabel(profileName: profileName)
     }
 
+    /// Instalações com nome salvo e identificação padrão (PAT-HBAND-001) ganham uma identificação
+    /// própria uma única vez. Também aplica a identificação aos envios (inclusive à fila).
+    @discardableResult
+    func ensurePatientId() -> String {
+        let p = PatientStore.shared.profile()
+        var current = p.patientId
+        let resolved = PatientIdentity.resolved(current: current, fullName: p.fullName)
+        if resolved != current {
+            let saved = PatientStore.shared.saveProfile(
+                profile: UserProfile(
+                    id: p.id, patientId: resolved, fullName: p.fullName, age: p.age, gender: p.gender,
+                    heightCm: p.heightCm, weightKg: p.weightKg, dailyStepGoal: p.dailyStepGoal,
+                    targetWaterMl: p.targetWaterMl, emergencyContact: p.emergencyContact,
+                    medicalNotes: p.medicalNotes
+                )
+            )
+            if saved {
+                current = resolved
+                note("Identificação do paciente criada: \(resolved)")
+            }
+        }
+        IngestRuntime.shared.setPatientId(raw: current)
+        return current
+    }
+
     /// Recalcula o `device_label` (perfil aberto) e aplica nos próximos envios.
     func refreshDeviceLabel(profileName: String? = nil) {
         let name = profileName ?? PatientStore.shared.profile().fullName
@@ -365,6 +390,7 @@ final class VeepooSession: NSObject, ObservableObject {
 
     func onStoreReady() {
         note("Store cifrado pronto.")
+        ensurePatientId()
         refreshDeviceLabel()
         reconnectLastKnown(reason: "store pronto")
         flushNow()
@@ -437,6 +463,7 @@ final class VeepooSession: NSObject, ObservableObject {
 
     func notifyProfileChanged() {
         profileRevision += 1
+        ensurePatientId()
         refreshDeviceLabel()
         refreshLocalStore()
     }

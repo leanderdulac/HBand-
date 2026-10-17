@@ -289,6 +289,8 @@ struct ProfileEditorSheet: View {
     @State private var name = ""
     @State private var wristbandName = ""
     @State private var wristbandEdited = false
+    /// 4 hex sorteados uma vez por formulário: a prévia e o valor gravado são iguais.
+    @State private var patientIdHex = PatientIdentity.randomHex()
     @State private var age = ""
     @State private var gender = ""
     @State private var height = ""
@@ -300,7 +302,6 @@ struct ProfileEditorSheet: View {
     @State private var patientId = ""
     @State private var profileId = "CURRENT_USER"
     @State private var goalsExpanded = false
-    @State private var identityExpanded = false
     @State private var confirmDiscard = false
     @State private var saveFailed = false
 
@@ -349,17 +350,23 @@ struct ProfileEditorSheet: View {
                                 .accessibilityIdentifier("input_medical_notes")
                         }
                     }
-                    disclosure("Identificação do cadastro", expanded: $identityExpanded) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Identificação do paciente")
-                                .font(.system(size: 15, weight: .semibold))
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Identificação do paciente")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(palette.onSurfaceVariant)
+                        Text(previewPatientId.isEmpty || PatientIdentity.needsGeneration(previewPatientId)
+                             ? "Será criada quando você salvar o perfil com o seu nome."
+                             : previewPatientId)
+                            .font(.system(size: 17))
+                            .frame(maxWidth: .infinity, minHeight: PatientTheme.minTouch, alignment: .leading)
+                            .accessibilityIdentifier("input_patient_id")
+                        if PatientIdentity.needsGeneration(patientId), !PatientIdentity.needsGeneration(previewPatientId) {
+                            Text("Esta identificação será gravada quando você salvar o perfil.")
+                                .font(.system(size: 15))
                                 .foregroundStyle(palette.onSurfaceVariant)
-                            Text(patientId)
-                                .font(.system(size: 17))
-                                .frame(maxWidth: .infinity, minHeight: PatientTheme.minTouch, alignment: .leading)
-                                .accessibilityIdentifier("input_patient_id")
+                                .accessibilityIdentifier("patient_id_preview_hint")
                         }
-                        Text("Esta identificação vincula os registros ao cadastro. Se precisar corrigi-la, fale com a equipe responsável.")
+                        Text("Esta identificação liga as suas medições ao seu cadastro e não muda depois de criada. Se precisar corrigi-la, fale com a equipe responsável.")
                             .font(.system(size: 15))
                             .foregroundStyle(palette.onSurfaceVariant)
                     }
@@ -502,6 +509,11 @@ struct ProfileEditorSheet: View {
         String(value).replacingOccurrences(of: ".", with: ",")
     }
 
+    /// Identificação gravada ou, se ainda não existe, a prévia com o nome digitado.
+    private var previewPatientId: String {
+        PatientIdentity.resolved(current: patientId, fullName: name, hex: patientIdHex)
+    }
+
     /// Enquanto o paciente não mexe no campo, a sugestão acompanha o nome completo.
     private var wristbandBinding: Binding<String> {
         Binding(
@@ -518,6 +530,7 @@ struct ProfileEditorSheet: View {
     }
 
     private func load() {
+        VeepooSession.shared.ensurePatientId()
         let profile = PatientStore.shared.profile()
         profileId = profile.id
         patientId = profile.patientId
@@ -554,10 +567,11 @@ struct ProfileEditorSheet: View {
     private func save() {
         guard valid, let parsedAge, let parsedHeight, let parsedWeight, let parsedSteps, let parsedWater else { return }
         saveFailed = false
+        let finalPatientId = previewPatientId
         let saved = PatientStore.shared.saveProfile(
             profile: UserProfile(
                 id: profileId,
-                patientId: patientId,
+                patientId: finalPatientId,
                 fullName: name.trimmingCharacters(in: .whitespacesAndNewlines),
                 age: parsedAge,
                 gender: gender,

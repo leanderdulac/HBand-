@@ -89,6 +89,17 @@ object IngestRuntime {
         deviceLabel = sanitizeDeviceLabel(raw)
     }
 
+    /**
+     * Identificação do paciente gerada no app (ex.: "PAT-LEANDRO-7F3A"). Leituras na fila com o
+     * padrão antigo (PAT-HBAND-001) ou sem paciente saem com esta identificação no envio.
+     */
+    var patientId: String? = null
+        private set
+
+    fun setPatientId(raw: String?) {
+        patientId = raw?.trim()?.takeIf { it.isNotEmpty() && it != IngestPayload.DEFAULT_PATIENT_ID }
+    }
+
     fun sanitizeDeviceLabel(raw: String?): String? =
         raw?.trim()?.replace(Regex("\\s+"), " ")?.take(DEVICE_LABEL_MAX)?.takeIf { it.isNotEmpty() }
 
