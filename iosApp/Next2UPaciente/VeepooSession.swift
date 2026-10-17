@@ -110,7 +110,7 @@ final class VeepooSession: NSObject, ObservableObject {
     private var sessionAttemptAt: Date?
 
     private func beginSessionAttempt(_ origin: String) -> Bool {
-        if let at = sessionAttemptAt, Date().timeIntervalSince(at) < 25 {
+        if let at = sessionAttemptAt, Date().timeIntervalSince(at) < Self.handshakeAttemptTimeout {
             return false
         }
         sessionAttemptAt = Date()
@@ -157,11 +157,19 @@ final class VeepooSession: NSObject, ObservableObject {
         startStallWatchdog()
     }
 
+    /// Tempo máximo entre pedir a sessão Veepoo (senha 0000) e o handshake; passou disso,
+    /// o watchdog repõe a sessão. Antes eram 60 s + até 30 s de intervalo do timer.
+    static let handshakeAttemptTimeout: TimeInterval = 8
+    /// Tentativas de repor a sessão no mesmo GATT antes de derrubar o link e religar do zero.
+    static let handshakeRetriesBeforeLinkReset = 2
+    static let watchdogInterval: TimeInterval = 3
+    private var handshakeRetries = 0
+
     /// Runs whenever the process is awake (foreground, or the ~10 s windows iOS grants on
     /// each GATT indication in background) and restarts a stuck handshake/measurement.
     private func startStallWatchdog() {
         let timer = DispatchSource.makeTimerSource(queue: .main)
-        timer.schedule(deadline: .now() + 30, repeating: 30, leeway: .seconds(5))
+        timer.schedule(deadline: .now() + Self.watchdogInterval, repeating: Self.watchdogInterval, leeway: .seconds(1))
         timer.setEventHandler { [weak self] in
             MainActor.assumeIsolated { self?.checkStall() }
         }
@@ -173,16 +181,28 @@ final class VeepooSession: NSObject, ObservableObject {
         let now = Date()
         guard autoReconnectEnabled, !userRequestedDisconnect else { return }
         if !hardwareReady {
-            // GATT up but the Veepoo password handshake never finished.
-            if let since = gattUpSince, now.timeIntervalSince(since) > 60,
-               let uuid = lastPeripheralUUID.flatMap(UUID.init(uuidString:)),
-               let peripheral = manager.centralManager.retrievePeripherals(withIdentifiers: [uuid]).first,
-               peripheral.state == .connected {
-                note("Watchdog: handshake parado há \(Int(now.timeIntervalSince(since))) s. Repondo sessão.")
-                gattUpSince = now
+            // GATT up but the Veepoo password handshake never finished (e.g. "bluetooth pairing
+            // fail" from the SDK, or a connect issued before poweredOn that the SDK dropped).
+            guard manager.centralManager.state == .poweredOn,
+                  let since = gattUpSince,
+                  let uuid = lastPeripheralUUID.flatMap(UUID.init(uuidString:)),
+                  let peripheral = manager.centralManager.retrievePeripherals(withIdentifiers: [uuid]).first,
+                  peripheral.state == .connected else { return }
+            let attemptAge = now.timeIntervalSince(sessionAttemptAt ?? since)
+            guard attemptAge > Self.handshakeAttemptTimeout else { return }
+            handshakeRetries += 1
+            if handshakeRetries > Self.handshakeRetriesBeforeLinkReset {
+                note("Watchdog: handshake sem resposta após \(handshakeRetries - 1) tentativas (\(Int(now.timeIntervalSince(since))) s). Religando o link com o relógio.")
+                handshakeRetries = 0
+                gattUpSince = nil
                 sessionAttemptAt = nil
-                resumeSession(peripheral)
+                // didDisconnect → keepPendingConnect → didConnect → resumeSession.
+                manager.centralManager.cancelPeripheralConnection(peripheral)
+                return
             }
+            note("Watchdog: handshake parado há \(Int(attemptAge)) s (tentativa \(handshakeRetries)). Repondo sessão.")
+            sessionAttemptAt = nil
+            resumeSession(peripheral)
             return
         }
         advanceMeasurementCycle(now: now)
@@ -205,7 +225,7 @@ final class VeepooSession: NSObject, ObservableObject {
         return min(maxIdleSeconds, emptyRetrySeconds * pow(2, Double(min(empty - 1, 4))))
     }
 
-    /// Chamado pelo watchdog (30 s) e por eventos BLE: encerra estágio vencido e inicia o
+    /// Chamado pelo watchdog (3 s) e por eventos BLE: encerra estágio vencido e inicia o
     /// próximo ciclo só quando a pausa terminou.
     private func advanceMeasurementCycle(now: Date = Date()) {
         guard hardwareReady else { return }
@@ -491,6 +511,10 @@ final class VeepooSession: NSObject, ObservableObject {
         }
         hardwareReady = true
         sessionAttemptAt = nil
+        handshakeRetries = 0
+        if let since = gattUpSince {
+            NSLog("[Next2U] Relógio pronto %.1f s após o GATT.", Date().timeIntervalSince(since))
+        }
         gattUpSince = nil
         lastSampleAt = Date()
         bleConnectionLabel = "Relógio pronto"
@@ -804,9 +828,30 @@ final class VeepooSession: NSObject, ObservableObject {
         }
     }
 
+    /// N2UBleRestore.m injeta o restore id no CBCentralManager criado pelo próprio SDK
+    /// (evita o "API MISUSE: has no restore identifier" e um segundo gerenciador).
+    private static func sdkCentralHasRestoreId() -> Bool {
+        guard let cls = NSClassFromString("N2UBleRestore") as? NSObject.Type else { return false }
+        let sel = NSSelectorFromString("injectedFlag")
+        guard cls.responds(to: sel),
+              let flag = cls.perform(sel)?.takeUnretainedValue() as? NSNumber else { return false }
+        return flag.boolValue
+    }
+
     private func attachRestorableCentral() {
         forwarder.sdk = manager
         forwarder.session = self
+        if Self.sdkCentralHasRestoreId() {
+            // Mesmo gerenciador, mesma fila principal: willRestoreState chega depois deste init.
+            manager.centralManager.delegate = forwarder
+            note("CBCentralManager do Veepoo já criado com restore id.")
+            return
+        }
+        // Fallback: substitui o gerenciador do SDK e impede injeção posterior (restore id único).
+        if let cls = NSClassFromString("N2UBleRestore") as? NSObject.Type,
+           cls.responds(to: NSSelectorFromString("disableInjection")) {
+            _ = cls.perform(NSSelectorFromString("disableInjection"))
+        }
         manager.centralManager.delegate = nil
         let restored = CBCentralManager(
             delegate: forwarder,
@@ -845,6 +890,16 @@ final class VeepooSession: NSObject, ObservableObject {
         let peripherals = (dict[CBCentralManagerRestoredStatePeripheralsKey] as? [CBPeripheral]) ?? []
         note("willRestoreState: \(peripherals.count) periférico(s).")
         sessionMessage = "O iOS restaurou o Bluetooth. Repondo a sessão do relógio."
+        for peripheral in peripherals {
+            rememberPeripheral(peripheral)
+            if peripheral.state == .connected, gattUpSince == nil { gattUpSince = Date() }
+        }
+        // willRestoreState chega antes de poweredOn; comandos agora seriam descartados
+        // ("can only accept this command while in the powered on state"). poweredOn repõe.
+        guard manager.centralManager.state == .poweredOn else {
+            note("willRestoreState: aguardando Bluetooth ligado para repor a sessão.")
+            return
+        }
         if peripherals.isEmpty {
             reconnectLastKnown(reason: "restore vazio")
             return
@@ -879,6 +934,7 @@ final class VeepooSession: NSObject, ObservableObject {
         bleConnectionLabel = "Desligado"
         gattUpSince = nil
         sessionAttemptAt = nil
+        handshakeRetries = 0
         note("didDisconnect \(reason)")
         keepPendingConnect(peripheral)
     }
@@ -932,6 +988,11 @@ final class VeepooSession: NSObject, ObservableObject {
     private func reconnectLastKnown(reason: String) {
         guard autoReconnectEnabled, !userRequestedDisconnect else { return }
         if hardwareReady, manager.isConnected { return }
+        guard manager.centralManager.state == .poweredOn else {
+            // Um connect antes de poweredOn era descartado e a sessão só voltava pelo watchdog.
+            note("Reconnect (\(reason)) adiado: Bluetooth ainda não está pronto.")
+            return
+        }
         note("Reconnect (\(reason)).")
         if let uuid = lastPeripheralUUID.flatMap(UUID.init(uuidString:)) {
             let found = manager.centralManager.retrievePeripherals(withIdentifiers: [uuid])
@@ -957,6 +1018,7 @@ final class VeepooSession: NSObject, ObservableObject {
         guard let peripheral else { return }
         guard autoReconnectEnabled, !userRequestedDisconnect else { return }
         lastPeripheralUUID = peripheral.identifier.uuidString
+        guard manager.centralManager.state == .poweredOn else { return }
         manager.centralManager.connect(
             peripheral,
             options: [
