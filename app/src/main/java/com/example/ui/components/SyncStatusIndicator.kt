@@ -1,65 +1,36 @@
 package com.example.ui.components
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.CloudDone
-import androidx.compose.material.icons.filled.CloudOff
-import androidx.compose.material.icons.filled.CloudSync
-import androidx.compose.material.icons.filled.ErrorOutline
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Schedule
-import androidx.compose.material.icons.filled.Sync
-import androidx.compose.material.icons.filled.Warning
-import androidx.compose.material.icons.filled.WifiOff
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.rotate
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import com.example.ui.theme.MinimalBorder
 
 enum class SyncDisplayStatus {
+    LOADING,
+    READ_ERROR,
     SYNCING,
     OFFLINE,
     FULLY_SYNCED,
     PENDING_QUEUE,
+    AUTH_REQUIRED,
     FAILED
 }
 
@@ -73,290 +44,70 @@ fun SyncStatusIndicator(
     modifier: Modifier = Modifier,
     consecutiveFailures: Int = 0,
     onRefreshHealth: (() -> Unit)? = null,
-    onMarkLocalSynced: (() -> Unit)? = null,
-    onRetryAll: (() -> Unit)? = null
+    onRetryAll: (() -> Unit)? = null,
+    onRetryRead: (() -> Unit)? = null,
 ) {
-    val infiniteTransition = rememberInfiniteTransition(label = "sync_spin")
-    val rotationAngle by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1200, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "rotation"
-    )
-
-    val (badgeBg, badgeFg, statusTitle, statusSubtitle, statusIcon) = when (syncStatus) {
-        SyncDisplayStatus.SYNCING -> SyncUiConfig(
-            bgColor = Color(0xFFD1E4FF),
-            fgColor = Color(0xFF004A77),
-            title = "Sincronizando",
-            subtitle = "Enviando as medições guardadas no telefone…",
-            icon = Icons.Default.Sync
-        )
-        SyncDisplayStatus.OFFLINE -> SyncUiConfig(
-            bgColor = Color(0xFFFFF3E0),
-            fgColor = Color(0xFFB56C00),
-            title = "Sem rede",
-            subtitle = "As medições ficam no telefone até a rede voltar.",
-            icon = Icons.Default.CloudOff
-        )
-        SyncDisplayStatus.FULLY_SYNCED -> SyncUiConfig(
-            bgColor = Color(0xFFE8F5E9),
-            fgColor = Color(0xFF2E7D32),
-            title = "Tudo enviado",
-            subtitle = "As medições locais já foram enviadas.",
-            icon = Icons.Default.CheckCircle
-        )
-        SyncDisplayStatus.PENDING_QUEUE -> SyncUiConfig(
-            bgColor = Color(0xFFF1F4F9),
-            fgColor = Color(0xFF00639B),
-            title = "Na fila ($pendingCount)",
-            subtitle = "O envio em segundo plano está agendado.",
-            icon = Icons.Default.Schedule
-        )
-        SyncDisplayStatus.FAILED -> SyncUiConfig(
-            bgColor = Color(0xFFFFEBEE),
-            fgColor = Color(0xFFC62828),
-            title = "Falha no envio ($failedCount)",
-            subtitle = "O último envio falhou. Toque para tentar de novo.",
-            icon = Icons.Default.ErrorOutline
-        )
+    val syncing = syncStatus == SyncDisplayStatus.SYNCING
+    val readable = syncStatus != SyncDisplayStatus.LOADING && syncStatus != SyncDisplayStatus.READ_ERROR
+    val title = when (syncStatus) {
+        SyncDisplayStatus.LOADING -> "Carregando fila…"
+        SyncDisplayStatus.READ_ERROR -> "Não foi possível ler a fila"
+        SyncDisplayStatus.SYNCING -> "Enviando registros"
+        SyncDisplayStatus.OFFLINE -> "Última verificação do serviço falhou"
+        SyncDisplayStatus.FULLY_SYNCED -> "Envio de dados"
+        SyncDisplayStatus.PENDING_QUEUE -> "Há registros aguardando envio"
+        SyncDisplayStatus.FAILED -> "Não foi possível enviar alguns registros"
+        SyncDisplayStatus.AUTH_REQUIRED -> "Envios pausados: acesso não autorizado"
     }
-
+    val description = when (syncStatus) {
+        SyncDisplayStatus.LOADING -> "Aguarde a consulta dos registros salvos no aplicativo."
+        SyncDisplayStatus.READ_ERROR -> "Os registros não foram apagados por esta tentativa. Tente ler a fila novamente. Essa ação não envia dados."
+        SyncDisplayStatus.SYNCING -> "Aguarde enquanto o aplicativo tenta enviar os registros."
+        SyncDisplayStatus.OFFLINE -> "Confira a conexão e a configuração do serviço. Se precisar, peça ajuda à equipe responsável pelo aplicativo."
+        SyncDisplayStatus.FULLY_SYNCED -> "A fila exibida não tem envios pendentes. Isso não confirma o recebimento pela equipe de saúde."
+        SyncDisplayStatus.PENDING_QUEUE -> "Os registros continuam na fila do aplicativo. Você pode tentar enviá-los agora."
+        SyncDisplayStatus.FAILED -> "Há registros que não puderam ser enviados. Confira os detalhes da falha antes de tentar novamente."
+        SyncDisplayStatus.AUTH_REQUIRED -> com.example.data.ingest.QueueAuthorization.PAUSED_MESSAGE
+    }
     Card(
-        modifier = modifier
-            .fillMaxWidth()
-            .testTag("workmanager_sync_status_card"),
-        shape = RoundedCornerShape(28.dp),
-        border = BorderStroke(1.dp, MinimalBorder),
-        colors = CardDefaults.cardColors(containerColor = Color.White)
+        modifier = modifier.fillMaxWidth().testTag("workmanager_sync_status_card"),
+        shape = RoundedCornerShape(24.dp),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
-        Column(modifier = Modifier.padding(20.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(
+                modifier = Modifier.testTag("sync_status_message").semantics(mergeDescendants = true) {
+                    liveRegion = LiveRegionMode.Polite
+                },
+                verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(44.dp)
-                            .clip(CircleShape)
-                            .background(badgeBg),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = statusIcon,
-                            contentDescription = null,
-                            tint = badgeFg,
-                            modifier = Modifier
-                                .size(24.dp)
-                                .then(
-                                    if (syncStatus == SyncDisplayStatus.SYNCING) {
-                                        Modifier.rotate(rotationAngle)
-                                    } else Modifier
-                                )
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.width(14.dp))
-
-                    Column {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                text = statusTitle,
-                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                                color = Color(0xFF191C1E)
-                            )
-                        }
-
-                        Spacer(modifier = Modifier.height(2.dp))
-
-                        Text(
-                            text = statusSubtitle,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = Color(0xFF44474E),
-                            maxLines = 2
-                        )
-                    }
+                Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Text(description, style = MaterialTheme.typography.bodyLarge)
+            }
+            if (syncing || syncStatus == SyncDisplayStatus.LOADING) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            if (syncStatus == SyncDisplayStatus.READ_ERROR && onRetryRead != null) {
+                OutlinedButton(onClick = onRetryRead, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag("retry_queue_read")) {
+                    Text("Tentar ler a fila novamente")
                 }
-
-                Spacer(modifier = Modifier.width(12.dp))
-
-                // Manual Trigger WorkManager Sync Button
+            }
+            if (readable && pendingCount > 0) Text("Aguardando envio: $pendingCount", style = MaterialTheme.typography.bodyLarge)
+            if (readable && failedCount > 0) Text("Registros com falha no envio: $failedCount", style = MaterialTheme.typography.bodyLarge)
+            if (readable && (syncStatus != SyncDisplayStatus.FULLY_SYNCED || pendingCount > 0 || failedCount > 0)) {
                 Button(
-                    onClick = onTriggerSync,
-                    shape = RoundedCornerShape(20.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (syncStatus == SyncDisplayStatus.FAILED) Color(0xFFC62828) else Color(0xFF00639B)
-                    ),
-                    modifier = Modifier.testTag("trigger_workmanager_sync_button")
+                    onClick = if ((failedCount > 0 || syncStatus == SyncDisplayStatus.AUTH_REQUIRED) && onRetryAll != null) onRetryAll else onTriggerSync,
+                    enabled = !syncing,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag("trigger_workmanager_sync_button")
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.CloudSync,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = if (syncStatus == SyncDisplayStatus.SYNCING) "Enviando" else "Enviar agora",
-                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
-                    )
+                    Text(if (syncing) "Enviando…" else if (syncStatus == SyncDisplayStatus.AUTH_REQUIRED) "Tentar após corrigir o acesso" else if (failedCount > 0) "Tentar enviar novamente" else "Enviar registros")
                 }
             }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // Metrics Queue Status Bar
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(Color(0xFFF8F9FF))
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                StatusPill("Na fila", "$pendingCount", Color(0xFF00639B))
-                StatusDivider()
-                StatusPill("Enviadas", "$syncedCount", Color(0xFF2E7D32))
-                StatusDivider()
-                StatusPill("Falhas", "$failedCount", Color(0xFFC62828))
-            }
-
-            AnimatedVisibility(visible = consecutiveFailures >= 2 || failedCount > 0 || syncStatus == SyncDisplayStatus.FAILED) {
-                Column(modifier = Modifier.padding(top = 16.dp)) {
-                    Surface(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("consecutive_failures_warning_banner"),
-                        shape = RoundedCornerShape(16.dp),
-                        color = Color(0xFFFFF1F0),
-                        border = BorderStroke(1.dp, Color(0xFFFFCDD2))
-                    ) {
-                        Column(modifier = Modifier.padding(14.dp)) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(10.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Warning,
-                                    contentDescription = "Aviso",
-                                    tint = Color(0xFFD32F2F),
-                                    modifier = Modifier.size(22.dp)
-                                )
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = "Vários envios seguidos falharam",
-                                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                                        color = Color(0xFFB71C1C)
-                                    )
-                                    Spacer(modifier = Modifier.height(2.dp))
-                                    Text(
-                                        text = if (consecutiveFailures >= 2) {
-                                            "$consecutiveFailures tentativas seguidas falharam. Confira o Wi-Fi ou os dados móveis."
-                                        } else {
-                                            "Há $failedCount medições que não foram enviadas. Confira a rede e tente de novo."
-                                        },
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = Color(0xFF5D1010)
-                                    )
-                                }
-                            }
-
-                            Spacer(modifier = Modifier.height(12.dp))
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                if (onMarkLocalSynced != null) {
-                                    Button(
-                                        onClick = onMarkLocalSynced,
-                                        shape = RoundedCornerShape(12.dp),
-                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32)),
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .testTag("mark_local_synced_button")
-                                    ) {
-                                        Text("Salvar Local", style = MaterialTheme.typography.labelSmall, maxLines = 1)
-                                    }
-                                }
-
-                                if (onRetryAll != null) {
-                                    OutlinedButton(
-                                        onClick = onRetryAll,
-                                        shape = RoundedCornerShape(12.dp),
-                                        border = BorderStroke(1.dp, Color(0xFF00639B)),
-                                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF00639B)),
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .testTag("retry_all_failed_button")
-                                    ) {
-                                        Text("Reprocessar", style = MaterialTheme.typography.labelSmall, maxLines = 1)
-                                    }
-                                }
-
-                                if (onRefreshHealth != null) {
-                                    OutlinedButton(
-                                        onClick = onRefreshHealth,
-                                        shape = RoundedCornerShape(12.dp),
-                                        border = BorderStroke(1.dp, Color(0xFFD32F2F)),
-                                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFD32F2F)),
-                                        modifier = Modifier.testTag("check_connectivity_health_button")
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.WifiOff,
-                                            contentDescription = null,
-                                            modifier = Modifier.size(14.dp)
-                                        )
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                        Text("Testar", style = MaterialTheme.typography.labelSmall)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+            if (syncStatus == SyncDisplayStatus.OFFLINE && onRefreshHealth != null) {
+                OutlinedButton(
+                    onClick = onRefreshHealth,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("check_connectivity_health_button")
+                ) { Text("Verificar serviço de envio") }
             }
         }
     }
-}
-
-private data class SyncUiConfig(
-    val bgColor: Color,
-    val fgColor: Color,
-    val title: String,
-    val subtitle: String,
-    val icon: ImageVector
-)
-
-@Composable
-private fun StatusPill(label: String, value: String, valueColor: Color) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(
-            text = value,
-            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-            color = valueColor
-        )
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelSmall,
-            color = Color(0xFF44474E)
-        )
-    }
-}
-
-@Composable
-private fun StatusDivider() {
-    Box(
-        modifier = Modifier
-            .size(width = 1.dp, height = 24.dp)
-            .background(Color(0xFFE2E8F0))
-    )
 }

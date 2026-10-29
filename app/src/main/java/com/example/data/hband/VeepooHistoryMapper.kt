@@ -42,7 +42,7 @@ object VeepooHistoryMapper {
         val dia = origin.lowValue.takeIf { it in 30..160 } ?: 0
         val steps = origin.stepValue.coerceAtLeast(0)
         val calories = origin.calValue.toFloat().takeIf { it > 0f } ?: 0f
-        val distance = origin.disValue.toFloat().takeIf { it > 0f } ?: 0f
+        val distance = VeepooSportReading.kilometersToMeters(origin.disValue) ?: 0f
         val temp = origin.temperature.toFloat().takeIf { it in 30f..43f } ?: 0f
         val spo2 = extractOriginSpo2(origin)
         val worn = when (origin.wear) {

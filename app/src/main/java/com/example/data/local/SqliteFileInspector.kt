@@ -15,10 +15,9 @@ object SqliteFileInspector {
         return header.contentEquals(SQLITE_HEADER)
     }
 
-    fun deleteSidecars(databaseFile: File) {
-        databaseFile.delete()
-        File(databaseFile.path + "-wal").delete()
-        File(databaseFile.path + "-shm").delete()
-        File(databaseFile.path + "-journal").delete()
+    fun requireEncryptedInput(databaseFile: File) {
+        check(!looksLikeUnencryptedSqlite(databaseFile)) {
+            "Existing unencrypted database requires explicit recovery; original files preserved."
+        }
     }
 }

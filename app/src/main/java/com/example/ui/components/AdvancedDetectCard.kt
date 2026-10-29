@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -27,6 +28,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -36,6 +38,8 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.data.hband.DetectSessionUiState
@@ -101,13 +105,13 @@ fun AdvancedDetectCard(
                 Spacer(modifier = Modifier.width(12.dp))
                 Column {
                     Text(
-                        text = "Medições avançadas (P1)",
+                        text = "Medições do relógio",
                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                         color = Color(0xFF191C1E)
                     )
                     Text(
-                        text = "Só aparecem APIs que o firmware reportou após o handshake",
-                        style = MaterialTheme.typography.labelSmall,
+                        text = "Recursos informados pelo relógio. Resultados ainda em validação.",
+                        style = MaterialTheme.typography.bodyMedium,
                         color = Color(0xFF00639B)
                     )
                 }
@@ -123,8 +127,8 @@ fun AdvancedDetectCard(
                         .testTag("advanced_detect_reconnect_hint")
                 ) {
                     Text(
-                        text = VeepooSessionGate.hintWhenDisconnected(actionsEnabled),
-                        style = MaterialTheme.typography.bodySmall,
+                        text = patientWatchConnectionHint(actionsEnabled),
+                        style = MaterialTheme.typography.bodyLarge,
                         color = Color(0xFF9A3412)
                     )
                 }
@@ -151,7 +155,7 @@ fun AdvancedDetectCard(
                     state = glucose,
                     connected = actionsEnabled,
                     startLabel = "Medir glicose",
-                    stopLabel = "Parar glicose",
+                    stopLabel = "Parar medição de glicose",
                     testTag = "glucose",
                     onStart = onStartGlucose,
                     onStop = onStopGlucose,
@@ -162,8 +166,8 @@ fun AdvancedDetectCard(
                     title = "Componentes sanguíneos",
                     state = bloodComponent,
                     connected = actionsEnabled,
-                    startLabel = "Medir sangue",
-                    stopLabel = "Parar",
+                    startLabel = "Medir componentes sanguíneos",
+                    stopLabel = "Parar medição de componentes sanguíneos",
                     testTag = "blood_component",
                     onStart = onStartBloodComponent,
                     onStop = onStopBloodComponent,
@@ -174,8 +178,8 @@ fun AdvancedDetectCard(
                     title = "Composição corporal",
                     state = bodyComponent,
                     connected = actionsEnabled,
-                    startLabel = "Medir corpo",
-                    stopLabel = "Parar",
+                    startLabel = "Medir composição corporal",
+                    stopLabel = "Parar medição de composição corporal",
                     testTag = "body_component",
                     onStart = onStartBodyComponent,
                     onStop = onStopBodyComponent,
@@ -187,7 +191,7 @@ fun AdvancedDetectCard(
                     state = emotion,
                     connected = actionsEnabled,
                     startLabel = "Medir emoção",
-                    stopLabel = "Parar",
+                    stopLabel = "Parar medição de emoção",
                     testTag = "emotion",
                     onStart = onStartEmotion,
                     onStop = onStopEmotion,
@@ -199,7 +203,7 @@ fun AdvancedDetectCard(
                     state = fatigue,
                     connected = actionsEnabled,
                     startLabel = "Medir fadiga",
-                    stopLabel = "Parar",
+                    stopLabel = "Parar medição de fadiga",
                     testTag = "fatigue",
                     onStart = onStartFatigue,
                     onStop = onStopFatigue,
@@ -211,7 +215,7 @@ fun AdvancedDetectCard(
                     state = breath,
                     connected = actionsEnabled,
                     startLabel = "Medir respiração",
-                    stopLabel = "Parar",
+                    stopLabel = "Parar medição de respiração",
                     testTag = "breath",
                     onStart = onStartBreath,
                     onStop = onStopBreath,
@@ -222,7 +226,7 @@ fun AdvancedDetectCard(
 }
 
 @Composable
-private fun DetectActionBlock(
+internal fun DetectActionBlock(
     title: String,
     state: DetectSessionUiState,
     connected: Boolean,
@@ -237,13 +241,19 @@ private fun DetectActionBlock(
     Column(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.testTag("${testTag}_block")) {
         Text(
             text = title,
-            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+            style = MaterialTheme.typography.titleLarge,
             color = Color(0xFF191C1E)
         )
         Text(
-            text = state.lastError ?: state.lastSummary.ifBlank { "Aguardando medição real do firmware" },
-            style = MaterialTheme.typography.labelSmall,
-            color = if (state.lastError != null) Color(0xFFBA1A1A) else Color(0xFF64748B),
+            text = when {
+                state.running && !connected -> "A conexão não está disponível para controlar esta medição. Conecte o relógio novamente."
+                state.lastError != null -> "O relógio informou uma falha nesta medição. Confira a conexão antes de tentar novamente."
+                state.running -> "Medição em andamento. Você pode parar pelo botão abaixo."
+                !connected -> "Conecte o relógio para iniciar a medição."
+                else -> "Use o botão abaixo para iniciar a medição."
+            },
+            style = MaterialTheme.typography.bodyLarge,
+            color = if (state.lastError != null) Color(0xFFBA1A1A) else Color(0xFF44474E),
             modifier = Modifier.testTag("${testTag}_status")
         )
         if (state.running && state.progress in 1..99) {
@@ -254,34 +264,40 @@ private fun DetectActionBlock(
                 trackColor = Color(0xFFD1E4FF),
             )
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (!state.running) Button(
                 onClick = onStart,
                 enabled = connected && !state.running,
                 shape = RoundedCornerShape(16.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00639B)),
-                modifier = Modifier.testTag("${testTag}_start")
+                modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag("${testTag}_start")
             ) {
-                Text(startLabel, style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold))
+                Text(startLabel, style = MaterialTheme.typography.labelLarge)
             }
-            OutlinedButton(
+            if (state.running) OutlinedButton(
                 onClick = onStop,
                 enabled = connected && state.running,
                 shape = RoundedCornerShape(16.dp),
-                modifier = Modifier.testTag("${testTag}_stop")
+                modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag("${testTag}_stop")
             ) {
-                Text(stopLabel, style = MaterialTheme.typography.labelMedium)
+                Text(stopLabel, style = MaterialTheme.typography.labelLarge)
             }
         }
-        if (extraLabel != null && onExtra != null) {
+        if (extraLabel != null && onExtra != null && !state.running) {
             OutlinedButton(
                 onClick = onExtra,
                 enabled = connected && !state.running,
                 shape = RoundedCornerShape(16.dp),
-                modifier = Modifier.testTag("${testTag}_read")
+                modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag("${testTag}_read")
             ) {
                 Text(extraLabel, style = MaterialTheme.typography.labelMedium)
             }
+        }
+        if (state.lastError == null && state.lastSummary.isNotBlank()) {
+            Text("Última informação recebida: ${state.lastSummary}", style = MaterialTheme.typography.bodyLarge)
+        }
+        if (state.lastError != null && com.example.BuildConfig.DEBUG) PatientSection("Detalhes para suporte: $title") {
+            Text(state.lastError, style = MaterialTheme.typography.bodyMedium)
         }
     }
 }
@@ -290,25 +306,26 @@ private fun DetectActionBlock(
 private fun RealAdcSparkline(samples: List<Int>) {
     if (samples.size < 2) {
         Text(
-            text = "Sem forma de onda real ainda — nenhum ADC inventado.",
-            style = MaterialTheme.typography.labelSmall,
-            color = Color(0xFF94A3B8),
+            text = "Ainda não há traçado do ECG disponível.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = Color(0xFF44474E),
             modifier = Modifier.testTag("ecg_waveform_empty")
         )
         return
     }
-    val min = samples.min()
-    val max = samples.max().coerceAtLeast(min + 1)
+    val normalized = remember(samples) { normalizedEcgWaveform(samples) }
+    Text("Traçado recebido do relógio. A escala foi ajustada para exibição.", style = MaterialTheme.typography.bodyMedium)
     Canvas(
         modifier = Modifier
             .fillMaxWidth()
             .height(72.dp)
             .testTag("ecg_waveform_real")
+            .semantics { contentDescription = "Traçado de ECG com ${samples.size} pontos recebidos." }
     ) {
         val path = Path()
-        samples.forEachIndexed { index, value ->
+        normalized.forEachIndexed { index, value ->
             val x = size.width * index / (samples.lastIndex).coerceAtLeast(1)
-            val y = size.height - ((value - min).toFloat() / (max - min) * size.height)
+            val y = size.height - value * size.height
             if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)
         }
         drawPath(
@@ -323,4 +340,13 @@ private fun RealAdcSparkline(samples: List<Int>) {
             strokeWidth = 1.dp.toPx()
         )
     }
+}
+
+/** Only display coordinates change; no samples, timing or clinical values are invented. */
+internal fun normalizedEcgWaveform(samples: List<Int>): List<Float> {
+    if (samples.isEmpty()) return emptyList()
+    val min = samples.min().toDouble()
+    val range = samples.max().toDouble() - min
+    return if (range == 0.0) List(samples.size) { 0.5f }
+    else samples.map { ((it.toDouble() - min) / range).toFloat() }
 }

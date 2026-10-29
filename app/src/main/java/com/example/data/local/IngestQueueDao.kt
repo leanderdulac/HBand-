@@ -16,13 +16,25 @@ interface IngestQueueDao {
     @Query("SELECT * FROM ingest_queue ORDER BY id DESC")
     suspend fun getAllItemsSync(): List<IngestQueueEntity>
 
-    @Query("SELECT * FROM ingest_queue WHERE status = 'PENDING' ORDER BY createdAt ASC")
+    // Check persisted auth evidence without materializing every clinical payload.
+    // Binary prefix equality preserves Kotlin startsWith (including letter case).
+    @Query("""
+        SELECT EXISTS(SELECT 1 FROM ingest_queue
+        WHERE status IN ('PENDING', 'FAILED') AND (
+            substr(errorMessage, 1, length(:unauthorizedPrefix)) = :unauthorizedPrefix COLLATE BINARY
+            OR substr(errorMessage, 1, length(:forbiddenPrefix)) = :forbiddenPrefix COLLATE BINARY
+        ))
+    """)
+    suspend fun hasAuthorizationBlock(unauthorizedPrefix: String, forbiddenPrefix: String): Boolean
+
+    @Query("SELECT * FROM ingest_queue WHERE status = 'PENDING' ORDER BY createdAt ASC, id ASC")
     suspend fun getPendingItems(): List<IngestQueueEntity>
 
     @Query("SELECT * FROM ingest_queue WHERE status = 'FAILED' ORDER BY createdAt ASC")
     suspend fun getFailedItems(): List<IngestQueueEntity>
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    // A repeated identity must not replace a previously captured row or its receipt.
+    @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insertItem(item: IngestQueueEntity): Long
 
     @Update
