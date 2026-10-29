@@ -135,7 +135,7 @@ final class VeepooSession: NSObject, ObservableObject {
     struct ScannedWatch: Identifiable, Equatable {
         var id: String { uuid.isEmpty ? address : uuid }
         var name: String
-        let address: String
+        var address: String
         let uuid: String
         let rssi: Int
         let isOsConnected: Bool
@@ -568,13 +568,13 @@ final class VeepooSession: NSObject, ObservableObject {
         stopScan()
         sessionMessage = "Conectando a \(watch.name)…"
         connected = watch
-        lastAddress = watch.address
+        rememberLastAddress(watch.address)
         lastName = watch.name
         rememberPeripheral(watch.model.peripheral)
         keepPendingConnect(watch.model.peripheral)
         manager.deviceShowConfirm = true
         manager.automaticConnection = false
-        note("Connect Veepoo \(watch.name) \(watch.address)")
+        note("Connect Veepoo \(watch.name)")
         manager.veepooSDKConnectDevice(watch.model, deviceConnect: { [weak self] state in
             Task { @MainActor in
                 self?.handleConnect(state, watch: watch)
@@ -710,6 +710,7 @@ final class VeepooSession: NSObject, ObservableObject {
     }
 
     private func onHandshake(_ watch: ScannedWatch) {
+        adoptSdkMac(from: watch)
         if hardwareReady {
             advanceMeasurementCycle()
             return
@@ -737,12 +738,76 @@ final class VeepooSession: NSObject, ObservableObject {
                     self.note("Histórico do band lido. FC.")
                     // Acerta a hora depois do histórico (como no Android): no handshake o VE30 ignora o comando.
                     self.syncWatchTime(manual: false)
+                    if let current = self.connected {
+                        self.adoptSdkMac(from: current)
+                    }
                     await self.enqueueWatchHistoryThenFlush()
                     self.advanceMeasurementCycle()
                 }
             }
         }
         startCycle(reason: "relógio conectado", force: true)
+    }
+
+    /// After password verification the SDK fills `deviceAddress` with the radio MAC
+    /// (`VPPeripheralModel.h`: "password verification may change after successful verification").
+    private func adoptSdkMac(from watch: ScannedWatch) {
+        let uuid = watch.model.peripheral?.identifier.uuidString ?? watch.uuid
+        let sources: [(String, String?)] = [
+            ("peripheralManage.peripheralModel.deviceAddress", manager.peripheralManage?.peripheralModel?.deviceAddress),
+            ("peripheralModel.deviceAddress", manager.peripheralModel?.deviceAddress),
+            ("connected VPPeripheralModel.deviceAddress", watch.model.deviceAddress),
+        ]
+        var mac: String?
+        var source = ""
+        for (name, raw) in sources {
+            if let normalized = DeviceIdentity.shared.normalizeMac(raw: raw) {
+                mac = normalized
+                source = name
+                break
+            }
+        }
+        let deviceId = DeviceIdentity.shared.ingestDeviceId(sdkAddress: mac, coreBluetoothUuid: uuid)
+        guard !deviceId.isEmpty else { return }
+        applyIngestDeviceId(deviceId, watch: watch)
+        if mac != nil {
+            NSLog("[Next2U] device_id MAC via %@ = %@", source, deviceId)
+            note("device_id: MAC do SDK (\(source)).")
+        } else {
+            NSLog("[Next2U] device_id fallback UUID CoreBluetooth (SDK sem MAC)")
+            note("device_id: UUID (SDK não informou MAC).")
+        }
+    }
+
+    /// Keep a stored MAC; do not replace it with a CoreBluetooth UUID before handshake.
+    private func rememberLastAddress(_ candidate: String) {
+        if DeviceIdentity.shared.normalizeMac(raw: candidate) != nil {
+            lastAddress = candidate
+            return
+        }
+        if DeviceIdentity.shared.normalizeMac(raw: lastAddress) != nil { return }
+        lastAddress = candidate
+    }
+
+    private func applyIngestDeviceId(_ deviceId: String, watch: ScannedWatch) {
+        lastAddress = deviceId
+        var updated = watch
+        updated.address = deviceId
+        connected = updated
+        if let index = devices.firstIndex(where: { $0.uuid == watch.uuid && !watch.uuid.isEmpty }) {
+            devices[index].address = deviceId
+        }
+    }
+
+    /// MAC after handshake; CoreBluetooth UUID only if the SDK still has no address.
+    private func ingestDeviceId() -> String {
+        DeviceIdentity.shared.ingestDeviceId(
+            sdkAddress: manager.peripheralManage?.peripheralModel?.deviceAddress
+                ?? manager.peripheralModel?.deviceAddress
+                ?? connected?.model.deviceAddress
+                ?? lastAddress,
+            coreBluetoothUuid: lastPeripheralUUID ?? connected?.uuid
+        )
     }
 
     /// Envia a hora do iPhone ao relógio (automático a cada handshake e pelo botão em Ajustes).
@@ -933,10 +998,13 @@ final class VeepooSession: NSObject, ObservableObject {
         }
         configureIngest()
         let watch = connected
-        let deviceId = watch?.address ?? lastAddress ?? ""
+        let deviceId = ingestDeviceId()
         let deviceModel = watch?.name ?? lastName ?? "VE30"
         let days = Int(manager.peripheralModel?.saveDays ?? 3)
-        let samples = VeepooHistoryIngest.samples(deviceId: deviceId, days: days)
+        var samples = VeepooHistoryIngest.samples(deviceId: deviceId, days: days)
+        if samples.isEmpty, let uuid = lastPeripheralUUID, uuid != deviceId {
+            samples = VeepooHistoryIngest.samples(deviceId: uuid, days: days)
+        }
         let queued = await VeepooHistoryIngest.enqueue(
             samples: samples,
             deviceId: deviceId,
@@ -1026,7 +1094,7 @@ final class VeepooSession: NSObject, ObservableObject {
         Task {
             defer { self.endIngestTask(task) }
             guard let recorded = try? await IngestRuntime.shared.recordLive(
-                deviceId: watch?.address ?? "",
+                deviceId: ingestDeviceId(),
                 deviceModel: watch?.name ?? "VE30",
                 heartRate: Int32(heartRate),
                 spo2: Int32(spo2),
@@ -1206,7 +1274,7 @@ final class VeepooSession: NSObject, ObservableObject {
             model: model
         )
         connected = watch
-        lastAddress = watch.address
+        rememberLastAddress(watch.address)
         lastName = watch.name
         lastPeripheralUUID = peripheral.identifier.uuidString
         if gattUpSince == nil { gattUpSince = Date() }
@@ -1240,7 +1308,7 @@ final class VeepooSession: NSObject, ObservableObject {
             model: model
         )
         connected = watch
-        lastAddress = watch.address
+        rememberLastAddress(watch.address)
         lastName = watch.name
         lastPeripheralUUID = peripheral.identifier.uuidString
         manager.deviceShowConfirm = false
@@ -1373,6 +1441,7 @@ final class VeepooSession: NSObject, ObservableObject {
             "Último evento BLE: \(lastBleEvent) (\(when))",
             "Ligação: \(bleConnectionLabel)",
             "Último envio: \(lastUploadLabel)",
+            "device_id: \(ingestDeviceId())",
         ]
     }
 

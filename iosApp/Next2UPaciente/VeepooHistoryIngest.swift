@@ -26,6 +26,7 @@ enum VeepooHistoryIngest {
     }
 
     static func samples(deviceId: String, days: Int) -> [Sample] {
+        // VPDataBaseOperation: table ID is the watch MAC (`andTableID`).
         let tableId = deviceId.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !tableId.isEmpty else { return [] }
         let dayCount = min(max(days, 1), maxDays)
