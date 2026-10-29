@@ -108,6 +108,21 @@ final class VeepooSession: NSObject, ObservableObject {
     /// connect) re-entered veepooSDKConnectDevice, producing a storm of parallel sessions,
     /// "pairing fail" / "check result fail", and an FC test that never returned values.
     private var sessionAttemptAt: Date?
+    /// One auto-connect to the last known watch per user scan.
+    private var autoConnectAttemptedThisScan = false
+
+    /// Services VE30/HBand-class bands commonly expose. Used only to ask iOS
+    /// for peripherals already connected at the OS (H Band official / Settings).
+    private static let veepooServiceUUIDs: [CBUUID] = [
+        CBUUID(string: "FFF0"),
+        CBUUID(string: "FFF6"),
+        CBUUID(string: "FFE0"),
+        CBUUID(string: "FEE7"),
+        CBUUID(string: "5554"),
+        CBUUID(string: "180A"),
+        CBUUID(string: "180D"),
+        CBUUID(string: "6E400001-B5A3-F393-E0A9-E50E24DCCA9E"),
+    ]
 
     private func beginSessionAttempt(_ origin: String) -> Bool {
         if let at = sessionAttemptAt, Date().timeIntervalSince(at) < Self.handshakeAttemptTimeout {
@@ -118,14 +133,17 @@ final class VeepooSession: NSObject, ObservableObject {
     }
 
     struct ScannedWatch: Identifiable, Equatable {
-        var id: String { address }
+        var id: String { uuid.isEmpty ? address : uuid }
         var name: String
         let address: String
+        let uuid: String
         let rssi: Int
+        let isOsConnected: Bool
         let model: VPPeripheralModel
 
         static func == (lhs: ScannedWatch, rhs: ScannedWatch) -> Bool {
-            lhs.address == rhs.address
+            if !lhs.uuid.isEmpty, !rhs.uuid.isEmpty { return lhs.uuid == rhs.uuid }
+            return !lhs.address.isEmpty && lhs.address == rhs.address
         }
     }
 
@@ -150,6 +168,10 @@ final class VeepooSession: NSObject, ObservableObject {
         // a reconexão é um único connect pendente do iOS (sem timeout, baixo consumo) +
         // scan ocasional com backoff só quando o periférico é desconhecido (ver backoffScan).
         manager.automaticConnection = false
+        // Default rrisLimit is -85: the SDK drops weaker ads, so a VE30 on the
+        // wrist (phone in pocket / other hand) never appears. -127 is the BLE floor.
+        manager.manufacturerIDFilter = false
+        manager.rrisLimit = -127
         // Veepoo's 30s timer cancelled pending iOS connects. Keep the system
         // pending-connect until the VE30 advertises again.
         manager.connectionTimeout = .max
@@ -410,36 +432,135 @@ final class VeepooSession: NSObject, ObservableObject {
             backoffScanTask = nil
         }
         devices = []
+        autoConnectAttemptedThisScan = false
         isScanning = true
         sessionMessage = "Procurando o relógio…"
         note(automatic ? "Scan Veepoo automático (10 s)." : "Scan Veepoo iniciado.")
-        manager.veepooSDKStartScanDeviceAndReceiveScanningDevice { [weak self] model in
-            guard let self, let model else { return }
-            Task { @MainActor in
-                let watch = ScannedWatch(
-                    name: model.deviceName ?? "HBand",
-                    address: model.deviceAddress ?? "",
-                    rssi: model.rssi?.intValue ?? 0,
-                    model: model
-                )
-                guard !watch.address.isEmpty else { return }
-                if let index = self.devices.firstIndex(where: { $0.address == watch.address }) {
-                    self.devices[index] = watch
-                } else {
-                    self.devices.append(watch)
-                }
-                if watch.address == self.lastAddress, self.connected == nil {
-                    self.connect(watch)
-                }
-            }
+        manager.manufacturerIDFilter = false
+        manager.rrisLimit = -127
+        guard manager.centralManager.state == .poweredOn else {
+            sessionMessage = "Ligue o Bluetooth do iPhone."
+            note("Scan adiado: Bluetooth ainda não está pronto.")
+            return
         }
+        // Relógios já ligados ao iOS (H Band oficial, Ajustes, restore) não anunciam.
+        seedKnownAndConnectedWatches()
+        // Scan amplo, como no Android (`startScan(null)`): sem UUID de serviço.
+        // O scan do SDK sozinho aplica rrisLimit -85 e ignora periféricos já ligados.
+        // One scan only: a second `scanForPeripherals` from the SDK would replace this one.
+        manager.centralManager.scanForPeripherals(
+            withServices: nil,
+            options: [CBCentralManagerScanOptionAllowDuplicatesKey: true]
+        )
     }
 
     func stopScan() {
         manager.veepooSDKStopScanDevice()
+        manager.centralManager.stopScan()
         isScanning = false
         autoScanStopTask?.cancel()
         autoScanStopTask = nil
+    }
+
+    /// iOS does not advertise already-connected BLE devices. Pull them from CoreBluetooth.
+    private func seedKnownAndConnectedWatches() {
+        if let uuid = lastPeripheralUUID.flatMap(UUID.init(uuidString:)) {
+            for peripheral in manager.centralManager.retrievePeripherals(withIdentifiers: [uuid]) {
+                offerRetrieved(peripheral)
+            }
+        }
+        for peripheral in manager.centralManager.retrieveConnectedPeripherals(withServices: Self.veepooServiceUUIDs) {
+            offerRetrieved(peripheral)
+        }
+    }
+
+    private func offerRetrieved(_ peripheral: CBPeripheral) {
+        guard let model = VPPeripheralModel(peripher: peripheral) else { return }
+        upsertScanned(
+            model: model,
+            fallbackName: peripheral.name ?? lastName,
+            rssi: 0,
+            uuid: peripheral.identifier.uuidString,
+            isOsConnected: peripheral.state == .connected || peripheral.state == .connecting
+        )
+    }
+
+    func onDidDiscover(
+        peripheral: CBPeripheral,
+        advertisementData: [String: Any],
+        rssi: NSNumber
+    ) {
+        guard isScanning else { return }
+        let localName = advertisementData[CBAdvertisementDataLocalNameKey] as? String
+        let manufacturer = advertisementData[CBAdvertisementDataManufacturerDataKey] as? Data
+        let uuid = peripheral.identifier.uuidString
+        let isKnown = uuid == lastPeripheralUUID
+        let named = !((localName ?? peripheral.name ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        let osConnected = peripheral.state == .connected || peripheral.state == .connecting
+        // Keep unnamed random beacons off the patient list; keep anything named, known, or connected.
+        guard isKnown || named || manufacturer != nil || osConnected else { return }
+        let advertised: VPPeripheralModel? = VPPeripheralModel(
+            peripher: peripheral,
+            advertisementData: advertisementData,
+            rssi: rssi
+        )
+        guard let model = advertised ?? VPPeripheralModel(peripher: peripheral) else { return }
+        let rssiValue = rssi.intValue == 127 ? 0 : rssi.intValue
+        upsertScanned(
+            model: model,
+            fallbackName: localName ?? peripheral.name ?? lastName,
+            rssi: rssiValue,
+            uuid: uuid,
+            isOsConnected: osConnected
+        )
+    }
+
+    private func upsertScanned(
+        model: VPPeripheralModel,
+        fallbackName: String?,
+        rssi: Int,
+        uuid: String,
+        isOsConnected: Bool
+    ) {
+        let mac = (model.deviceAddress ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let ident = uuid.isEmpty ? mac : uuid
+        guard !ident.isEmpty else { return }
+        let resolvedName = [model.deviceName, fallbackName, lastName]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first { !$0.isEmpty } ?? "Relógio"
+        let watch = ScannedWatch(
+            name: resolvedName,
+            address: mac.isEmpty ? ident : mac,
+            uuid: uuid.isEmpty ? ident : uuid,
+            rssi: rssi,
+            isOsConnected: isOsConnected,
+            model: model
+        )
+        if let index = devices.firstIndex(where: {
+            $0.uuid == watch.uuid || (!$0.address.isEmpty && $0.address == watch.address)
+        }) {
+            let previous = devices[index]
+            devices[index] = ScannedWatch(
+                name: watch.name,
+                address: watch.address,
+                uuid: watch.uuid,
+                rssi: rssi != 0 ? rssi : previous.rssi,
+                isOsConnected: watch.isOsConnected || previous.isOsConnected,
+                model: watch.model
+            )
+        } else {
+            devices.append(watch)
+        }
+        devices.sort {
+            if $0.isOsConnected != $1.isOsConnected { return $0.isOsConnected && !$1.isOsConnected }
+            return $0.rssi > $1.rssi
+        }
+        let matchesLast = (!watch.address.isEmpty && watch.address == lastAddress)
+            || (!watch.uuid.isEmpty && watch.uuid == lastPeripheralUUID)
+        if matchesLast, connected == nil, !userRequestedDisconnect, !autoConnectAttemptedThisScan {
+            autoConnectAttemptedThisScan = true
+            connect(watch)
+        }
     }
 
     func connect(_ watch: ScannedWatch) {
@@ -993,6 +1114,15 @@ final class VeepooSession: NSObject, ObservableObject {
         case .poweredOn:
             bleConnectionLabel = hardwareReady ? "Relógio pronto" : "Bluetooth ligado"
             note("Bluetooth ligado.")
+            if isScanning {
+                seedKnownAndConnectedWatches()
+                manager.manufacturerIDFilter = false
+                manager.rrisLimit = -127
+                manager.centralManager.scanForPeripherals(
+                    withServices: nil,
+                    options: [CBCentralManagerScanOptionAllowDuplicatesKey: true]
+                )
+            }
             reconnectLastKnown(reason: "poweredOn")
         case .poweredOff:
             hardwareReady = false
@@ -1070,7 +1200,9 @@ final class VeepooSession: NSObject, ObservableObject {
         let watch = ScannedWatch(
             name: lastName ?? peripheral.name ?? "VE30",
             address: lastAddress ?? peripheral.identifier.uuidString,
+            uuid: peripheral.identifier.uuidString,
             rssi: 0,
+            isOsConnected: true,
             model: model
         )
         connected = watch
@@ -1102,7 +1234,9 @@ final class VeepooSession: NSObject, ObservableObject {
         let watch = ScannedWatch(
             name: lastName ?? peripheral.name ?? "VE30",
             address: lastAddress ?? peripheral.identifier.uuidString,
+            uuid: peripheral.identifier.uuidString,
             rssi: 0,
+            isOsConnected: true,
             model: model
         )
         connected = watch
@@ -1283,6 +1417,13 @@ final class VeepooCentralForwarder: NSObject, CBCentralManagerDelegate {
             advertisementData: advertisementData,
             rssi: RSSI
         )
+        Task { @MainActor in
+            self.session?.onDidDiscover(
+                peripheral: peripheral,
+                advertisementData: advertisementData,
+                rssi: RSSI
+            )
+        }
     }
 
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
@@ -1322,6 +1463,7 @@ final class VeepooCentralForwarder: NSObject, CBCentralManagerDelegate {
     }
 }
 
+#if DEBUG
 struct BleDiagnosticsCard: View {
     @Environment(\.patientPalette) private var palette
     @ObservedObject var session: VeepooSession
@@ -1346,3 +1488,4 @@ struct BleDiagnosticsCard: View {
         .accessibilityIdentifier("ble_diagnostics_card")
     }
 }
+#endif

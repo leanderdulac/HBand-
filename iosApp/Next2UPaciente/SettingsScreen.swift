@@ -16,6 +16,10 @@ struct SettingsScreen: View {
     @State private var showProfile = false
     @State private var showContinuityHelp = false
     @State private var notifyOpenFailed = false
+    #if DEBUG
+    @State private var versionTaps = 0
+    @State private var showDeveloper = false
+    #endif
 
     var body: some View {
         NavigationStack {
@@ -29,24 +33,22 @@ struct SettingsScreen: View {
                     profileCard
                     continuityCard
                     watchClockCard
-                    if DeveloperFlags.showTechnicalUI {
-                        BleDiagnosticsCard(session: session)
-                    }
                     reconnectCard
                     themeCard
                     hrAlertsCard
-                    if DeveloperFlags.showTechnicalUI {
-                    Text("Assinatura do piloto")
-                        .font(.system(size: 22, weight: .semibold))
-                        .foregroundStyle(palette.onSurface)
-                    Text(SigningPlaceholders.summary)
-                        .font(.system(size: 17))
-                        .foregroundStyle(palette.onSurfaceVariant)
-                    }
                     Text(AppVersion.label)
                         .font(.system(size: 17, weight: .semibold))
                         .foregroundStyle(palette.onSurface)
                         .accessibilityIdentifier("settings_version_label")
+                        #if DEBUG
+                        .onTapGesture {
+                            versionTaps += 1
+                            if versionTaps >= 7 {
+                                versionTaps = 0
+                                showDeveloper = true
+                            }
+                        }
+                        #endif
                 }
                 .padding(PatientTheme.margin)
             }
@@ -65,6 +67,14 @@ struct SettingsScreen: View {
             .onChange(of: autoReconnect) { value in
                 session.setAutoReconnect(value)
             }
+            #if DEBUG
+            .sheet(isPresented: $showDeveloper) {
+                DeveloperScreen(session: session)
+                    .environment(\.patientPalette, palette)
+                    .environment(\.patientColorScheme, paletteScheme)
+                    .preferredColorScheme(paletteScheme)
+            }
+            #endif
         }
         .accessibilityIdentifier("theme_selector")
     }

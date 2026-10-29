@@ -1,3 +1,4 @@
+#if DEBUG
 import SwiftUI
 import shared
 
@@ -242,3 +243,4 @@ struct JsonPayloadSheet: View {
         .accessibilityIdentifier("json_payload_modal")
     }
 }
+#endif

@@ -34,6 +34,18 @@ enum PatientReadings {
         return "Registro de " + formatter.string(from: Date(timeIntervalSince1970: Double(millis) / 1000))
     }
 
+    static func shortTime(_ millis: Int64) -> String {
+        guard millis > 0 else { return "Sem horário" }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "pt-BR")
+        formatter.dateFormat = "dd/MM 'às' HH:mm"
+        return formatter.string(from: Date(timeIntervalSince1970: Double(millis) / 1000))
+    }
+
+    static func latest(where matches: (SensorMetric) -> Bool) -> SensorMetric? {
+        metrics().filter(matches).max(by: { $0.timestampMillis < $1.timestampMillis })
+    }
+
     static func weekdayLabel(_ date: Date) -> String {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "pt-BR")
