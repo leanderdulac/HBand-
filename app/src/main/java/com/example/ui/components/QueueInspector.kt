@@ -62,7 +62,6 @@ fun QueueInspector(
     syncedCount: Int,
     failedCount: Int,
     queueItems: List<IngestQueueEntity>,
-    syncLogs: List<SyncLogEntry>,
     isSyncing: Boolean,
     onSyncNow: () -> Unit,
     onRetryFailedItem: (Long) -> Unit,
@@ -71,7 +70,6 @@ fun QueueInspector(
     onClearSynced: () -> Unit,
     onClearAll: () -> Unit,
     onInspectItem: (IngestQueueEntity) -> Unit,
-    onRefreshWorkManager: () -> Unit,
     p1LocationHint: String? = null,
     modifier: Modifier = Modifier
 ) {
@@ -247,15 +245,6 @@ fun QueueInspector(
             }
         }
 
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // WorkManager Sync History Log Component
-        SyncHistoryLog(
-            syncLogs = syncLogs,
-            onRefreshWorkManager = onRefreshWorkManager,
-            onTriggerSyncNow = onSyncNow,
-            modifier = Modifier.fillMaxWidth()
-        )
     }
 }
 

@@ -21,6 +21,12 @@ interface HBandSensorMetricDao {
     @Query("SELECT * FROM hband_sensor_metrics ORDER BY timestampMillis DESC LIMIT :limit")
     fun getRecentMetrics(limit: Int): Flow<List<HBandSensorMetricEntity>>
 
+    @Query(
+        "SELECT timestampMillis FROM hband_sensor_metrics " +
+            "WHERE deviceId = :deviceId AND timestampMillis IN (:millis)"
+    )
+    suspend fun existingMillis(deviceId: String, millis: List<Long>): List<Long>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertMetric(metric: HBandSensorMetricEntity): Long
 

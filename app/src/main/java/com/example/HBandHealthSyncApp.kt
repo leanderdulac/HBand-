@@ -5,6 +5,7 @@ import android.util.Log
 import com.example.data.hband.HBandBleManager
 import com.example.data.hband.HBandBleService
 import com.example.data.hband.VeepooEcgNative
+import com.example.data.ingest.IngestDeduper
 import com.example.data.local.AppDatabase
 import com.example.data.remote.RetrofitClient
 import com.example.data.repository.WearableRepository
@@ -13,6 +14,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 
 class HBandHealthSyncApp : Application() {
     val bleScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -56,6 +59,25 @@ class HBandHealthSyncApp : Application() {
                 }
             },
         )
+        val prefs = getSharedPreferences("hband_settings", MODE_PRIVATE)
+        val ingestDeduper = IngestDeduper()
+        val profile = runBlocking(Dispatchers.IO) {
+            runCatching { db.userProfileDao().getUserProfile() }.getOrNull()
+        }
+        profile?.patientId?.takeIf { it.isNotBlank() }?.let { bleManager.setPatientId(it) }
+        bleScope.launch {
+            bleManager.galaxyUploads.collect { telemetry ->
+                if (!prefs.getBoolean("auto_ingest_live", true)) return@collect
+                if (!ingestDeduper.shouldEnqueue(telemetry)) return@collect
+                try {
+                    withContext(Dispatchers.IO) {
+                        historyRepository.enqueueTelemetry(telemetry, bleManager.currentPatientId)
+                    }
+                } catch (e: Exception) {
+                    Log.e("HBandHealthSyncApp", "Falha ao enfileirar Samsung Health: ${e.message}", e)
+                }
+            }
+        }
         HBandWorkScheduler.schedulePeriodicIngest(this)
         HBandBleService.startIfPersistedSession(this)
     }

@@ -162,4 +162,12 @@ class IngestDeduperTest {
         assertTrue(deduper.shouldEnqueue(sample(hr = 80), nowMs = 32_000L))
         assertTrue(deduper.shouldEnqueue(sample(hr = 91), nowMs = 33_000L))
     }
+
+    @Test
+    fun `same heart rate at another timestamp is a different sample`() {
+        val deduper = IngestDeduper(minIntervalMs = 30_000L)
+        assertTrue(deduper.shouldEnqueue(sample(hr = 80), nowMs = 1_000L))
+        val later = sample(hr = 80).copy(timestamp = "2026-09-14T12:05:00Z")
+        assertTrue(deduper.shouldEnqueue(later, nowMs = 2_000L))
+    }
 }

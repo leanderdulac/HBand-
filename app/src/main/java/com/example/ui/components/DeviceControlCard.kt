@@ -49,6 +49,7 @@ fun DeviceControlCard(
     onSpotCheck: () -> Unit,
     onScanClick: () -> Unit,
     onDisconnect: () -> Unit,
+    linkNote: String? = null,
     modifier: Modifier = Modifier,
 ) {
     val batteryLevel = device?.batteryLevel
@@ -138,6 +139,15 @@ fun DeviceControlCard(
                         }
                     }
                 }
+            }
+
+            if (!linkNote.isNullOrBlank()) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    text = linkNote,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color(0xFF44474E),
+                )
             }
 
             Spacer(modifier = Modifier.height(16.dp))

@@ -1,6 +1,7 @@
 package com.example.data.repository
 
 import com.example.data.hband.VeepooHistoryMapper
+import com.example.data.hband.VeepooUploadPlan
 import com.example.data.ingest.IngestHttpKind
 import com.example.data.ingest.IngestPayloadMapper
 import com.example.data.local.AdvancedMeasurementDao
@@ -99,9 +100,9 @@ class WearableRepository(
         }
 
     /**
-     * Persists multi-day Origin/sleep/HRV/SpO2 samples to Room. HealthTech ingest
-     * only receives hourly samples that already have a real heart rate — never
-     * fabricated vitals and never a 5-minute flood.
+     * Persists VE30 Origin/sleep/HRV/SpO2 locally. The platform receives one
+     * real heart-rate sample per 5 minutes, up to the newest day, and skips
+     * timestamps already stored from an earlier pull.
      */
     suspend fun persistHistorySamples(
         samples: List<HBandTelemetry>,
@@ -129,18 +130,20 @@ class WearableRepository(
                 awakeMinutes = telemetry.sleepSummary.awakeMinutes,
             )
         }
-        sensorMetricDao.insertMetrics(entities)
+        val alreadyStored = storedMetricKeys(entities)
+        val fresh = entities.filter { "${it.deviceId}|${it.timestampMillis}" !in alreadyStored }
+        if (fresh.isNotEmpty()) {
+            sensorMetricDao.insertMetrics(fresh)
+        }
 
-        val hourly = samples
-            .filter { IngestPayloadMapper.isIngestible(it) }
-            .groupBy { telemetry ->
-                val bucket = VeepooHistoryMapper.parseIsoToMillis(telemetry.timestamp) / 3_600_000L
-                telemetry.deviceId to bucket
+        val upload = VeepooUploadPlan.forIngest(
+            samples.filter { telemetry ->
+                val epoch = VeepooHistoryMapper.parseIsoToMillis(telemetry.timestamp)
+                val deviceId = IngestPayloadMapper.resolveDeviceId(telemetry.deviceId)
+                epoch > 0L && "$deviceId|$epoch" !in alreadyStored
             }
-            .values
-            .mapNotNull { group -> group.maxByOrNull { it.heartRate } }
-
-        for (telemetry in hourly) {
+        )
+        for (telemetry in upload) {
             queueDao.insertItem(
                 IngestQueueEntity(
                     payloadJson = IngestPayloadMapper.telemetryToJson(telemetry, patientId),
@@ -148,11 +151,27 @@ class WearableRepository(
                 )
             )
         }
-        try {
-            processQueue()
-        } catch (_: Exception) {
+        if (upload.isNotEmpty()) {
+            try {
+                processQueue()
+            } catch (_: Exception) {
+            }
         }
-        entities.size
+        fresh.size
+    }
+
+    private suspend fun storedMetricKeys(entities: List<HBandSensorMetricEntity>): Set<String> {
+        val known = mutableSetOf<String>()
+        for ((deviceId, rows) in entities.groupBy { it.deviceId }) {
+            val millis = rows.map { it.timestampMillis }.distinct()
+            for (chunk in millis.chunked(400)) {
+                if (chunk.isEmpty()) continue
+                for (existing in sensorMetricDao.existingMillis(deviceId, chunk)) {
+                    known += "$deviceId|$existing"
+                }
+            }
+        }
+        return known
     }
 
     /**

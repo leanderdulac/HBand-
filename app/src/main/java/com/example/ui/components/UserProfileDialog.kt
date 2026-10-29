@@ -76,7 +76,6 @@ fun UserProfileDialog(
     var heightStr by remember { mutableStateOf(initial.heightCm.toInt().toString()) }
     var weightStr by remember { mutableStateOf(initial.weightKg.toInt().toString()) }
     var stepGoalStr by remember { mutableStateOf(initial.dailyStepGoal.toString()) }
-    var waterGoalStr by remember { mutableStateOf(initial.targetWaterMl.toString()) }
     var emergencyContact by remember { mutableStateOf(initial.emergencyContact) }
     var medicalNotes by remember { mutableStateOf(initial.medicalNotes) }
 
@@ -179,26 +178,15 @@ fun UserProfileDialog(
                     )
                 }
 
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(
-                        value = stepGoalStr,
-                        onValueChange = { stepGoalStr = it },
-                        label = { Text("Meta Passos/Dia") },
-                        singleLine = true,
-                        colors = profileTextFieldColors(),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        modifier = Modifier.weight(1f)
-                    )
-                    OutlinedTextField(
-                        value = waterGoalStr,
-                        onValueChange = { waterGoalStr = it },
-                        label = { Text("Meta Água (ml)") },
-                        singleLine = true,
-                        colors = profileTextFieldColors(),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        modifier = Modifier.weight(1f)
-                    )
-                }
+                OutlinedTextField(
+                    value = stepGoalStr,
+                    onValueChange = { stepGoalStr = it },
+                    label = { Text("Meta Passos/Dia") },
+                    singleLine = true,
+                    colors = profileTextFieldColors(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.fillMaxWidth()
+                )
 
                 OutlinedTextField(
                     value = emergencyContact,
@@ -230,7 +218,7 @@ fun UserProfileDialog(
                         heightCm = heightStr.toFloatOrNull() ?: 178f,
                         weightKg = weightStr.toFloatOrNull() ?: 74f,
                         dailyStepGoal = stepGoalStr.toIntOrNull() ?: 8000,
-                        targetWaterMl = waterGoalStr.toIntOrNull() ?: 2500,
+                        targetWaterMl = initial.targetWaterMl,
                         emergencyContact = emergencyContact,
                         medicalNotes = medicalNotes
                     )

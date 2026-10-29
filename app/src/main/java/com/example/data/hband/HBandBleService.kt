@@ -54,12 +54,8 @@ class HBandBleService : Service() {
                 stopSelfSafely()
                 return START_NOT_STICKY
             }
-            ACTION_RECONNECT -> bleManager()?.reconnectLastDevice()
-            else -> {
-                if (bleManager()?.connectedDevice?.value?.isConnected != true) {
-                    bleManager()?.reconnectLastDevice()
-                }
-            }
+            ACTION_RECONNECT, ACTION_MEASURE -> bleManager()?.onMeasureWake()
+            else -> bleManager()?.onMeasureWake()
         }
         return START_STICKY
     }
@@ -77,20 +73,27 @@ class HBandBleService : Service() {
         val manager = bleManager() ?: return
         observeJob?.cancel()
         observeJob = serviceScope.launch {
-            combine(manager.connectedDevice, manager.isHardwareConnected) { device, hardware ->
-                device to hardware
-            }.collect { (device, hardware) ->
-                val connected = device?.isConnected == true && hardware
+            combine(
+                manager.connectedDevice,
+                manager.isHardwareConnected,
+                manager.galaxyHealthActive,
+            ) { device, hardware, galaxy ->
+                Triple(device, hardware, galaxy)
+            }.collect { (device, hardware, galaxy) ->
+                val label = device?.name ?: getString(R.string.ble_session_device_fallback)
+                val connected = if (galaxy) {
+                    device?.isConnected == true
+                } else {
+                    device?.isConnected == true && hardware
+                }
                 val text = when {
-                    connected -> getString(
-                        R.string.ble_session_connected,
-                        device?.name ?: getString(R.string.ble_session_device_fallback)
-                    )
+                    galaxy && device != null && device.isConnected ->
+                        getString(R.string.ble_session_samsung_health, label)
+                    galaxy && device != null ->
+                        getString(R.string.ble_session_samsung_waiting, label)
+                    connected -> getString(R.string.ble_session_connected, label)
                     manager.isAutoReconnectEnabled && !device?.macAddress.isNullOrBlank() ->
-                        getString(
-                            R.string.ble_session_reconnecting,
-                            device?.name ?: getString(R.string.ble_session_device_fallback)
-                        )
+                        getString(R.string.ble_session_reconnecting, label)
                     else -> getString(R.string.ble_session_disconnected)
                 }
                 val notification = buildNotification(text, connected)
@@ -188,6 +191,7 @@ class HBandBleService : Service() {
         const val NOTIFICATION_ID = 2101
         const val ACTION_STOP = "com.example.data.hband.STOP_BLE_SESSION"
         const val ACTION_RECONNECT = "com.example.data.hband.RECONNECT_BLE_SESSION"
+        const val ACTION_MEASURE = "com.example.data.hband.MEASURE_NOW"
 
         fun start(context: Context) {
             val intent = Intent(context, HBandBleService::class.java)
@@ -195,6 +199,22 @@ class HBandBleService : Service() {
                 context.startForegroundService(intent)
             } else {
                 context.startService(intent)
+            }
+        }
+
+        fun startMeasure(context: Context) {
+            val intent = Intent(context, HBandBleService::class.java).apply {
+                action = ACTION_MEASURE
+            }
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(intent)
+                } else {
+                    context.startService(intent)
+                }
+            } catch (e: Exception) {
+                android.util.Log.w("HBandBleService", "FGS de medição não subiu: ${e.message}")
+                (context.applicationContext as? HBandHealthSyncApp)?.bleManager?.onMeasureWake()
             }
         }
 

@@ -52,6 +52,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.data.repository.ApiHealthState
 import com.example.ui.theme.MinimalBorder
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -59,6 +60,16 @@ import java.util.Locale
 
 @Composable
 fun SettingsTab(
+    syncDisplayStatus: SyncDisplayStatus = SyncDisplayStatus.FULLY_SYNCED,
+    pendingCount: Int = 0,
+    syncedCount: Int = 0,
+    failedCount: Int = 0,
+    consecutiveFailures: Int = 0,
+    onTriggerSync: () -> Unit = {},
+    onRefreshHealth: () -> Unit = {},
+    onMarkLocalSynced: () -> Unit = {},
+    onRetryAll: () -> Unit = {},
+    apiHealth: ApiHealthState = ApiHealthState(),
     userProfile: com.example.data.local.UserProfileEntity? = null,
     onEditProfileClick: () -> Unit = {},
     autoReconnectBle: Boolean = true,
@@ -112,6 +123,24 @@ fun SettingsTab(
             .padding(bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
+        SyncStatusIndicator(
+            syncStatus = syncDisplayStatus,
+            pendingCount = pendingCount,
+            syncedCount = syncedCount,
+            failedCount = failedCount,
+            consecutiveFailures = consecutiveFailures,
+            onTriggerSync = onTriggerSync,
+            onRefreshHealth = onRefreshHealth,
+            onMarkLocalSynced = onMarkLocalSynced,
+            onRetryAll = onRetryAll,
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        ApiHeader(
+            apiHealth = apiHealth,
+            onRefreshHealth = onRefreshHealth
+        )
+
         // User & Patient Profile Card
         Card(
             modifier = Modifier
@@ -190,7 +219,7 @@ fun SettingsTab(
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Text("Meta Diária:", style = MaterialTheme.typography.bodySmall, color = Color(0xFF64748B))
-                            Text("${profile.dailyStepGoal} passos • ${profile.targetWaterMl} mL", style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold), color = Color(0xFF0F172A))
+                            Text("${profile.dailyStepGoal} passos", style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold), color = Color(0xFF0F172A))
                         }
                         Row(
                             modifier = Modifier.fillMaxWidth(),

@@ -26,7 +26,6 @@ import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.QueryStats
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Watch
 import com.example.ui.components.SettingsTab
@@ -49,8 +48,10 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.health.connect.client.PermissionController
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -66,7 +67,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.example.ui.components.ApiHeader
+import com.example.data.hband.GalaxyHealthMapper
+import com.example.data.hband.GalaxyHealthReader
 import com.example.ui.components.DeviceControlCard
 import com.example.ui.components.HomeWelcomeHeader
 import com.example.ui.components.JsonPayloadModal
@@ -85,6 +87,8 @@ fun HomeScreen(
     val connectedDevice by viewModel.connectedDevice.collectAsStateWithLifecycle()
     val scannedDevices by viewModel.scannedDevices.collectAsStateWithLifecycle()
     val isScanning by viewModel.isScanning.collectAsStateWithLifecycle()
+    val savedVeepooMac by viewModel.savedVeepooMac.collectAsStateWithLifecycle()
+    val savedVeepooName by viewModel.savedVeepooName.collectAsStateWithLifecycle()
     val latestTelemetry by viewModel.latestTelemetry.collectAsStateWithLifecycle()
     val allSensorMetrics by viewModel.allSensorMetrics.collectAsStateWithLifecycle()
     val allQueueItems by viewModel.allQueueItems.collectAsStateWithLifecycle()
@@ -94,7 +98,6 @@ fun HomeScreen(
     val consecutiveFailures by viewModel.consecutiveFailures.collectAsStateWithLifecycle()
     val isSyncing by viewModel.isSyncing.collectAsStateWithLifecycle()
     val syncDisplayStatus by viewModel.syncDisplayStatus.collectAsStateWithLifecycle()
-    val syncLogs by viewModel.syncLogs.collectAsStateWithLifecycle()
     val autoIngestLive by viewModel.autoIngestLiveReadings.collectAsStateWithLifecycle()
     val selectedModalItem by viewModel.selectedQueueItemForPreview.collectAsStateWithLifecycle()
     val notification by viewModel.notification.collectAsStateWithLifecycle()
@@ -106,6 +109,12 @@ fun HomeScreen(
     val wearDetectState by viewModel.wearDetectState.collectAsStateWithLifecycle()
     val historySyncState by viewModel.historySyncState.collectAsStateWithLifecycle()
     val isHardwareConnected by viewModel.isHardwareConnected.collectAsStateWithLifecycle()
+    val linkNote by viewModel.linkNote.collectAsStateWithLifecycle()
+    val healthPermissionLauncher = rememberLauncherForActivityResult(
+        PermissionController.createRequestPermissionResultContract()
+    ) {
+        viewModel.onGalaxyHealthPermissionResult()
+    }
     val ecgState by viewModel.ecgState.collectAsStateWithLifecycle()
     val glucoseState by viewModel.glucoseState.collectAsStateWithLifecycle()
     val bloodComponentState by viewModel.bloodComponentState.collectAsStateWithLifecycle()
@@ -132,10 +141,7 @@ fun HomeScreen(
     val geminiInsightText by viewModel.geminiInsightText.collectAsStateWithLifecycle()
     val isGeneratingGeminiInsight by viewModel.isGeneratingGeminiInsight.collectAsStateWithLifecycle()
 
-    val todayHydrationMl by viewModel.todayHydrationMl.collectAsStateWithLifecycle()
     val totalBreathingSeconds by viewModel.totalBreathingSeconds.collectAsStateWithLifecycle()
-
-    var activeShareData by remember { mutableStateOf<com.example.util.ShareProgressData?>(null) }
 
     val snackbarHostState = remember { SnackbarHostState() }
     var selectedTab by remember { mutableIntStateOf(0) }
@@ -145,12 +151,13 @@ fun HomeScreen(
         telemetry = latestTelemetry,
     )
 
-    activeShareData?.let { shareData ->
-        com.example.ui.components.ShareProgressDialog(
-            shareData = shareData,
-            onDismiss = { activeShareData = null },
-            onShowSnackbar = { viewModel.showNotification(it) }
-        )
+    LaunchedEffect(Unit) {
+        if (viewModel.galaxyHealthPermissionPending()) {
+            healthPermissionLauncher.launch(GalaxyHealthReader.permissions)
+        }
+        viewModel.healthPermissionRequests.collect {
+            healthPermissionLauncher.launch(GalaxyHealthReader.permissions)
+        }
     }
 
     LaunchedEffect(notification) {
@@ -210,20 +217,6 @@ fun HomeScreen(
                 NavigationBarItem(
                     selected = selectedTab == 1,
                     onClick = { selectedTab = 1 },
-                    icon = { Icon(Icons.Default.QueryStats, contentDescription = null) },
-                    label = { Text("Gráficos", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold)) },
-                    colors = NavigationBarItemDefaults.colors(
-                        selectedIconColor = Color(0xFF004A77),
-                        selectedTextColor = Color(0xFF004A77),
-                        unselectedIconColor = Color(0xFF44474E),
-                        unselectedTextColor = Color(0xFF44474E),
-                        indicatorColor = Color(0xFFD1E4FF)
-                    ),
-                    modifier = Modifier.testTag("tab_recharts")
-                )
-                NavigationBarItem(
-                    selected = selectedTab == 2,
-                    onClick = { selectedTab = 2 },
                     icon = { Icon(Icons.Default.Watch, contentDescription = null) },
                     label = { Text("Dispositivos", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium)) },
                     colors = NavigationBarItemDefaults.colors(
@@ -236,8 +229,8 @@ fun HomeScreen(
                     modifier = Modifier.testTag("tab_ble")
                 )
                 NavigationBarItem(
-                    selected = selectedTab == 3,
-                    onClick = { selectedTab = 3 },
+                    selected = selectedTab == 2,
+                    onClick = { selectedTab = 2 },
                     icon = {
                         BadgedBox(
                             badge = {
@@ -260,8 +253,8 @@ fun HomeScreen(
                     modifier = Modifier.testTag("tab_queue")
                 )
                 NavigationBarItem(
-                    selected = selectedTab == 4,
-                    onClick = { selectedTab = 4 },
+                    selected = selectedTab == 3,
+                    onClick = { selectedTab = 3 },
                     icon = { Icon(Icons.Default.Settings, contentDescription = null) },
                     label = { Text("Ajustes", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium)) },
                     colors = NavigationBarItemDefaults.colors(
@@ -295,36 +288,20 @@ fun HomeScreen(
             ) {
                 when (selectedTab) {
                     0 -> DashboardTab(
-                        syncDisplayStatus = syncDisplayStatus,
-                        pendingCount = pendingCount,
-                        syncedCount = syncedCount,
-                        failedCount = failedCount,
-                        consecutiveFailures = consecutiveFailures,
-                        syncLogs = syncLogs,
-                        apiHealth = apiHealth,
                         connectedDevice = connectedDevice,
                         latestTelemetry = latestTelemetry,
                         sensorMetrics = allSensorMetrics,
                         autoIngestLive = autoIngestLive,
-                        onTriggerSync = { viewModel.triggerWorkManagerSync() },
-                        onRefreshHealth = { viewModel.checkHealth() },
-                        onMarkLocalSynced = { viewModel.markAllAsLocalSynced() },
-                        onRetryAll = { viewModel.retryAllFailed() },
                         onToggleAutoIngest = { viewModel.setAutoIngestLiveReadings(it) },
                         onSpotCheck = { viewModel.triggerSpotCheck() },
-                        onShowNotification = { viewModel.showNotification(it) },
-                        onScanClick = { selectedTab = 2 },
+                        onScanClick = { selectedTab = 1 },
                         onDisconnect = { viewModel.disconnectDevice() },
+                        linkNote = linkNote,
                         geminiInsightText = geminiInsightText,
                         isGeneratingGeminiInsight = isGeneratingGeminiInsight,
                         onRefreshGeminiInsight = { viewModel.generateGeminiInsight() },
-                        todayHydrationMl = todayHydrationMl,
-                        hydrationTargetMl = userProfile?.targetWaterMl ?: viewModel.hydrationTargetGoalMl,
-                        onAddWater = { viewModel.addWaterIntake(it) },
-                        onResetHydration = { viewModel.resetTodayHydration() },
                         totalBreathingSeconds = totalBreathingSeconds,
                         onSaveBreathingSession = { viewModel.saveBreathingSession(it) },
-                        onGenerateShareData = { activeShareData = it },
                         capabilities = deviceCapabilities,
                         hardwareConnected = isHardwareConnected,
                         actionsEnabled = p1ActionsEnabled,
@@ -352,26 +329,23 @@ fun HomeScreen(
                         onStopBreath = { viewModel.stopBreathDetect() },
                     )
 
-                    1 -> com.example.ui.components.RechartsSensorDashboard(
-                        sensorMetrics = allSensorMetrics,
-                    )
-
-                    2 -> BleDevicesTab(
+                    1 -> BleDevicesTab(
                         scannedDevices = scannedDevices,
                         connectedDevice = connectedDevice,
                         isScanning = isScanning,
+                        savedVeepooMac = savedVeepooMac,
+                        savedVeepooName = savedVeepooName,
                         onStartScan = { viewModel.startBleScan() },
                         onConnectDevice = { viewModel.connectDevice(it) },
-                        onConnectByMac = { mac -> viewModel.connectByMacAddress(mac) },
+                        onConnectByMac = { mac, name -> viewModel.connectByMacAddress(mac, name) },
                         onDisconnectDevice = { viewModel.disconnectDevice() }
                     )
 
-                    3 -> QueueInspector(
+                    2 -> QueueInspector(
                         pendingCount = pendingCount,
                         syncedCount = syncedCount,
                         failedCount = failedCount,
                         queueItems = allQueueItems,
-                        syncLogs = syncLogs,
                         isSyncing = isSyncing,
                         onSyncNow = { viewModel.syncQueueNow() },
                         onRetryFailedItem = { viewModel.retryFailedItem(it) },
@@ -380,7 +354,6 @@ fun HomeScreen(
                         onClearSynced = { viewModel.clearSynced() },
                         onClearAll = { viewModel.clearAll() },
                         onInspectItem = { viewModel.selectItemForPreview(it) },
-                        onRefreshWorkManager = { viewModel.triggerWorkManagerSync() },
                         p1LocationHint = if (deviceCapabilities.hasAdvancedDetect) {
                             VeepooSessionGate.FILA_P1_LOCATION_HINT
                         } else {
@@ -388,7 +361,17 @@ fun HomeScreen(
                         },
                     )
 
-                    4 -> SettingsTab(
+                    3 -> SettingsTab(
+                        syncDisplayStatus = syncDisplayStatus,
+                        pendingCount = pendingCount,
+                        syncedCount = syncedCount,
+                        failedCount = failedCount,
+                        consecutiveFailures = consecutiveFailures,
+                        onTriggerSync = { viewModel.triggerWorkManagerSync() },
+                        onRefreshHealth = { viewModel.checkHealth() },
+                        onMarkLocalSynced = { viewModel.markAllAsLocalSynced() },
+                        onRetryAll = { viewModel.retryAllFailed() },
+                        apiHealth = apiHealth,
                         userProfile = userProfile,
                         onEditProfileClick = { showProfileDialog = true },
                         autoReconnectBle = autoReconnectBle,
@@ -454,36 +437,20 @@ fun HomeScreen(
 
 @Composable
 private fun DashboardTab(
-    syncDisplayStatus: com.example.ui.components.SyncDisplayStatus,
-    pendingCount: Int,
-    syncedCount: Int,
-    failedCount: Int,
-    consecutiveFailures: Int = 0,
-    syncLogs: List<com.example.ui.components.SyncLogEntry>,
-    apiHealth: com.example.data.repository.ApiHealthState,
     connectedDevice: com.example.data.model.HBandDevice?,
     latestTelemetry: com.example.data.model.HBandTelemetry?,
     sensorMetrics: List<com.example.data.local.HBandSensorMetricEntity>,
     autoIngestLive: Boolean,
-    onTriggerSync: () -> Unit,
-    onRefreshHealth: () -> Unit,
-    onMarkLocalSynced: () -> Unit = {},
-    onRetryAll: () -> Unit = {},
     onToggleAutoIngest: (Boolean) -> Unit,
     onSpotCheck: () -> Unit,
-    onShowNotification: (String) -> Unit,
     onScanClick: () -> Unit,
     onDisconnect: () -> Unit,
+    linkNote: String? = null,
     geminiInsightText: String = "",
     isGeneratingGeminiInsight: Boolean = false,
     onRefreshGeminiInsight: () -> Unit = {},
-    todayHydrationMl: Int = 0,
-    hydrationTargetMl: Int = 2500,
-    onAddWater: (Int) -> Unit = {},
-    onResetHydration: () -> Unit = {},
     totalBreathingSeconds: Int = 0,
     onSaveBreathingSession: (Int) -> Unit = {},
-    onGenerateShareData: (com.example.util.ShareProgressData) -> Unit = {},
     capabilities: com.example.data.hband.DeviceCapabilities = com.example.data.hband.DeviceCapabilities(),
     hardwareConnected: Boolean = false,
     actionsEnabled: Boolean = hardwareConnected,
@@ -516,19 +483,6 @@ private fun DashboardTab(
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        com.example.ui.components.SyncStatusIndicator(
-            syncStatus = syncDisplayStatus,
-            pendingCount = pendingCount,
-            syncedCount = syncedCount,
-            failedCount = failedCount,
-            consecutiveFailures = consecutiveFailures,
-            onTriggerSync = onTriggerSync,
-            onRefreshHealth = onRefreshHealth,
-            onMarkLocalSynced = onMarkLocalSynced,
-            onRetryAll = onRetryAll,
-            modifier = Modifier.fillMaxWidth()
-        )
-
         DeviceControlCard(
             device = connectedDevice,
             autoIngestLive = autoIngestLive,
@@ -536,6 +490,7 @@ private fun DashboardTab(
             onSpotCheck = onSpotCheck,
             onScanClick = onScanClick,
             onDisconnect = onDisconnect,
+            linkNote = linkNote,
         )
 
         TelemetryGauges(telemetry = latestTelemetry)
@@ -586,23 +541,6 @@ private fun DashboardTab(
             modifier = Modifier.fillMaxWidth()
         )
 
-        com.example.ui.components.ShareProgressCard(
-            sensorMetrics = sensorMetrics,
-            hydrationMl = todayHydrationMl,
-            breathingSeconds = totalBreathingSeconds,
-            onGenerateShareData = onGenerateShareData,
-            modifier = Modifier.fillMaxWidth()
-        )
-
-        com.example.ui.components.HydrationCard(
-            currentMl = todayHydrationMl,
-            targetGoalMl = hydrationTargetMl,
-            logs = emptyList(),
-            onAddWater = onAddWater,
-            onResetToday = onResetHydration,
-            modifier = Modifier.fillMaxWidth()
-        )
-
         com.example.ui.components.BreathingExerciseCard(
             totalBreathingSeconds = totalBreathingSeconds,
             onSaveSession = onSaveBreathingSession,
@@ -614,30 +552,6 @@ private fun DashboardTab(
             modifier = Modifier.fillMaxWidth()
         )
 
-        com.example.ui.components.RechartsSensorDashboard(
-            sensorMetrics = sensorMetrics,
-            isScrollable = false,
-            modifier = Modifier.fillMaxWidth()
-        )
-
-        com.example.ui.components.CsvExportCard(
-            metrics = sensorMetrics,
-            onShowNotification = onShowNotification,
-            modifier = Modifier.fillMaxWidth()
-        )
-
-        com.example.ui.components.SyncHistoryLog(
-            syncLogs = syncLogs,
-            onRefreshWorkManager = onTriggerSync,
-            onTriggerSyncNow = onTriggerSync,
-            modifier = Modifier.fillMaxWidth()
-        )
-
-        ApiHeader(
-            apiHealth = apiHealth,
-            onRefreshHealth = onRefreshHealth
-        )
-
         Spacer(modifier = Modifier.height(24.dp))
     }
 }
@@ -647,9 +561,11 @@ private fun BleDevicesTab(
     scannedDevices: List<com.example.data.model.HBandDevice>,
     connectedDevice: com.example.data.model.HBandDevice?,
     isScanning: Boolean,
+    savedVeepooMac: String?,
+    savedVeepooName: String?,
     onStartScan: () -> Unit,
     onConnectDevice: (com.example.data.model.HBandDevice) -> Unit,
-    onConnectByMac: (String) -> Unit,
+    onConnectByMac: (String, String) -> Unit,
     onDisconnectDevice: () -> Unit
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -687,73 +603,6 @@ private fun BleDevicesTab(
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // Quick Connect Gear S3 Card
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .testTag("quick_connect_gears3_card"),
-            shape = RoundedCornerShape(28.dp),
-            border = BorderStroke(1.dp, Color(0xFFBBE9FF)),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFFF0F9FF))
-        ) {
-            Column(modifier = Modifier.padding(20.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(44.dp)
-                                .clip(CircleShape)
-                                .background(Color(0xFF00639B)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Watch,
-                                contentDescription = null,
-                                tint = Color.White,
-                                modifier = Modifier.size(24.dp)
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column {
-                            Text(
-                                text = "Samsung Gear S3 LE",
-                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                                color = Color(0xFF001D31)
-                            )
-                            Text(
-                                text = "Conexão GATT direta (GATT Heart Rate & RSC)",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = Color(0xFF00639B)
-                            )
-                        }
-                    }
-
-                    Button(
-                        onClick = { onConnectByMac("DC:C1:C6:6B:D4:FC") },
-                        shape = RoundedCornerShape(18.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00639B)),
-                        modifier = Modifier.testTag("quick_connect_gears3_button")
-                    ) {
-                        Text(
-                            text = if (connectedDevice?.name?.contains("Gear", ignoreCase = true) == true && connectedDevice.isConnected) "Conectado" else "Conectar Gear S3",
-                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold)
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(10.dp))
-                Text(
-                    text = "💡 Dica Gear S3: Mantenha o relógio firme no pulso e inicie a medição de FC ou Treino no relógio para transmitir os batimentos continuamente via Bluetooth LE.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Color(0xFF44474E)
-                )
-            }
-        }
-
         // Quick Connect VE30 Card
         Card(
             modifier = Modifier
@@ -792,21 +641,42 @@ private fun BleDevicesTab(
                                 color = Color(0xFF001D31)
                             )
                             Text(
-                                text = "Ativar conexão direta e telemetria de sensores",
+                                text = savedVeepooMac?.let { "Pulseira salva $it" }
+                                    ?: "Busca a pulseira pareada neste telefone",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = Color(0xFF2E7D32)
                             )
                         }
                     }
 
+                    val veepooConnected = connectedDevice?.isConnected == true &&
+                        !GalaxyHealthMapper.isGalaxyWatch(connectedDevice.name)
+                    val targetMac = if (veepooConnected) connectedDevice?.macAddress else savedVeepooMac
+                    val targetName = if (veepooConnected) {
+                        connectedDevice?.name ?: "VE30"
+                    } else {
+                        savedVeepooName ?: "VE30"
+                    }
                     Button(
-                        onClick = { onConnectByMac("C4:E3:42:VE:30:A4") },
+                        onClick = {
+                            val mac = targetMac?.trim().orEmpty()
+                            if (veepooConnected) return@Button
+                            if (android.bluetooth.BluetoothAdapter.checkBluetoothAddress(mac)) {
+                                onConnectByMac(mac, targetName)
+                            } else {
+                                handleScanClick()
+                            }
+                        },
                         shape = RoundedCornerShape(18.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32)),
                         modifier = Modifier.testTag("quick_connect_ve30_button")
                     ) {
                         Text(
-                            text = if (connectedDevice?.deviceId == "C4:E3:42:VE:30:A4" && connectedDevice.isConnected) "Conectado" else "Conectar VE30",
+                            text = when {
+                                veepooConnected -> "Conectado"
+                                android.bluetooth.BluetoothAdapter.checkBluetoothAddress(targetMac.orEmpty()) -> "Conectar VE30"
+                                else -> "Buscar VE30"
+                            },
                             style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold)
                         )
                     }
@@ -894,7 +764,7 @@ private fun BleDevicesTab(
                     Button(
                         onClick = {
                             if (customMacInput.isNotBlank()) {
-                                onConnectByMac(customMacInput.trim())
+                                onConnectByMac(customMacInput.trim(), "VE30")
                             }
                         },
                         enabled = customMacInput.isNotBlank(),

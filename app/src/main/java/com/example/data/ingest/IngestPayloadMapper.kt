@@ -201,6 +201,7 @@ class IngestDeduper(
         if (!IngestPayloadMapper.isIngestible(telemetry)) return false
         val signature = listOf(
             telemetry.deviceId,
+            telemetry.timestamp,
             telemetry.heartRate,
             telemetry.spO2,
             telemetry.bloodPressure.systolic,

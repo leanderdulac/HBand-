@@ -22,6 +22,7 @@ class HBandIngestWorker(
         )
 
         val result = repository.processQueueDetailed()
+        com.example.data.hband.HBandMeasureAlarm.nudgeIfDue(applicationContext)
         // Auth / client errors are permanent until the user fixes the key or payload.
         // Retry only when the network or the server was transiently unavailable.
         return if (result.hadTransientFailure && result.authError == null) {

@@ -9,6 +9,7 @@ import com.example.data.hband.AutoMeasureUiState
 import com.example.data.hband.DetectSessionUiState
 import com.example.data.hband.DeviceCapabilities
 import com.example.data.hband.FindDeviceUiState
+import com.example.data.hband.GalaxyHealthMapper
 import com.example.data.hband.HBandBleManager
 import com.example.data.hband.HBandBleService
 import com.example.data.hband.HealthRemindUiState
@@ -35,6 +36,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.yield
 import androidx.lifecycle.asFlow
 import androidx.work.WorkManager
 
@@ -79,7 +81,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val autoMeasureState: StateFlow<AutoMeasureUiState> = bleManager.autoMeasureState
     val wearDetectState: StateFlow<WearDetectUiState> = bleManager.wearDetectState
     val historySyncState: StateFlow<HistorySyncUiState> = bleManager.historySyncState
+    val savedVeepooMac: StateFlow<String?> = bleManager.savedVeepooMac
+    val savedVeepooName: StateFlow<String?> = bleManager.savedVeepooName
     val isHardwareConnected: StateFlow<Boolean> = bleManager.isHardwareConnected
+    val linkNote: StateFlow<String?> = bleManager.linkNote
+    val healthPermissionRequests = bleManager.healthPermissionRequests
     val ecgState: StateFlow<DetectSessionUiState> = bleManager.ecgState
     val glucoseState: StateFlow<DetectSessionUiState> = bleManager.glucoseState
     val bloodComponentState: StateFlow<DetectSessionUiState> = bleManager.bloodComponentState
@@ -325,7 +331,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             latestTelemetry.collect { telemetry ->
                 if (telemetry == null) return@collect
-                if (_autoIngestLiveReadings.value && ingestDeduper.shouldEnqueue(telemetry)) {
+                // Galaxy sobe pela fila do processo (amostras do dia). O StateFlow
+                // só guarda a mais recente e perderia o restante.
+                val galaxy = GalaxyHealthMapper.isGalaxyWatch(telemetry.deviceModel)
+                if (!galaxy && _autoIngestLiveReadings.value && ingestDeduper.shouldEnqueue(telemetry)) {
                     val patientId = userProfile.value?.patientId ?: bleManager.currentPatientId
                     repository.enqueueTelemetry(telemetry, patientId)
                 }
@@ -534,8 +543,35 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         showNotification("Pulseira desconectada")
     }
 
+    suspend fun galaxyHealthPermissionPending(): Boolean = bleManager.galaxyHealthPermissionPending()
+
+    fun onGalaxyHealthPermissionResult() {
+        viewModelScope.launch {
+            val note = bleManager.refreshGalaxyNow()
+            yield()
+            val result = repository.processQueueDetailed()
+            val synced = result.syncedCount > 0
+            val text = if (synced) "Enviado: ${note.orEmpty()}" else note.orEmpty().ifBlank { result.message }
+            if (text.isNotBlank()) {
+                showNotification(text, isError = bleManager.connectedDevice.value?.isConnected != true && !synced)
+            }
+        }
+    }
+
     fun triggerSpotCheck() {
         viewModelScope.launch {
+            if (bleManager.isActiveGalaxyWatch()) {
+                val note = bleManager.refreshGalaxyNow()
+                if (note == GalaxyHealthMapper.NOTE_PERMISSION) {
+                    bleManager.askHealthPermissionFromUser()
+                }
+                yield()
+                val result = repository.processQueueDetailed()
+                val synced = result.syncedCount > 0
+                val text = if (synced) "Enviado: ${note.orEmpty()}" else note.orEmpty().ifBlank { result.message }
+                showNotification(text, isError = bleManager.connectedDevice.value?.isConnected != true && !synced)
+                return@launch
+            }
             val telemetry = bleManager.triggerSpotCheck()
             if (!IngestPayloadMapper.isIngestible(telemetry)) {
                 showNotification(
