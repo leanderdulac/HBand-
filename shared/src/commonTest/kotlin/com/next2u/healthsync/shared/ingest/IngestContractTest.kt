@@ -43,6 +43,24 @@ class IngestReadingIdentityTest {
         val generated = IngestReadingIdentity.forPayload("""{"heart_rate":72}""") { "new-id" }
         assertEquals("new-id", generated)
     }
+
+    @Test
+    fun history_id_is_deterministic_and_core_syntax() {
+        val first = IngestReadingIdentity.historyId("C4:E3:42:AA:30:A4", "origin", 1_700_000_000_000L)
+        val second = IngestReadingIdentity.historyId("C4:E3:42:AA:30:A4", "origin", 1_700_000_000_000L)
+        val spo2 = IngestReadingIdentity.historyId("C4:E3:42:AA:30:A4", "spo2", 1_700_000_000_000L)
+        assertEquals(first, second)
+        assertTrue(IngestReadingIdentity.isValid(first))
+        assertTrue(first.contains("origin"))
+        assertTrue(first.contains("1700000000000"))
+        assertTrue(first.contains("C4:E3:42:AA:30:A4"))
+        assertTrue(IngestReadingIdentity.isValid(spo2))
+        assertTrue(first != spo2)
+        val messy = IngestReadingIdentity.historyId("dev id!", "hr/v", 12L)
+        assertTrue(IngestReadingIdentity.isValid(messy), messy)
+        assertFalse(messy.contains(" "))
+        assertFalse(messy.contains("/"))
+    }
 }
 
 class IngestConfigurationTest {

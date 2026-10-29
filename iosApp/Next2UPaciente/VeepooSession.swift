@@ -610,12 +610,14 @@ final class VeepooSession: NSObject, ObservableObject {
         readBattery()
         manager.peripheralManage.veepooSdkStartReadDeviceAllData { [weak self] state, _, _, _ in
             Task { @MainActor in
+                guard let self else { return }
                 if state.rawValue == 2 {
-                    self?.sessionMessage = "Histórico do relógio lido. Medindo batimentos…"
-                    self?.note("Histórico do band lido. FC.")
+                    self.sessionMessage = "Histórico do relógio lido. Medindo batimentos…"
+                    self.note("Histórico do band lido. FC.")
                     // Acerta a hora depois do histórico (como no Android): no handshake o VE30 ignora o comando.
-                    self?.syncWatchTime(manual: false)
-                    self?.advanceMeasurementCycle()
+                    self.syncWatchTime(manual: false)
+                    await self.enqueueWatchHistoryThenFlush()
+                    self.advanceMeasurementCycle()
                 }
             }
         }
@@ -794,13 +796,49 @@ final class VeepooSession: NSObject, ObservableObject {
 
     /// Flush the durable queue without recording a new reading.
     func flushQueueOnly() {
-        guard PatientStore.shared.status == .ready else { return }
+        Task { await self.performFlush() }
+    }
+
+    /// Used by BGTask after `configureIngest()` / store open.
+    func noteBackgroundFlush(_ flush: FlushOutcome) {
+        applyFlush(flush)
+    }
+
+    /// History from the Veepoo SDK database, then one flush. Same IDs on reconnect.
+    private func enqueueWatchHistoryThenFlush() async {
+        guard PatientStore.shared.status == .ready else {
+            note("Histórico lido; store ainda não abriu.")
+            return
+        }
+        configureIngest()
+        let watch = connected
+        let deviceId = watch?.address ?? lastAddress ?? ""
+        let deviceModel = watch?.name ?? lastName ?? "VE30"
+        let days = Int(manager.peripheralModel?.saveDays ?? 3)
+        let samples = VeepooHistoryIngest.samples(deviceId: deviceId, days: days)
+        let queued = await VeepooHistoryIngest.enqueue(
+            samples: samples,
+            deviceId: deviceId,
+            deviceModel: deviceModel,
+            patientId: PatientStore.shared.profile().patientId
+        )
+        NSLog("[Next2U] Histórico do relógio: amostras=%d novas na fila=%d", samples.count, queued)
+        note("Histórico do relógio enfileirado.")
+        await performFlush()
+    }
+
+    @discardableResult
+    func performFlush() async -> Bool {
+        guard PatientStore.shared.status == .ready else { return false }
         configureIngest()
         let task = beginIngestTask()
-        Task {
-            defer { self.endIngestTask(task) }
-            guard let flush = try? await IngestRuntime.shared.flush() else { return }
+        defer { endIngestTask(task) }
+        do {
+            let flush = try await IngestRuntime.shared.flush()
             applyFlush(flush)
+            return flush.failedCount == 0
+        } catch {
+            return false
         }
     }
 

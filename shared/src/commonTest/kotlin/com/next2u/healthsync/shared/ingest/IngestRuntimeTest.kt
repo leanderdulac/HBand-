@@ -181,4 +181,75 @@ class IngestRuntimeTest {
         assertTrue(body.contains("\"device_label\":\"iPhone de LFM\""), body)
         IngestRuntime.setDeviceLabel(null)
     }
+
+    @Test
+    fun history_sample_uses_deterministic_id_and_skips_live_deduper() = runTest {
+        val first = IngestRuntime.recordHistorySample(
+            deviceId = "C4:E3:42:AA:30:A4",
+            deviceModel = "VE30",
+            timestampIso = "2026-10-29T12:00:00Z",
+            timestampMillis = 1_700_000_000_000L,
+            metricType = "origin",
+            heartRate = 72,
+            spo2 = 0,
+            systolic = 0,
+            diastolic = 0,
+            temperatureCelsius = 0f,
+            steps = 10,
+            calories = 0f,
+            distanceMeters = 0f,
+            hrvScore = 0,
+            deepSleepMinutes = 0,
+            lightSleepMinutes = 0,
+            awakeMinutes = 0,
+            patientId = "PAT-1",
+        )
+        val sameAgain = IngestRuntime.recordHistorySample(
+            deviceId = "C4:E3:42:AA:30:A4",
+            deviceModel = "VE30",
+            timestampIso = "2026-10-29T12:00:00Z",
+            timestampMillis = 1_700_000_000_000L,
+            metricType = "origin",
+            heartRate = 72,
+            spo2 = 0,
+            systolic = 0,
+            diastolic = 0,
+            temperatureCelsius = 0f,
+            steps = 10,
+            calories = 0f,
+            distanceMeters = 0f,
+            hrvScore = 0,
+            deepSleepMinutes = 0,
+            lightSleepMinutes = 0,
+            awakeMinutes = 0,
+            patientId = "PAT-1",
+        )
+        val laterSameHr = IngestRuntime.recordHistorySample(
+            deviceId = "C4:E3:42:AA:30:A4",
+            deviceModel = "VE30",
+            timestampIso = "2026-10-29T12:05:00Z",
+            timestampMillis = 1_700_000_300_000L,
+            metricType = "origin",
+            heartRate = 72,
+            spo2 = 0,
+            systolic = 0,
+            diastolic = 0,
+            temperatureCelsius = 0f,
+            steps = 12,
+            calories = 0f,
+            distanceMeters = 0f,
+            hrvScore = 0,
+            deepSleepMinutes = 0,
+            lightSleepMinutes = 0,
+            awakeMinutes = 0,
+            patientId = "PAT-1",
+        )
+        assertTrue(first.queued)
+        assertEquals("C4:E3:42:AA:30:A4-origin-1700000000000", first.clientReadingId)
+        assertFalse(sameAgain.queued)
+        assertEquals(first.clientReadingId, sameAgain.clientReadingId)
+        assertTrue(laterSameHr.queued, "histórico não usa a janela de 30s das leituras ao vivo")
+        assertEquals(2, IngestRuntime.pendingCount())
+        assertTrue(laterSameHr.clientReadingId!!.contains("1700000300000"))
+    }
 }

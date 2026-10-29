@@ -8,8 +8,10 @@ import com.next2u.healthsync.shared.platform.isoUtcNow
 import com.next2u.healthsync.shared.platform.nowMillis
 import com.next2u.healthsync.shared.store.PatientStore
 import io.ktor.client.engine.HttpClientEngine
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlin.coroutines.coroutineContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
@@ -212,20 +214,87 @@ object IngestRuntime {
         return record(telemetry, patientId)
     }
 
-    suspend fun record(telemetry: HBandTelemetry, patientId: String): RecordOutcome = mutex.withLock {
+    /**
+     * Watch history sample. Uses a deterministic `client_reading_id` so the Core
+     * dedups reconnect/replay. Does not use the 30s live-reading window.
+     */
+    suspend fun recordHistorySample(
+        deviceId: String,
+        deviceModel: String,
+        timestampIso: String,
+        timestampMillis: Long,
+        metricType: String,
+        heartRate: Int,
+        spo2: Int,
+        systolic: Int,
+        diastolic: Int,
+        temperatureCelsius: Float,
+        steps: Int,
+        calories: Float,
+        distanceMeters: Float,
+        hrvScore: Int,
+        deepSleepMinutes: Int,
+        lightSleepMinutes: Int,
+        awakeMinutes: Int,
+        patientId: String,
+    ): RecordOutcome {
+        val telemetry = HBandTelemetry(
+            deviceId = deviceId,
+            deviceModel = deviceModel,
+            timestamp = timestampIso,
+            heartRate = heartRate,
+            bloodPressure = BloodPressure(systolic, diastolic),
+            spO2 = spo2,
+            temperatureCelsius = temperatureCelsius,
+            steps = steps,
+            calories = calories,
+            distanceMeters = distanceMeters,
+            hrvScore = hrvScore,
+            sleepSummary = SleepSummary(deepSleepMinutes, lightSleepMinutes, awakeMinutes),
+            isRealSensorData = true,
+        )
+        val id = IngestReadingIdentity.historyId(deviceId, metricType, timestampMillis)
+        return record(
+            telemetry = telemetry,
+            patientId = patientId,
+            clientReadingId = id,
+            skipLiveDeduper = true,
+            observedAtMillis = timestampMillis,
+        )
+    }
+
+    suspend fun record(telemetry: HBandTelemetry, patientId: String): RecordOutcome =
+        record(telemetry, patientId, clientReadingId = null, skipLiveDeduper = false, observedAtMillis = 0L)
+
+    private suspend fun record(
+        telemetry: HBandTelemetry,
+        patientId: String,
+        clientReadingId: String?,
+        skipLiveDeduper: Boolean,
+        observedAtMillis: Long,
+    ): RecordOutcome = mutex.withLock {
         if (!telemetry.isRealSensorData) {
             return RecordOutcome(false, message = "Somente leituras reais do relógio entram na fila.")
         }
-        PatientStore.tryAppendMetric(telemetry)
+        if (observedAtMillis > 0L) {
+            PatientStore.tryAppendObservedMetric(telemetry, observedAtMillis)
+        } else {
+            PatientStore.tryAppendMetric(telemetry)
+        }
         if (!IngestPayload.isIngestible(telemetry)) {
             return RecordOutcome(false, message = IngestPayload.MISSING_HR_ERROR)
         }
-        if (!deduper.shouldEnqueue(telemetry)) {
+        if (!skipLiveDeduper && !deduper.shouldEnqueue(telemetry)) {
             return RecordOutcome(false, message = "Leitura repetida no intervalo de 30s; gravada localmente, sem novo envio.")
         }
-        val payload = IngestPayload.withDeviceLabel(IngestPayload.telemetryToJson(telemetry, patientId), deviceLabel)
+        val base = IngestPayload.withDeviceLabel(IngestPayload.telemetryToJson(telemetry, patientId), deviceLabel)
+        val requested = clientReadingId?.takeIf { IngestReadingIdentity.isValid(it) }
+        val payload = if (requested == null) base else IngestPayload.withClientReadingId(base, requested)
         val id = IngestReadingIdentity.forPayload(payload)
         val items = load().toMutableList()
+        if (items.any { it.clientReadingId == id }) {
+            return RecordOutcome(false, id, "Já na fila com client_reading_id $id.")
+        }
         items += StoredQueueItem(
             clientReadingId = id,
             payloadJson = payload,
@@ -237,6 +306,7 @@ object IngestRuntime {
     }
 
     suspend fun flush(): FlushOutcome = mutex.withLock {
+        coroutineContext.ensureActive()
         val transport = configuration.transport()
         if (transport.configurationError != null) {
             return FlushOutcome(message = transport.configurationError, pendingCount = pendingUnlocked())
@@ -282,6 +352,7 @@ object IngestRuntime {
         var transient = false
         var retryAfterMs: Long? = null
         for (chunk in IngestReconciler.chunks(prepared, FLUSH_CHUNK_ITEMS)) {
+            coroutineContext.ensureActive()
             val body = IngestReconciler.batchBody(chunk)
             val key = IngestReconciler.flushIdempotencyKey(chunk)
             val call = client.batchIngestWearableData(body, key)

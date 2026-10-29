@@ -134,6 +134,31 @@ object PatientStore {
         return if (commit(previous)) id else -1L
     }
 
+    /**
+     * History replay uses the watch observation time. Same device + time + vitals
+     * on reconnect is a no-op so charts do not grow a duplicate point.
+     */
+    fun tryAppendObservedMetric(telemetry: HBandTelemetry, observedAtMillis: Long): Long {
+        if (!isReady || !telemetry.isRealSensorData || observedAtMillis <= 0L) return -1L
+        val already = snapshot.metrics.any {
+            it.deviceId == telemetry.deviceId &&
+                it.timestampMillis == observedAtMillis &&
+                it.heartRate == telemetry.heartRate &&
+                it.spO2 == telemetry.spO2 &&
+                it.hrvScore == telemetry.hrvScore &&
+                it.steps == telemetry.steps
+        }
+        if (already) return -1L
+        val previous = snapshot
+        val id = snapshot.nextMetricId
+        val metric = telemetry.toMetric(id, observedAtMillis)
+        snapshot = snapshot.copy(
+            metrics = snapshot.metrics + metric,
+            nextMetricId = id + 1,
+        )
+        return if (commit(previous)) id else -1L
+    }
+
     internal fun loadQueueJson(): String = json.encodeToString(snapshot.queue)
 
     internal fun replaceQueueJson(raw: String) {

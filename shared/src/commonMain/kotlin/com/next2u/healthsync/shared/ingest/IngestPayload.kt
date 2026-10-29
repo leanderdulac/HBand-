@@ -139,6 +139,17 @@ object IngestPayload {
         return pretty.encodeToString(JsonObject.serializer(), JsonObject(obj + ("device_label" to JsonPrimitive(label))))
     }
 
+    /** Stamps a durable `client_reading_id` at insert so reconnect/history replay keeps the same key. */
+    fun withClientReadingId(json: String, clientReadingId: String): String {
+        if (clientReadingId.isBlank()) return json
+        val obj = Json.parseToJsonElement(json).jsonObject
+        if (obj.containsKey("client_reading_id")) return json
+        return pretty.encodeToString(
+            JsonObject.serializer(),
+            JsonObject(obj + ("client_reading_id" to JsonPrimitive(clientReadingId))),
+        )
+    }
+
     fun telemetryToJson(telemetry: HBandTelemetry, patientId: String): String {
         val obj = buildJsonObject {
             put("patient_id", resolvePatientId(patientId))

@@ -6,6 +6,7 @@ enum SigningPlaceholders {
     static let teamId = "H87XXMXA5G"
     static let bundleId = "br.com.next2u.saude.paciente"
     static let ingestTaskId = "br.com.next2u.saude.paciente.ingest"
+    static let ingestRefreshTaskId = "br.com.next2u.saude.paciente.ingest.refresh"
 
     static let summary = """
     Team ID: \(teamId) (Next2U).
