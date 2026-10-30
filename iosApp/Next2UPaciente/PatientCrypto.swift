@@ -67,7 +67,7 @@ enum PatientCrypto {
             let key = try loadOrCreateKey()
             let sealed = try AES.GCM.seal(Data(plaintext.utf8), using: key)
             guard let combined = sealed.combined else { return false }
-            try combined.write(to: snapshotURL(), options: .atomic)
+            try combined.write(to: snapshotURL(), options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
             return true
         } catch {
             return false

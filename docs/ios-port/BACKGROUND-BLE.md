@@ -41,8 +41,10 @@ conseguir entregar `willRestoreState` (TN3115).
 4. Não há FGS Android. Notify GATT *pode* acordar o processo; o sistema pode
    mesmo assim suspender depois de alguns minutos sem eventos.
 5. Reinício com passcode: sem BLE até o primeiro unlock.
-6. `BGTaskScheduler` (`br.com.next2u.saude.paciente.ingest`) é oportunista —
-   **não** promete 15 min. O flush principal é o callback BLE.
+6. `BGTaskScheduler`: `BGAppRefresh` (`br.com.next2u.saude.paciente.ingest.refresh`,
+   `earliestBeginDate` ~15 min) é o slot preferido; `BGProcessing`
+   (`br.com.next2u.saude.paciente.ingest`) fica de reserva. **Não** promete 15 min.
+   O flush principal continua o callback BLE. Force-quit **para** os envios.
 7. Exceção de bateria (PR #19) **não existe** no iOS. Ligar Atualização em
    Segundo Plano; não inventar «liberar bateria».
 8. No **iOS 26**, alguns toggles do Control Center só relançam apps com

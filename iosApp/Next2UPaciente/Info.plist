@@ -4,6 +4,7 @@
 <dict>
 	<key>BGTaskSchedulerPermittedIdentifiers</key>
 	<array>
+		<string>br.com.next2u.saude.paciente.ingest.refresh</string>
 		<string>br.com.next2u.saude.paciente.ingest</string>
 	</array>
 	<key>CFBundleDevelopmentRegion</key>

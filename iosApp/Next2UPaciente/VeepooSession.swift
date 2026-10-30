@@ -98,6 +98,16 @@ final class VeepooSession: NSObject, ObservableObject {
     private var cycleGotReading = false
     private var consecutiveEmptyCycles = 0
     private var nextCycleAt = Date.distantPast
+    /// Background: FC contínua mantém notificações GATT chegando, e cada uma acorda o app
+    /// (bluetooth-central). Sem isso, a pausa de 5 min entre ciclos deixava o app sem tráfego
+    /// BLE, o iOS suspendia e o watchdog nunca iniciava o próximo ciclo (campo 29/10).
+    private var backgroundStreaming = false
+    private var lastRecordAt = Date.distantPast
+    private var lastFlushAt = Date.distantPast
+    private var deferredFlush: Task<Void, Never>?
+    private var lastHistoryPullAt = Date.distantPast
+    static let minUploadInterval: TimeInterval = 60
+    static let historyPullMinInterval: TimeInterval = 5 * 60
     /// Liveness of the measurement loop. The FC/SpO₂ rotation is driven only by BLE
     /// callbacks, so one missed callback used to freeze it forever (no readings, no POSTs).
     private var lastSampleAt = Date()
@@ -108,6 +118,21 @@ final class VeepooSession: NSObject, ObservableObject {
     /// connect) re-entered veepooSDKConnectDevice, producing a storm of parallel sessions,
     /// "pairing fail" / "check result fail", and an FC test that never returned values.
     private var sessionAttemptAt: Date?
+    /// One auto-connect to the last known watch per user scan.
+    private var autoConnectAttemptedThisScan = false
+
+    /// Services VE30/HBand-class bands commonly expose. Used only to ask iOS
+    /// for peripherals already connected at the OS (H Band official / Settings).
+    private static let veepooServiceUUIDs: [CBUUID] = [
+        CBUUID(string: "FFF0"),
+        CBUUID(string: "FFF6"),
+        CBUUID(string: "FFE0"),
+        CBUUID(string: "FEE7"),
+        CBUUID(string: "5554"),
+        CBUUID(string: "180A"),
+        CBUUID(string: "180D"),
+        CBUUID(string: "6E400001-B5A3-F393-E0A9-E50E24DCCA9E"),
+    ]
 
     private func beginSessionAttempt(_ origin: String) -> Bool {
         if let at = sessionAttemptAt, Date().timeIntervalSince(at) < Self.handshakeAttemptTimeout {
@@ -118,14 +143,17 @@ final class VeepooSession: NSObject, ObservableObject {
     }
 
     struct ScannedWatch: Identifiable, Equatable {
-        var id: String { address }
+        var id: String { uuid.isEmpty ? address : uuid }
         var name: String
-        let address: String
+        var address: String
+        let uuid: String
         let rssi: Int
+        let isOsConnected: Bool
         let model: VPPeripheralModel
 
         static func == (lhs: ScannedWatch, rhs: ScannedWatch) -> Bool {
-            lhs.address == rhs.address
+            if !lhs.uuid.isEmpty, !rhs.uuid.isEmpty { return lhs.uuid == rhs.uuid }
+            return !lhs.address.isEmpty && lhs.address == rhs.address
         }
     }
 
@@ -150,6 +178,10 @@ final class VeepooSession: NSObject, ObservableObject {
         // a reconexão é um único connect pendente do iOS (sem timeout, baixo consumo) +
         // scan ocasional com backoff só quando o periférico é desconhecido (ver backoffScan).
         manager.automaticConnection = false
+        // Default rrisLimit is -85: the SDK drops weaker ads, so a VE30 on the
+        // wrist (phone in pocket / other hand) never appears. -127 is the BLE floor.
+        manager.manufacturerIDFilter = false
+        manager.rrisLimit = -127
         // Veepoo's 30s timer cancelled pending iOS connects. Keep the system
         // pending-connect until the VE30 advertises again.
         manager.connectionTimeout = .max
@@ -159,6 +191,13 @@ final class VeepooSession: NSObject, ObservableObject {
         refreshLocalStore()
         note("Sessão BLE criada. Restore id \(Self.restoreId).")
         startStallWatchdog()
+        let nc = NotificationCenter.default
+        nc.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.handleEnteredBackground() }
+        }
+        nc.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.handleWillEnterForeground() }
+        }
     }
 
     /// Tempo máximo entre pedir a sessão Veepoo (senha 0000) e o handshake; passou disso,
@@ -234,6 +273,15 @@ final class VeepooSession: NSObject, ObservableObject {
     /// próximo ciclo só quando a pausa terminou.
     private func advanceMeasurementCycle(now: Date = Date()) {
         guard hardwareReady else { return }
+        if heartRunning, backgroundStreaming {
+            // FC contínua: só reinicia se o relógio parou de mandar amostras.
+            if now.timeIntervalSince(lastSampleAt) > Self.heartStageTimeout {
+                note("FC contínua sem amostras; reiniciando.")
+                stopHeart()
+                startHeart()
+            }
+            return
+        }
         if heartRunning, now.timeIntervalSince(measureStartedAt) > Self.heartStageTimeout {
             note("Ciclo: FC sem resultado completo em \(Int(Self.heartStageTimeout)) s.")
             stopHeart()
@@ -243,6 +291,10 @@ final class VeepooSession: NSObject, ObservableObject {
         if spo2Running, now.timeIntervalSince(measureStartedAt) > Self.oxygenStageTimeout {
             note("Ciclo: SpO₂ sem resultado em \(Int(Self.oxygenStageTimeout)) s.")
             finishCycle(reason: "SpO₂ sem resultado")
+            return
+        }
+        if backgroundStreaming, !heartRunning, !spo2Running {
+            startHeart()
             return
         }
         if !heartRunning, !spo2Running, now >= nextCycleAt {
@@ -270,6 +322,11 @@ final class VeepooSession: NSObject, ObservableObject {
         if cycleGotReading {
             sessionMessage = "Medição concluída. Próxima em \(Int(idle / 60)) min."
         }
+        if backgroundStreaming || Self.isInBackground {
+            // Em segundo plano uma pausa sem tráfego BLE = app suspenso. Reabre a FC já.
+            backgroundStreaming = true
+            if hardwareReady { startHeart() }
+        }
     }
 
     func configureIngest() {
@@ -283,6 +340,7 @@ final class VeepooSession: NSObject, ObservableObject {
                   builtIn.isEmpty ? "não" : "sim", builtIn.count, deviceLabel)
         }
         IngestRuntime.shared.setDeviceLabel(raw: deviceLabel)
+        IngestRuntime.shared.setAppVersion(raw: Self.appVersionString)
         IngestRuntime.shared.configure(
             baseUrl: ingestUrl,
             overrideKey: key.isEmpty ? nil : key,
@@ -294,6 +352,13 @@ final class VeepooSession: NSObject, ObservableObject {
     }
 
     private static var loggedIngestConfig = false
+    /// "1.2.3+45" (CFBundleShortVersionString+CFBundleVersion) → header X-App-Version.
+    static let appVersionString: String = {
+        let info = Bundle.main.infoDictionary
+        let short = info?["CFBundleShortVersionString"] as? String ?? "0"
+        let build = info?["CFBundleVersion"] as? String ?? "0"
+        return "ios-\(short)+\(build)"
+    }()
     /// Nome da pulseira escolhido pelo paciente em Meu perfil (vazio = segue o nome do perfil).
     static let wristbandNameKey = "wristband_name"
     /// Último `device_label` efetivo (cache para envios antes de o perfil abrir).
@@ -399,8 +464,64 @@ final class VeepooSession: NSObject, ObservableObject {
     func handleBecameActive() {
         note("App em primeiro plano.")
         configureIngest()
+        if hardwareReady {
+            pullWatchHistory(reason: "primeiro plano")
+        }
         advanceMeasurementCycle()
         reconnectLastKnown(reason: "primeiro plano")
+        flushQueueOnly()
+    }
+
+    private static var isInBackground: Bool {
+        UIApplication.shared.applicationState == .background
+    }
+
+    /// Envia o que está na fila (com beginBackgroundTask) e passa a FC contínua para que
+    /// as notificações do relógio continuem acordando o app com o iPhone bloqueado.
+    func handleEnteredBackground() {
+        note("App em segundo plano.")
+        Task { await self.performFlush() }
+        IngestBackground.schedule()
+        guard hardwareReady else { return }
+        backgroundStreaming = true
+        if !heartRunning {
+            stopOxygen()
+            startHeart()
+        }
+    }
+
+    func handleWillEnterForeground() {
+        guard backgroundStreaming else { return }
+        backgroundStreaming = false
+        note("Primeiro plano: FC contínua encerrada, volta ao ciclo pontual.")
+        if heartRunning {
+            stopHeart()
+            finishCycle(reason: "volta ao primeiro plano")
+        }
+    }
+
+    /// Histórico gravado no relógio → fila (client_reading_id estável) → envio.
+    private func pullWatchHistory(reason: String, force: Bool = false) {
+        guard hardwareReady else { return }
+        if !force, Date().timeIntervalSince(lastHistoryPullAt) < Self.historyPullMinInterval { return }
+        lastHistoryPullAt = Date()
+        let resumeHeart = heartRunning
+        if resumeHeart { stopHeart() }
+        stopOxygen()
+        note("Lendo histórico do relógio (\(reason)).")
+        manager.peripheralManage.veepooSdkStartReadDeviceAllData { [weak self] state, _, _, _ in
+            Task { @MainActor in
+                guard let self, state.rawValue == 2 else { return }
+                if let current = self.connected { self.adoptSdkMac(from: current) }
+                await self.enqueueWatchHistoryThenFlush()
+                if self.backgroundStreaming || Self.isInBackground {
+                    self.backgroundStreaming = true
+                    if !self.heartRunning { self.startHeart() }
+                } else {
+                    self.advanceMeasurementCycle()
+                }
+            }
+        }
     }
 
     func startScan(automatic: Bool = false) {
@@ -410,36 +531,135 @@ final class VeepooSession: NSObject, ObservableObject {
             backoffScanTask = nil
         }
         devices = []
+        autoConnectAttemptedThisScan = false
         isScanning = true
         sessionMessage = "Procurando o relógio…"
         note(automatic ? "Scan Veepoo automático (10 s)." : "Scan Veepoo iniciado.")
-        manager.veepooSDKStartScanDeviceAndReceiveScanningDevice { [weak self] model in
-            guard let self, let model else { return }
-            Task { @MainActor in
-                let watch = ScannedWatch(
-                    name: model.deviceName ?? "HBand",
-                    address: model.deviceAddress ?? "",
-                    rssi: model.rssi?.intValue ?? 0,
-                    model: model
-                )
-                guard !watch.address.isEmpty else { return }
-                if let index = self.devices.firstIndex(where: { $0.address == watch.address }) {
-                    self.devices[index] = watch
-                } else {
-                    self.devices.append(watch)
-                }
-                if watch.address == self.lastAddress, self.connected == nil {
-                    self.connect(watch)
-                }
-            }
+        manager.manufacturerIDFilter = false
+        manager.rrisLimit = -127
+        guard manager.centralManager.state == .poweredOn else {
+            sessionMessage = "Ligue o Bluetooth do iPhone."
+            note("Scan adiado: Bluetooth ainda não está pronto.")
+            return
         }
+        // Relógios já ligados ao iOS (H Band oficial, Ajustes, restore) não anunciam.
+        seedKnownAndConnectedWatches()
+        // Scan amplo, como no Android (`startScan(null)`): sem UUID de serviço.
+        // O scan do SDK sozinho aplica rrisLimit -85 e ignora periféricos já ligados.
+        // One scan only: a second `scanForPeripherals` from the SDK would replace this one.
+        manager.centralManager.scanForPeripherals(
+            withServices: nil,
+            options: [CBCentralManagerScanOptionAllowDuplicatesKey: true]
+        )
     }
 
     func stopScan() {
         manager.veepooSDKStopScanDevice()
+        manager.centralManager.stopScan()
         isScanning = false
         autoScanStopTask?.cancel()
         autoScanStopTask = nil
+    }
+
+    /// iOS does not advertise already-connected BLE devices. Pull them from CoreBluetooth.
+    private func seedKnownAndConnectedWatches() {
+        if let uuid = lastPeripheralUUID.flatMap(UUID.init(uuidString:)) {
+            for peripheral in manager.centralManager.retrievePeripherals(withIdentifiers: [uuid]) {
+                offerRetrieved(peripheral)
+            }
+        }
+        for peripheral in manager.centralManager.retrieveConnectedPeripherals(withServices: Self.veepooServiceUUIDs) {
+            offerRetrieved(peripheral)
+        }
+    }
+
+    private func offerRetrieved(_ peripheral: CBPeripheral) {
+        guard let model = VPPeripheralModel(peripher: peripheral) else { return }
+        upsertScanned(
+            model: model,
+            fallbackName: peripheral.name ?? lastName,
+            rssi: 0,
+            uuid: peripheral.identifier.uuidString,
+            isOsConnected: peripheral.state == .connected || peripheral.state == .connecting
+        )
+    }
+
+    func onDidDiscover(
+        peripheral: CBPeripheral,
+        advertisementData: [String: Any],
+        rssi: NSNumber
+    ) {
+        guard isScanning else { return }
+        let localName = advertisementData[CBAdvertisementDataLocalNameKey] as? String
+        let manufacturer = advertisementData[CBAdvertisementDataManufacturerDataKey] as? Data
+        let uuid = peripheral.identifier.uuidString
+        let isKnown = uuid == lastPeripheralUUID
+        let named = !((localName ?? peripheral.name ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        let osConnected = peripheral.state == .connected || peripheral.state == .connecting
+        // Keep unnamed random beacons off the patient list; keep anything named, known, or connected.
+        guard isKnown || named || manufacturer != nil || osConnected else { return }
+        let advertised: VPPeripheralModel? = VPPeripheralModel(
+            peripher: peripheral,
+            advertisementData: advertisementData,
+            rssi: rssi
+        )
+        guard let model = advertised ?? VPPeripheralModel(peripher: peripheral) else { return }
+        let rssiValue = rssi.intValue == 127 ? 0 : rssi.intValue
+        upsertScanned(
+            model: model,
+            fallbackName: localName ?? peripheral.name ?? lastName,
+            rssi: rssiValue,
+            uuid: uuid,
+            isOsConnected: osConnected
+        )
+    }
+
+    private func upsertScanned(
+        model: VPPeripheralModel,
+        fallbackName: String?,
+        rssi: Int,
+        uuid: String,
+        isOsConnected: Bool
+    ) {
+        let mac = (model.deviceAddress ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let ident = uuid.isEmpty ? mac : uuid
+        guard !ident.isEmpty else { return }
+        let resolvedName = [model.deviceName, fallbackName, lastName]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first { !$0.isEmpty } ?? "Relógio"
+        let watch = ScannedWatch(
+            name: resolvedName,
+            address: mac.isEmpty ? ident : mac,
+            uuid: uuid.isEmpty ? ident : uuid,
+            rssi: rssi,
+            isOsConnected: isOsConnected,
+            model: model
+        )
+        if let index = devices.firstIndex(where: {
+            $0.uuid == watch.uuid || (!$0.address.isEmpty && $0.address == watch.address)
+        }) {
+            let previous = devices[index]
+            devices[index] = ScannedWatch(
+                name: watch.name,
+                address: watch.address,
+                uuid: watch.uuid,
+                rssi: rssi != 0 ? rssi : previous.rssi,
+                isOsConnected: watch.isOsConnected || previous.isOsConnected,
+                model: watch.model
+            )
+        } else {
+            devices.append(watch)
+        }
+        devices.sort {
+            if $0.isOsConnected != $1.isOsConnected { return $0.isOsConnected && !$1.isOsConnected }
+            return $0.rssi > $1.rssi
+        }
+        let matchesLast = (!watch.address.isEmpty && watch.address == lastAddress)
+            || (!watch.uuid.isEmpty && watch.uuid == lastPeripheralUUID)
+        if matchesLast, connected == nil, !userRequestedDisconnect, !autoConnectAttemptedThisScan {
+            autoConnectAttemptedThisScan = true
+            connect(watch)
+        }
     }
 
     func connect(_ watch: ScannedWatch) {
@@ -447,13 +667,13 @@ final class VeepooSession: NSObject, ObservableObject {
         stopScan()
         sessionMessage = "Conectando a \(watch.name)…"
         connected = watch
-        lastAddress = watch.address
+        rememberLastAddress(watch.address)
         lastName = watch.name
         rememberPeripheral(watch.model.peripheral)
         keepPendingConnect(watch.model.peripheral)
         manager.deviceShowConfirm = true
         manager.automaticConnection = false
-        note("Connect Veepoo \(watch.name) \(watch.address)")
+        note("Connect Veepoo \(watch.name)")
         manager.veepooSDKConnectDevice(watch.model, deviceConnect: { [weak self] state in
             Task { @MainActor in
                 self?.handleConnect(state, watch: watch)
@@ -589,6 +809,7 @@ final class VeepooSession: NSObject, ObservableObject {
     }
 
     private func onHandshake(_ watch: ScannedWatch) {
+        adoptSdkMac(from: watch)
         if hardwareReady {
             advanceMeasurementCycle()
             return
@@ -610,16 +831,84 @@ final class VeepooSession: NSObject, ObservableObject {
         readBattery()
         manager.peripheralManage.veepooSdkStartReadDeviceAllData { [weak self] state, _, _, _ in
             Task { @MainActor in
+                guard let self else { return }
                 if state.rawValue == 2 {
-                    self?.sessionMessage = "Histórico do relógio lido. Medindo batimentos…"
-                    self?.note("Histórico do band lido. FC.")
+                    self.sessionMessage = "Histórico do relógio lido. Medindo batimentos…"
+                    self.note("Histórico do band lido. FC.")
                     // Acerta a hora depois do histórico (como no Android): no handshake o VE30 ignora o comando.
-                    self?.syncWatchTime(manual: false)
-                    self?.advanceMeasurementCycle()
+                    self.syncWatchTime(manual: false)
+                    if let current = self.connected {
+                        self.adoptSdkMac(from: current)
+                    }
+                    self.lastHistoryPullAt = Date()
+                    await self.enqueueWatchHistoryThenFlush()
+                    self.advanceMeasurementCycle()
                 }
             }
         }
+        if Self.isInBackground { backgroundStreaming = true }
         startCycle(reason: "relógio conectado", force: true)
+    }
+
+    /// After password verification the SDK fills `deviceAddress` with the radio MAC
+    /// (`VPPeripheralModel.h`: "password verification may change after successful verification").
+    private func adoptSdkMac(from watch: ScannedWatch) {
+        let uuid = watch.model.peripheral?.identifier.uuidString ?? watch.uuid
+        let sources: [(String, String?)] = [
+            ("peripheralManage.peripheralModel.deviceAddress", manager.peripheralManage?.peripheralModel?.deviceAddress),
+            ("peripheralModel.deviceAddress", manager.peripheralModel?.deviceAddress),
+            ("connected VPPeripheralModel.deviceAddress", watch.model.deviceAddress),
+        ]
+        var mac: String?
+        var source = ""
+        for (name, raw) in sources {
+            if let normalized = DeviceIdentity.shared.normalizeMac(raw: raw) {
+                mac = normalized
+                source = name
+                break
+            }
+        }
+        let deviceId = DeviceIdentity.shared.ingestDeviceId(sdkAddress: mac, coreBluetoothUuid: uuid)
+        guard !deviceId.isEmpty else { return }
+        applyIngestDeviceId(deviceId, watch: watch)
+        if mac != nil {
+            NSLog("[Next2U] device_id MAC via %@ = %@", source, deviceId)
+            note("device_id: MAC do SDK (\(source)).")
+        } else {
+            NSLog("[Next2U] device_id fallback UUID CoreBluetooth (SDK sem MAC)")
+            note("device_id: UUID (SDK não informou MAC).")
+        }
+    }
+
+    /// Keep a stored MAC; do not replace it with a CoreBluetooth UUID before handshake.
+    private func rememberLastAddress(_ candidate: String) {
+        if DeviceIdentity.shared.normalizeMac(raw: candidate) != nil {
+            lastAddress = candidate
+            return
+        }
+        if DeviceIdentity.shared.normalizeMac(raw: lastAddress) != nil { return }
+        lastAddress = candidate
+    }
+
+    private func applyIngestDeviceId(_ deviceId: String, watch: ScannedWatch) {
+        lastAddress = deviceId
+        var updated = watch
+        updated.address = deviceId
+        connected = updated
+        if let index = devices.firstIndex(where: { $0.uuid == watch.uuid && !watch.uuid.isEmpty }) {
+            devices[index].address = deviceId
+        }
+    }
+
+    /// MAC after handshake; CoreBluetooth UUID only if the SDK still has no address.
+    private func ingestDeviceId() -> String {
+        DeviceIdentity.shared.ingestDeviceId(
+            sdkAddress: manager.peripheralManage?.peripheralModel?.deviceAddress
+                ?? manager.peripheralModel?.deviceAddress
+                ?? connected?.model.deviceAddress
+                ?? lastAddress,
+            coreBluetoothUuid: lastPeripheralUUID ?? connected?.uuid
+        )
     }
 
     /// Envia a hora do iPhone ao relógio (automático a cada handshake e pelo botão em Ajustes).
@@ -697,6 +986,10 @@ final class VeepooSession: NSObject, ObservableObject {
         heartRunning = true
         heartSamplesThisBurst = 0
         measureStartedAt = Date()
+        // Prazo do watchdog conta a partir deste início. Sem isso, depois do primeiro
+        // "sem amostras" o lastSampleAt antigo fazia o watchdog parar/reiniciar a FC a cada
+        // 3 s, e o relógio nunca completava uma medição (syslog 30/10 01:45–01:50).
+        lastSampleAt = Date()
         manager.peripheralManage.veepooSDKTestHeartStart(true) { [weak self] state, value in
             Task { @MainActor in
                 guard let self else { return }
@@ -710,7 +1003,7 @@ final class VeepooSession: NSObject, ObservableObject {
                     self.note("FC: amostra \(self.heartSamplesThisBurst) recebida.")
                     self.cycleGotReading = true
                     self.recordAndFlush()
-                    if self.heartSamplesThisBurst >= Self.heartSamplesPerCycle {
+                    if !self.backgroundStreaming, self.heartSamplesThisBurst >= Self.heartSamplesPerCycle {
                         self.stopHeart()
                         self.startOxygen()
                     }
@@ -794,13 +1087,52 @@ final class VeepooSession: NSObject, ObservableObject {
 
     /// Flush the durable queue without recording a new reading.
     func flushQueueOnly() {
-        guard PatientStore.shared.status == .ready else { return }
+        Task { await self.performFlush() }
+    }
+
+    /// Used by BGTask after `configureIngest()` / store open.
+    func noteBackgroundFlush(_ flush: FlushOutcome) {
+        applyFlush(flush)
+    }
+
+    /// History from the Veepoo SDK database, then one flush. Same IDs on reconnect.
+    private func enqueueWatchHistoryThenFlush() async {
+        guard PatientStore.shared.status == .ready else {
+            note("Histórico lido; store ainda não abriu.")
+            return
+        }
+        configureIngest()
+        let watch = connected
+        let deviceId = ingestDeviceId()
+        let deviceModel = watch?.name ?? lastName ?? "VE30"
+        let days = Int(manager.peripheralModel?.saveDays ?? 3)
+        var samples = VeepooHistoryIngest.samples(deviceId: deviceId, days: days)
+        if samples.isEmpty, let uuid = lastPeripheralUUID, uuid != deviceId {
+            samples = VeepooHistoryIngest.samples(deviceId: uuid, days: days)
+        }
+        let queued = await VeepooHistoryIngest.enqueue(
+            samples: samples,
+            deviceId: deviceId,
+            deviceModel: deviceModel,
+            patientId: PatientStore.shared.profile().patientId
+        )
+        NSLog("[Next2U] Histórico do relógio: amostras=%d novas na fila=%d", samples.count, queued)
+        note("Histórico do relógio enfileirado.")
+        await performFlush()
+    }
+
+    @discardableResult
+    func performFlush() async -> Bool {
+        guard PatientStore.shared.status == .ready else { return false }
         configureIngest()
         let task = beginIngestTask()
-        Task {
-            defer { self.endIngestTask(task) }
-            guard let flush = try? await IngestRuntime.shared.flush() else { return }
+        defer { endIngestTask(task) }
+        do {
+            let flush = try await IngestRuntime.shared.flush()
             applyFlush(flush)
+            return flush.failedCount == 0
+        } catch {
+            return false
         }
     }
 
@@ -856,6 +1188,9 @@ final class VeepooSession: NSObject, ObservableObject {
     }
 
     private func recordAndFlush() {
+        // FC contínua em segundo plano: no máximo uma leitura por minuto na fila.
+        if backgroundStreaming, Date().timeIntervalSince(lastRecordAt) < Self.minUploadInterval { return }
+        lastRecordAt = Date()
         guard PatientStore.shared.status == .ready else {
             note("Leitura recebida; store ainda não abriu.")
             NSLog("[Next2U] Leitura NÃO gravada: store %@", "\(PatientStore.shared.status)")
@@ -867,7 +1202,7 @@ final class VeepooSession: NSObject, ObservableObject {
         Task {
             defer { self.endIngestTask(task) }
             guard let recorded = try? await IngestRuntime.shared.recordLive(
-                deviceId: watch?.address ?? "",
+                deviceId: ingestDeviceId(),
                 deviceModel: watch?.name ?? "VE30",
                 heartRate: Int32(heartRate),
                 spo2: Int32(spo2),
@@ -892,10 +1227,28 @@ final class VeepooSession: NSObject, ObservableObject {
             pendingCount = Int(IngestRuntime.shared.pendingCount())
             failedCount = Int(IngestRuntime.shared.failedCount())
             refreshLocalStore()
-            if recorded.queued {
-                guard let flush = try? await IngestRuntime.shared.flush() else { return }
-                applyFlush(flush)
-            }
+            if recorded.queued { await self.throttledFlush() }
+        }
+    }
+
+    /// Envia no máximo 1x/min; leituras intermediárias ficam na fila durável e saem no
+    /// próximo envio (adiado ou acordado pela próxima notificação do relógio).
+    private func throttledFlush() async {
+        let wait = Self.minUploadInterval - Date().timeIntervalSince(lastFlushAt)
+        if wait <= 0 {
+            lastFlushAt = Date()
+            deferredFlush?.cancel()
+            deferredFlush = nil
+            await performFlush()
+            return
+        }
+        guard deferredFlush == nil else { return }
+        deferredFlush = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
+            guard let self, !Task.isCancelled else { return }
+            self.deferredFlush = nil
+            self.lastFlushAt = Date()
+            await self.performFlush()
         }
     }
 
@@ -955,6 +1308,15 @@ final class VeepooSession: NSObject, ObservableObject {
         case .poweredOn:
             bleConnectionLabel = hardwareReady ? "Relógio pronto" : "Bluetooth ligado"
             note("Bluetooth ligado.")
+            if isScanning {
+                seedKnownAndConnectedWatches()
+                manager.manufacturerIDFilter = false
+                manager.rrisLimit = -127
+                manager.centralManager.scanForPeripherals(
+                    withServices: nil,
+                    options: [CBCentralManagerScanOptionAllowDuplicatesKey: true]
+                )
+            }
             reconnectLastKnown(reason: "poweredOn")
         case .poweredOff:
             hardwareReady = false
@@ -1032,11 +1394,13 @@ final class VeepooSession: NSObject, ObservableObject {
         let watch = ScannedWatch(
             name: lastName ?? peripheral.name ?? "VE30",
             address: lastAddress ?? peripheral.identifier.uuidString,
+            uuid: peripheral.identifier.uuidString,
             rssi: 0,
+            isOsConnected: true,
             model: model
         )
         connected = watch
-        lastAddress = watch.address
+        rememberLastAddress(watch.address)
         lastName = watch.name
         lastPeripheralUUID = peripheral.identifier.uuidString
         if gattUpSince == nil { gattUpSince = Date() }
@@ -1064,11 +1428,13 @@ final class VeepooSession: NSObject, ObservableObject {
         let watch = ScannedWatch(
             name: lastName ?? peripheral.name ?? "VE30",
             address: lastAddress ?? peripheral.identifier.uuidString,
+            uuid: peripheral.identifier.uuidString,
             rssi: 0,
+            isOsConnected: true,
             model: model
         )
         connected = watch
-        lastAddress = watch.address
+        rememberLastAddress(watch.address)
         lastName = watch.name
         lastPeripheralUUID = peripheral.identifier.uuidString
         manager.deviceShowConfirm = false
@@ -1201,6 +1567,7 @@ final class VeepooSession: NSObject, ObservableObject {
             "Último evento BLE: \(lastBleEvent) (\(when))",
             "Ligação: \(bleConnectionLabel)",
             "Último envio: \(lastUploadLabel)",
+            "device_id: \(ingestDeviceId())",
         ]
     }
 
@@ -1245,6 +1612,13 @@ final class VeepooCentralForwarder: NSObject, CBCentralManagerDelegate {
             advertisementData: advertisementData,
             rssi: RSSI
         )
+        Task { @MainActor in
+            self.session?.onDidDiscover(
+                peripheral: peripheral,
+                advertisementData: advertisementData,
+                rssi: RSSI
+            )
+        }
     }
 
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
@@ -1284,6 +1658,7 @@ final class VeepooCentralForwarder: NSObject, CBCentralManagerDelegate {
     }
 }
 
+#if DEBUG
 struct BleDiagnosticsCard: View {
     @Environment(\.patientPalette) private var palette
     @ObservedObject var session: VeepooSession
@@ -1308,3 +1683,4 @@ struct BleDiagnosticsCard: View {
         .accessibilityIdentifier("ble_diagnostics_card")
     }
 }
+#endif

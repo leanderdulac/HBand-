@@ -35,14 +35,9 @@ struct ContentView: View {
                 .tabItem { Label("Relógio", systemImage: "applewatch") }
                 .tag(2)
 
-            QueueScreen(session: session)
-                .tabItem { Label("Envios", systemImage: "icloud.and.arrow.up") }
-                .badge(session.pendingCount)
-                .tag(3)
-
             SettingsScreen(themeStorage: $themeStorage, session: session)
                 .tabItem { Label("Ajustes", systemImage: "gearshape.fill") }
-                .tag(4)
+                .tag(3)
         }
         .tint(palette.primary)
         .environment(\.patientPalette, palette)

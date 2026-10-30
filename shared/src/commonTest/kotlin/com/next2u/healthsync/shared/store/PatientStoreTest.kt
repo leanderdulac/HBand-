@@ -2,6 +2,7 @@ package com.next2u.healthsync.shared.store
 
 import com.next2u.healthsync.shared.ingest.IngestRuntime
 import com.next2u.healthsync.shared.ingest.MemoryQueueStore
+import com.next2u.healthsync.shared.model.HBandTelemetry
 import kotlinx.coroutines.test.runTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
@@ -158,5 +159,21 @@ class PatientStoreTest {
         assertEquals("Maria", PatientStore.profile().fullName)
         assertEquals(250, PatientStore.hydration().single().amountMl)
         assertEquals(60, PatientStore.breathing().single().durationSeconds)
+    }
+
+    @Test
+    fun observed_history_metric_keeps_watch_time_and_skips_reconnect_duplicate() {
+        assertEquals(StoreStatus.READY, PatientStore.open())
+        val sample = HBandTelemetry(
+            deviceId = "C4:E3:42:AA:30:A4",
+            deviceModel = "VE30",
+            timestamp = "2026-10-29T12:00:00Z",
+            heartRate = 70,
+            isRealSensorData = true,
+        )
+        assertTrue(PatientStore.tryAppendObservedMetric(sample, 1_700_000_000_000L) > 0)
+        assertEquals(-1L, PatientStore.tryAppendObservedMetric(sample, 1_700_000_000_000L))
+        assertEquals(1, PatientStore.metricCount())
+        assertEquals(1_700_000_000_000L, PatientStore.metrics().single().timestampMillis)
     }
 }
