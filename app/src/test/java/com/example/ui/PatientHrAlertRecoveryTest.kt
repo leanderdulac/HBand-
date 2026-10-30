@@ -43,6 +43,9 @@ class PatientHrAlertRecoveryTest {
         field("_lowerHrThreshold", MutableStateFlow(50))
         field("_hrAlertsEnabled", enabled)
         field("notificationState", notices)
+        val prefs = RuntimeEnvironment.getApplication().getSharedPreferences("hr_alert_test", 0)
+        prefs.edit().clear().commit()
+        field("prefs", prefs)
     }
 
     private fun evaluate(hr: Int) {
@@ -59,14 +62,14 @@ class PatientHrAlertRecoveryTest {
         assertTrue(Notifications.sent.isEmpty())
     }
 
-    @Test fun failed_android_post_preserves_local_notice_and_later_attempt() {
+    @Test fun failed_android_post_preserves_local_notice_and_does_not_repeat() {
         Notifications.failure = "post"
         evaluate(40)
         assertTrue(notices.notification.value!!.message.contains("40 bpm"))
         Notifications.failure = ""
-        ShadowSystemClock.advanceBy(Duration.ofMillis(7999)); evaluate(130)
+        evaluate(38)
         assertEquals(1, Notifications.attempts)
-        ShadowSystemClock.advanceBy(Duration.ofMillis(1)); evaluate(130)
+        evaluate(130)
         assertEquals(2, Notifications.attempts)
         assertEquals(1001, Notifications.sent.single().first)
     }
@@ -75,35 +78,33 @@ class PatientHrAlertRecoveryTest {
         Notifications.failure = "post"
         evaluate(130)
         assertTrue(notices.notification.value!!.message.contains("130 bpm"))
-        ShadowSystemClock.advanceBy(Duration.ofSeconds(8))
         evaluate(40)
         assertTrue(notices.notification.value!!.message.contains("40 bpm"))
         assertEquals(2, Notifications.attempts)
         assertTrue(Notifications.sent.isEmpty())
     }
 
-    @Test fun high_and_low_share_the_existing_eight_second_window() {
-        evaluate(130)
-        ShadowSystemClock.advanceBy(Duration.ofMillis(7999)); evaluate(40)
-        assertEquals(listOf(1001), Notifications.sent.map { it.first })
-        ShadowSystemClock.advanceBy(Duration.ofMillis(1)); evaluate(40)
-        assertEquals(listOf(1001, 1002), Notifications.sent.map { it.first })
+    @Test fun stays_silent_while_above_and_rearms_only_after_hysteresis() {
+        repeat(20) { evaluate(101 + it % 3) }
+        assertEquals(1, Notifications.sent.size)
+        evaluate(97); evaluate(102)
+        assertEquals(1, Notifications.sent.size)
+        evaluate(95); evaluate(102)
+        assertEquals(listOf(1001, 1001), Notifications.sent.map { it.first })
     }
 
-    @Test fun first_automatic_notice_is_allowed_during_the_first_eight_seconds_of_uptime() {
+    @Test fun low_rearms_at_limit_plus_five() {
+        evaluate(40); evaluate(52); evaluate(40)
+        assertEquals(1, Notifications.sent.size)
+        evaluate(55); evaluate(40)
+        assertEquals(listOf(1002, 1002), Notifications.sent.map { it.first })
+    }
+
+    @Test fun first_automatic_notice_is_allowed_during_the_first_seconds_of_uptime() {
         ShadowPausedSystemClock.reset()
         assertTrue(SystemClock.elapsedRealtime() < 8000)
         evaluate(130)
         assertEquals(1, Notifications.sent.size)
-    }
-
-    @Test fun elapsed_sleep_counts_towards_the_window_without_advancing_uptime() {
-        evaluate(130)
-        val before = SystemClock.uptimeMillis()
-        ShadowSystemClock.simulateDeepSleep(Duration.ofSeconds(8))
-        assertEquals(before, SystemClock.uptimeMillis())
-        evaluate(40)
-        assertEquals(listOf(1001, 1002), Notifications.sent.map { it.first })
     }
 
     @Test fun cancellation_is_not_converted_into_an_ordinary_notification_failure() {
@@ -128,7 +129,6 @@ class PatientHrAlertRecoveryTest {
 
     @Test fun automatic_notices_keep_the_observed_value_without_a_simulation_label() {
         evaluate(130)
-        ShadowSystemClock.advanceBy(Duration.ofSeconds(8))
         evaluate(40)
         assertEquals(listOf(1001, 1002), Notifications.sent.map { it.first })
         Notifications.sent.zip(listOf(130, 40)).forEach { (sent, value) ->

@@ -43,6 +43,7 @@ import androidx.work.WorkManager
 
 import com.example.ui.components.SyncLogEntry
 import com.example.ui.theme.AppThemeOption
+import com.example.util.HrAlertGate
 import com.example.util.HrNotificationHelper
 import com.example.worker.HBandWorkScheduler
 import android.content.Context
@@ -216,7 +217,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _hrAlertsEnabled = MutableStateFlow(prefs.getBoolean("hr_alerts_enabled", true))
     val hrAlertsEnabled: StateFlow<Boolean> = _hrAlertsEnabled.asStateFlow()
 
-    private var lastAlertTimeMs: Long? = null
 
     private val insightPolicy = insightPolicy(com.example.BuildConfig.DEBUG, com.example.BuildConfig.AI_INSIGHT_ENABLED)
     private val insightReview = PatientInsightReview(
@@ -353,22 +353,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun evaluateHeartRateThresholds(hr: Int) {
         if (!_hrAlertsEnabled.value) return
-
-        val now = android.os.SystemClock.elapsedRealtime()
-        // Local elapsed duration, independent of civil-time corrections; includes device sleep.
-        lastAlertTimeMs?.let { if (now - it < 8000) return }
-
         val upper = _upperHrThreshold.value
         val lower = _lowerHrThreshold.value
-
-        if (hr > upper) {
-            lastAlertTimeMs = now
-            HrNotificationHelper.sendHighHrNotification(getApplication(), hr, upper)
-            showNotification("Batimentos: $hr bpm. Acima do limite cadastrado de $upper bpm.", isError = true)
-        } else if (hr < lower) {
-            lastAlertTimeMs = now
-            HrNotificationHelper.sendLowHrNotification(getApplication(), hr, lower)
-            showNotification("Batimentos: $hr bpm. Abaixo do limite cadastrado de $lower bpm.", isError = true)
+        // Sem campo inicializado: o estado vive em prefs (sobrevive a reinício do app).
+        when (HrAlertGate(prefs).evaluate(hr, upper, lower)) {
+            HrAlertGate.Kind.HIGH -> {
+                HrNotificationHelper.sendHighHrNotification(getApplication(), hr, upper)
+                showNotification("Batimentos: $hr bpm. Acima do limite cadastrado de $upper bpm.", isError = true)
+            }
+            HrAlertGate.Kind.LOW -> {
+                HrNotificationHelper.sendLowHrNotification(getApplication(), hr, lower)
+                showNotification("Batimentos: $hr bpm. Abaixo do limite cadastrado de $lower bpm.", isError = true)
+            }
+            null -> Unit
         }
     }
 
