@@ -607,31 +607,63 @@ struct ProfileEditorSheet: View {
 }
 
 /// Posts the frozen AlertCopy text. Limits are the ones cadastrados in Ajustes, not clinical ranges.
+///
+/// Edge-triggered: one notification when HR crosses the limit, then silence while it stays
+/// out of range. Re-arms once HR is back inside by `hysteresis` bpm; if it stays out of range,
+/// at most one reminder after `reminderAfter`. State lives in UserDefaults so a background
+/// relaunch (BLE state restoration) does not fire again. Fixed identifiers replace, not stack.
 enum HeartAlertDelivery {
-    static func evaluate(heartRate: Int) {
+    static let hysteresis = 5
+    static let reminderAfter: TimeInterval = 30 * 60
+
+    enum Kind: String { case high, low }
+
+    static func evaluate(heartRate: Int, now: Date = Date()) {
         let defaults = UserDefaults.standard
         guard defaults.bool(forKey: "hr_alerts_enabled"), heartRate > 0 else { return }
         let upper = defaults.object(forKey: "upper_hr_threshold") as? Int ?? 100
         let lower = defaults.object(forKey: "lower_hr_threshold") as? Int ?? 50
         let copy = AlertCopy.shared
-        if heartRate > upper {
-            post(title: copy.titleHigh(), body: copy.body(currentHr: Int32(heartRate), threshold: Int32(upper)))
-        } else if heartRate < lower {
-            post(title: copy.titleLow(), body: copy.body(currentHr: Int32(heartRate), threshold: Int32(lower)))
+        step(.high, outOfRange: heartRate > upper, backInside: heartRate <= upper - hysteresis, now: now) {
+            post(.high, title: copy.titleHigh(), body: copy.body(currentHr: Int32(heartRate), threshold: Int32(upper)))
+        }
+        step(.low, outOfRange: heartRate < lower, backInside: heartRate >= lower + hysteresis, now: now) {
+            post(.low, title: copy.titleLow(), body: copy.body(currentHr: Int32(heartRate), threshold: Int32(lower)))
         }
     }
 
-    private static func post(title: String, body: String) {
+    private static func step(_ kind: Kind, outOfRange: Bool, backInside: Bool, now: Date, fire: () -> Void) {
+        let d = UserDefaults.standard
+        let activeKey = "hr_alert_\(kind.rawValue)_active"
+        let firedKey = "hr_alert_\(kind.rawValue)_fired_at"
+        let remindedKey = "hr_alert_\(kind.rawValue)_reminded"
+        if outOfRange {
+            if !d.bool(forKey: activeKey) {
+                d.set(true, forKey: activeKey)
+                d.set(now.timeIntervalSince1970, forKey: firedKey)
+                d.set(false, forKey: remindedKey)
+                fire()
+            } else if !d.bool(forKey: remindedKey),
+                      now.timeIntervalSince1970 - d.double(forKey: firedKey) >= reminderAfter {
+                d.set(true, forKey: remindedKey)
+                fire()
+            }
+        } else if backInside, d.bool(forKey: activeKey) {
+            d.set(false, forKey: activeKey)
+            d.set(false, forKey: remindedKey)
+        }
+    }
+
+    private static func post(_ kind: Kind, title: String, body: String) {
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
         content.sound = .default
-        let request = UNNotificationRequest(
-            identifier: "hr-alert-\(Int(Date().timeIntervalSince1970))",
-            content: content,
-            trigger: nil
-        )
-        UNUserNotificationCenter.current().add(request)
+        content.threadIdentifier = "hr-alert"
+        let id = "hr-alert-\(kind.rawValue)"
+        let center = UNUserNotificationCenter.current()
+        center.removeDeliveredNotifications(withIdentifiers: [id])
+        center.add(UNNotificationRequest(identifier: id, content: content, trigger: nil))
     }
 }
 
