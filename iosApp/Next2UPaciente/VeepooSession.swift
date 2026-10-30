@@ -986,6 +986,10 @@ final class VeepooSession: NSObject, ObservableObject {
         heartRunning = true
         heartSamplesThisBurst = 0
         measureStartedAt = Date()
+        // Prazo do watchdog conta a partir deste início. Sem isso, depois do primeiro
+        // "sem amostras" o lastSampleAt antigo fazia o watchdog parar/reiniciar a FC a cada
+        // 3 s, e o relógio nunca completava uma medição (syslog 30/10 01:45–01:50).
+        lastSampleAt = Date()
         manager.peripheralManage.veepooSDKTestHeartStart(true) { [weak self] state, value in
             Task { @MainActor in
                 guard let self else { return }
