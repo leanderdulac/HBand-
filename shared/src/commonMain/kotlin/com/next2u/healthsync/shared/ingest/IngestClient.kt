@@ -26,6 +26,7 @@ data class IngestHttpCall(
 class IngestClient(
     private val http: HttpClient,
     private val transport: IngestTransport,
+    private val appVersion: String? = null,
 ) {
     init {
         require(transport.configurationError == null && !transport.baseUrl.isNullOrBlank()) {
@@ -54,6 +55,7 @@ class IngestClient(
             val response = http.request(baseUrl + path) {
                 this.method = method
                 header("X-API-Key", transport.apiKey)
+                if (!appVersion.isNullOrBlank()) header("X-App-Version", appVersion)
                 if (!idempotencyKey.isNullOrBlank()) header("Idempotency-Key", idempotencyKey)
                 if (body != null) {
                     setBody(TextContent(body, ContentType.Application.Json))

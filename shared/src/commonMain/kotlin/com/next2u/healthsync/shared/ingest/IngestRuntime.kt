@@ -91,6 +91,14 @@ object IngestRuntime {
         deviceLabel = sanitizeDeviceLabel(raw)
     }
 
+    /** Versão do app (ex.: "ios-1.4.0+21"), enviada no header X-App-Version de todo envio. */
+    var appVersion: String? = null
+        private set
+
+    fun setAppVersion(raw: String?) {
+        appVersion = raw?.trim()?.filter { it.code in 0x21..0x7E }?.take(64)?.takeIf { it.isNotEmpty() }
+    }
+
     /**
      * Identificação do paciente gerada no app (ex.: "PAT-LEANDRO-7F3A"). Leituras na fila com o
      * padrão antigo (PAT-HBAND-001) ou sem paciente saem com esta identificação no envio.
@@ -345,6 +353,7 @@ object IngestRuntime {
         val client = IngestClient(
             IngestClient.ingestHttpClient(engineOverride ?: defaultIngestEngine()),
             transport,
+            appVersion,
         )
         var synced = 0
         var failed = 0

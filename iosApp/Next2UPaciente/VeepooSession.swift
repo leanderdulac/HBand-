@@ -98,6 +98,16 @@ final class VeepooSession: NSObject, ObservableObject {
     private var cycleGotReading = false
     private var consecutiveEmptyCycles = 0
     private var nextCycleAt = Date.distantPast
+    /// Background: FC contínua mantém notificações GATT chegando, e cada uma acorda o app
+    /// (bluetooth-central). Sem isso, a pausa de 5 min entre ciclos deixava o app sem tráfego
+    /// BLE, o iOS suspendia e o watchdog nunca iniciava o próximo ciclo (campo 29/10).
+    private var backgroundStreaming = false
+    private var lastRecordAt = Date.distantPast
+    private var lastFlushAt = Date.distantPast
+    private var deferredFlush: Task<Void, Never>?
+    private var lastHistoryPullAt = Date.distantPast
+    static let minUploadInterval: TimeInterval = 60
+    static let historyPullMinInterval: TimeInterval = 5 * 60
     /// Liveness of the measurement loop. The FC/SpO₂ rotation is driven only by BLE
     /// callbacks, so one missed callback used to freeze it forever (no readings, no POSTs).
     private var lastSampleAt = Date()
@@ -181,6 +191,13 @@ final class VeepooSession: NSObject, ObservableObject {
         refreshLocalStore()
         note("Sessão BLE criada. Restore id \(Self.restoreId).")
         startStallWatchdog()
+        let nc = NotificationCenter.default
+        nc.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.handleEnteredBackground() }
+        }
+        nc.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.handleWillEnterForeground() }
+        }
     }
 
     /// Tempo máximo entre pedir a sessão Veepoo (senha 0000) e o handshake; passou disso,
@@ -256,6 +273,15 @@ final class VeepooSession: NSObject, ObservableObject {
     /// próximo ciclo só quando a pausa terminou.
     private func advanceMeasurementCycle(now: Date = Date()) {
         guard hardwareReady else { return }
+        if heartRunning, backgroundStreaming {
+            // FC contínua: só reinicia se o relógio parou de mandar amostras.
+            if now.timeIntervalSince(lastSampleAt) > Self.heartStageTimeout {
+                note("FC contínua sem amostras; reiniciando.")
+                stopHeart()
+                startHeart()
+            }
+            return
+        }
         if heartRunning, now.timeIntervalSince(measureStartedAt) > Self.heartStageTimeout {
             note("Ciclo: FC sem resultado completo em \(Int(Self.heartStageTimeout)) s.")
             stopHeart()
@@ -265,6 +291,10 @@ final class VeepooSession: NSObject, ObservableObject {
         if spo2Running, now.timeIntervalSince(measureStartedAt) > Self.oxygenStageTimeout {
             note("Ciclo: SpO₂ sem resultado em \(Int(Self.oxygenStageTimeout)) s.")
             finishCycle(reason: "SpO₂ sem resultado")
+            return
+        }
+        if backgroundStreaming, !heartRunning, !spo2Running {
+            startHeart()
             return
         }
         if !heartRunning, !spo2Running, now >= nextCycleAt {
@@ -292,6 +322,11 @@ final class VeepooSession: NSObject, ObservableObject {
         if cycleGotReading {
             sessionMessage = "Medição concluída. Próxima em \(Int(idle / 60)) min."
         }
+        if backgroundStreaming || Self.isInBackground {
+            // Em segundo plano uma pausa sem tráfego BLE = app suspenso. Reabre a FC já.
+            backgroundStreaming = true
+            if hardwareReady { startHeart() }
+        }
     }
 
     func configureIngest() {
@@ -305,6 +340,7 @@ final class VeepooSession: NSObject, ObservableObject {
                   builtIn.isEmpty ? "não" : "sim", builtIn.count, deviceLabel)
         }
         IngestRuntime.shared.setDeviceLabel(raw: deviceLabel)
+        IngestRuntime.shared.setAppVersion(raw: Self.appVersionString)
         IngestRuntime.shared.configure(
             baseUrl: ingestUrl,
             overrideKey: key.isEmpty ? nil : key,
@@ -316,6 +352,13 @@ final class VeepooSession: NSObject, ObservableObject {
     }
 
     private static var loggedIngestConfig = false
+    /// "1.2.3+45" (CFBundleShortVersionString+CFBundleVersion) → header X-App-Version.
+    static let appVersionString: String = {
+        let info = Bundle.main.infoDictionary
+        let short = info?["CFBundleShortVersionString"] as? String ?? "0"
+        let build = info?["CFBundleVersion"] as? String ?? "0"
+        return "ios-\(short)+\(build)"
+    }()
     /// Nome da pulseira escolhido pelo paciente em Meu perfil (vazio = segue o nome do perfil).
     static let wristbandNameKey = "wristband_name"
     /// Último `device_label` efetivo (cache para envios antes de o perfil abrir).
@@ -421,8 +464,64 @@ final class VeepooSession: NSObject, ObservableObject {
     func handleBecameActive() {
         note("App em primeiro plano.")
         configureIngest()
+        if hardwareReady {
+            pullWatchHistory(reason: "primeiro plano")
+        }
         advanceMeasurementCycle()
         reconnectLastKnown(reason: "primeiro plano")
+        flushQueueOnly()
+    }
+
+    private static var isInBackground: Bool {
+        UIApplication.shared.applicationState == .background
+    }
+
+    /// Envia o que está na fila (com beginBackgroundTask) e passa a FC contínua para que
+    /// as notificações do relógio continuem acordando o app com o iPhone bloqueado.
+    func handleEnteredBackground() {
+        note("App em segundo plano.")
+        Task { await self.performFlush() }
+        IngestBackground.schedule()
+        guard hardwareReady else { return }
+        backgroundStreaming = true
+        if !heartRunning {
+            stopOxygen()
+            startHeart()
+        }
+    }
+
+    func handleWillEnterForeground() {
+        guard backgroundStreaming else { return }
+        backgroundStreaming = false
+        note("Primeiro plano: FC contínua encerrada, volta ao ciclo pontual.")
+        if heartRunning {
+            stopHeart()
+            finishCycle(reason: "volta ao primeiro plano")
+        }
+    }
+
+    /// Histórico gravado no relógio → fila (client_reading_id estável) → envio.
+    private func pullWatchHistory(reason: String, force: Bool = false) {
+        guard hardwareReady else { return }
+        if !force, Date().timeIntervalSince(lastHistoryPullAt) < Self.historyPullMinInterval { return }
+        lastHistoryPullAt = Date()
+        let resumeHeart = heartRunning
+        if resumeHeart { stopHeart() }
+        stopOxygen()
+        note("Lendo histórico do relógio (\(reason)).")
+        manager.peripheralManage.veepooSdkStartReadDeviceAllData { [weak self] state, _, _, _ in
+            Task { @MainActor in
+                guard let self, state.rawValue == 2 else { return }
+                if let current = self.connected { self.adoptSdkMac(from: current) }
+                await self.enqueueWatchHistoryThenFlush()
+                if self.backgroundStreaming || Self.isInBackground {
+                    self.backgroundStreaming = true
+                    if !self.heartRunning { self.startHeart() }
+                } else {
+                    self.advanceMeasurementCycle()
+                }
+            }
+        }
     }
 
     func startScan(automatic: Bool = false) {
@@ -741,11 +840,13 @@ final class VeepooSession: NSObject, ObservableObject {
                     if let current = self.connected {
                         self.adoptSdkMac(from: current)
                     }
+                    self.lastHistoryPullAt = Date()
                     await self.enqueueWatchHistoryThenFlush()
                     self.advanceMeasurementCycle()
                 }
             }
         }
+        if Self.isInBackground { backgroundStreaming = true }
         startCycle(reason: "relógio conectado", force: true)
     }
 
@@ -898,7 +999,7 @@ final class VeepooSession: NSObject, ObservableObject {
                     self.note("FC: amostra \(self.heartSamplesThisBurst) recebida.")
                     self.cycleGotReading = true
                     self.recordAndFlush()
-                    if self.heartSamplesThisBurst >= Self.heartSamplesPerCycle {
+                    if !self.backgroundStreaming, self.heartSamplesThisBurst >= Self.heartSamplesPerCycle {
                         self.stopHeart()
                         self.startOxygen()
                     }
@@ -1083,6 +1184,9 @@ final class VeepooSession: NSObject, ObservableObject {
     }
 
     private func recordAndFlush() {
+        // FC contínua em segundo plano: no máximo uma leitura por minuto na fila.
+        if backgroundStreaming, Date().timeIntervalSince(lastRecordAt) < Self.minUploadInterval { return }
+        lastRecordAt = Date()
         guard PatientStore.shared.status == .ready else {
             note("Leitura recebida; store ainda não abriu.")
             NSLog("[Next2U] Leitura NÃO gravada: store %@", "\(PatientStore.shared.status)")
@@ -1119,10 +1223,28 @@ final class VeepooSession: NSObject, ObservableObject {
             pendingCount = Int(IngestRuntime.shared.pendingCount())
             failedCount = Int(IngestRuntime.shared.failedCount())
             refreshLocalStore()
-            if recorded.queued {
-                guard let flush = try? await IngestRuntime.shared.flush() else { return }
-                applyFlush(flush)
-            }
+            if recorded.queued { await self.throttledFlush() }
+        }
+    }
+
+    /// Envia no máximo 1x/min; leituras intermediárias ficam na fila durável e saem no
+    /// próximo envio (adiado ou acordado pela próxima notificação do relógio).
+    private func throttledFlush() async {
+        let wait = Self.minUploadInterval - Date().timeIntervalSince(lastFlushAt)
+        if wait <= 0 {
+            lastFlushAt = Date()
+            deferredFlush?.cancel()
+            deferredFlush = nil
+            await performFlush()
+            return
+        }
+        guard deferredFlush == nil else { return }
+        deferredFlush = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
+            guard let self, !Task.isCancelled else { return }
+            self.deferredFlush = nil
+            self.lastFlushAt = Date()
+            await self.performFlush()
         }
     }
 
