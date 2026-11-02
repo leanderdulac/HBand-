@@ -26,11 +26,11 @@ O `VeepooBleSDK.framework` é **só iPhoneOS/arm64**. Use um iPhone físico.
 4. Confirmar o bundle `br.com.next2u.saude.paciente`.
 5. Rodar no **iPhone**. Checklist: `docs/ios-port/MAC-CHECKLIST.md`.
 
-SDK Veepoo vendored: **2.2.107.15** (`iosApp/Vendor/`). Android:
+SDK Veepoo vendored: **2.2.110.15** (`iosApp/Vendor/`). Android:
 `vpprotocol-2.3.80.15`. Ver `iosApp/Vendor/THIRD_PARTY_NOTICE.md`.
 
 ## Depois do primeiro archive
 
 Passos TestFlight e Ad Hoc: `docs/ios-port/PLAN.md` §5.4.
 
-O `VeepooBleSDK.framework` **já** está em `iosApp/Vendor/` (2.2.107.15).
+O `VeepooBleSDK.framework` **já** está em `iosApp/Vendor/` (2.2.110.15).
