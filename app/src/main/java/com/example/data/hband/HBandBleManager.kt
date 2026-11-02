@@ -166,6 +166,10 @@ class HBandBleManager(
 
     private val _watchDialCapabilities = MutableStateFlow(loadWatchDialCapabilities())
     val watchDialCapabilities: StateFlow<WatchDialCapabilities> = _watchDialCapabilities.asStateFlow()
+    private val _watchFaceState = MutableStateFlow(WatchFaceUiState())
+    val watchFaceState: StateFlow<WatchFaceUiState> = _watchFaceState.asStateFlow()
+    private val _watchAutoMeasureState = MutableStateFlow(WatchAutoMeasureState())
+    val watchAutoMeasureState: StateFlow<WatchAutoMeasureState> = _watchAutoMeasureState.asStateFlow()
 
     private val _historySyncState = MutableStateFlow(HistorySyncUiState())
     val historySyncState: StateFlow<HistorySyncUiState> = _historySyncState.asStateFlow()
@@ -281,6 +285,33 @@ class HBandBleManager(
     private var lastFunctionSupport: FunctionDeviceSupportData? = null
     private var lastAutoMeasureSettings: List<AutoMeasureData> = emptyList()
     private val watchSettingsMutex = Mutex()
+
+    /** Fuso/hora do telefone mudou: reacerta o relógio se houver sessão Veepoo ativa. */
+    private val clockChangeReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(ctx: Context, intent: android.content.Intent) {
+            if (!isVeepooConnection || !hasLiveHardwareSession()) return
+            Log.i(TAG, "VE30 hora: ${intent.action} — reacertando")
+            scope.launch(Dispatchers.Main) {
+                watchSettingsMutex.withLock {
+                    if (isVeepooConnection && hasLiveHardwareSession()) writeWatchTime(manual = false)
+                }
+            }
+        }
+    }
+
+    init {
+        runCatching {
+            androidx.core.content.ContextCompat.registerReceiver(
+                context.applicationContext,
+                clockChangeReceiver,
+                android.content.IntentFilter().apply {
+                    addAction(android.content.Intent.ACTION_TIMEZONE_CHANGED)
+                    addAction(android.content.Intent.ACTION_TIME_CHANGED)
+                },
+                androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED,
+            )
+        }.onFailure { Log.w(TAG, "Receiver de fuso não registrado: ${it.message}") }
+    }
     private var autoMeasureRevision = 0L
     private var spo2SettingRevision = 0L
     private var wearSettingRevision = 0L
@@ -806,6 +837,7 @@ class HBandBleManager(
                 // overload de 6 args (sem esse listener) deixava o handshake incompleto no
                 // firmware real, mesmo com onPwdDataChange/onFunctionSupportDataChange OK.
                 Log.i(TAG, "VE30 senha: custom settings OK ($customSettingData) — syncPersonInfo")
+                recordAutoMeasure(customSettingData)
                 markPasswordHandshakeSucceeded("custom-settings")
                 syncVeepooPersonInfo()
             },
@@ -2189,6 +2221,139 @@ class HBandBleManager(
         }
     }
 
+    private fun recordAutoMeasure(data: com.veepoo.protocol.model.settings.CustomSettingData?) {
+        if (data == null) return
+        val state = runCatching {
+            WatchAutoMeasureState(
+                known = true,
+                heartRateAuto = WatchFace.statusToBool(data.autoHeartDetect?.name),
+                hrvAuto = WatchFace.statusToBool(data.autoHrv?.name),
+            )
+        }.getOrNull() ?: return
+        _watchAutoMeasureState.value = state
+        Log.i(TAG, "VE30 medição automática: FC=${state.heartRateAuto} HRV=${state.hrvAuto}")
+    }
+
+    /** Relê os ajustes do relógio (inclui medição automática de FC). Chamar com watchSettingsMutex. */
+    private suspend fun readWatchAutoMeasure() {
+        val data = withTimeoutOrNull(WATCH_TIME_TIMEOUT_MS) {
+            suspendCancellableCoroutine<com.veepoo.protocol.model.settings.CustomSettingData?> { cont ->
+                try {
+                    vpManager.readCustomSetting(
+                        IBleWriteResponse { w -> if (w != Constants.REQUEST_SUCCESS && cont.isActive) cont.resume(null) },
+                        ICustomSettingDataListener { d -> if (cont.isActive) cont.resume(d) },
+                    )
+                } catch (e: Exception) {
+                    Log.w(TAG, "VE30 readCustomSetting falhou: ${e.message}")
+                    if (cont.isActive) cont.resume(null)
+                }
+            }
+        }
+        recordAutoMeasure(data)
+    }
+
+    /** Ajustes > Relógio > "Trocar foto do mostrador". [imagePath] já recortado/reduzido. */
+    fun requestWatchPhotoDial(imagePath: String) {
+        if (_watchFaceState.value.busy) return
+        if (!hasLiveHardwareSession() || !isVeepooConnection) {
+            _watchFaceState.value = WatchFaceUiState(lastResultOk = false, message = WatchFace.failureMessage(WatchFaceFailure.NOT_CONNECTED))
+            return
+        }
+        _watchFaceState.value = WatchFaceUiState(busy = true, message = WatchFace.PREPARING_MESSAGE)
+        scope.launch(Dispatchers.Main) {
+            val failure = watchSettingsMutex.withLock {
+                if (!hasLiveHardwareSession()) WatchFaceFailure.NOT_CONNECTED else sendWatchPhotoDial(imagePath)
+            }
+            _watchFaceState.value = if (failure == null) {
+                WatchFaceUiState(lastResultOk = true, message = WatchFace.SUCCESS_MESSAGE)
+            } else {
+                WatchFaceUiState(lastResultOk = false, message = WatchFace.failureMessage(failure))
+            }
+            Log.i(TAG, "VE30 mostrador: resultado=${failure ?: "OK"}")
+        }
+    }
+
+    fun reportWatchPhotoImageError() {
+        _watchFaceState.value = WatchFaceUiState(lastResultOk = false, message = WatchFace.failureMessage(WatchFaceFailure.IMAGE))
+    }
+
+    /** Sequência do demo oficial: notify JL → MTU 247 → auth RCSP → sistema de arquivos → foto. */
+    private suspend fun sendWatchPhotoDial(imagePath: String): WatchFaceFailure? {
+        val jl = runCatching { vpManager.isJLDevice() }.getOrDefault(false)
+        if (!jl) return WatchFaceFailure.UNSUPPORTED
+        withTimeoutOrNull(5_000L) {
+            suspendCancellableCoroutine<Unit> { cont ->
+                runCatching {
+                    vpManager.openJLDataNotify(object : com.inuker.bluetooth.library.connect.response.BleNotifyResponse {
+                        override fun onNotify(service: java.util.UUID?, character: java.util.UUID?, value: ByteArray?) {}
+                        override fun onResponse(code: Int) { if (cont.isActive) cont.resume(Unit) }
+                    })
+                }.onFailure { if (cont.isActive) cont.resume(Unit) }
+            }
+        }
+        withTimeoutOrNull(5_000L) {
+            suspendCancellableCoroutine<Unit> { cont ->
+                runCatching {
+                    vpManager.changeMTU(247, com.veepoo.protocol.listener.data.IMtuChangeListener { if (cont.isActive) cont.resume(Unit) })
+                }.onFailure { if (cont.isActive) cont.resume(Unit) }
+            }
+        }
+        val authOk = withTimeoutOrNull(20_000L) {
+            suspendCancellableCoroutine<Boolean> { cont ->
+                runCatching {
+                    vpManager.startJLDeviceAuth(object : com.inuker.bluetooth.library.jieli.response.RcspAuthResponse {
+                        override fun onRcspAuthStart() {}
+                        override fun onRcspAuthSuccess() { if (cont.isActive) cont.resume(true) }
+                        override fun onRcspAuthFailed() { if (cont.isActive) cont.resume(false) }
+                    })
+                }.onFailure { if (cont.isActive) cont.resume(false) }
+            }
+        } ?: return WatchFaceFailure.TIMEOUT
+        if (!authOk) return WatchFaceFailure.AUTH
+        val fsOk = withTimeoutOrNull(30_000L) {
+            suspendCancellableCoroutine<Boolean> { cont ->
+                runCatching {
+                    vpManager.listJLWatchList(object : com.inuker.bluetooth.library.jieli.dial.JLWatchFaceManager.OnWatchDialInfoGetListener {
+                        override fun onGettingWatchDialInfo() {}
+                        override fun onWatchDialInfoGetStart() {}
+                        override fun onWatchDialInfoGetComplete() {}
+                        override fun onWatchDialInfoGetSuccess(
+                            system: MutableList<com.jieli.jl_fatfs.model.FatFile>?,
+                            server: MutableList<com.jieli.jl_fatfs.model.FatFile>?,
+                            pic: com.jieli.jl_fatfs.model.FatFile?,
+                        ) { if (cont.isActive) cont.resume(true) }
+                        override fun onWatchDialInfoGetFailed(error: com.jieli.jl_rcsp.model.base.BaseError?) {
+                            Log.w(TAG, "VE30 mostrador: listJLWatchList falhou: $error")
+                            if (cont.isActive) cont.resume(false)
+                        }
+                    })
+                }.onFailure { if (cont.isActive) cont.resume(false) }
+            }
+        } ?: return WatchFaceFailure.TIMEOUT
+        if (!fsOk) return WatchFaceFailure.TRANSFER
+        return withTimeoutOrNull(180_000L) {
+            suspendCancellableCoroutine<WatchFaceFailure?> { cont ->
+                runCatching {
+                    vpManager.setJLWatchPhotoDial(imagePath, object : com.inuker.bluetooth.library.jieli.dial.JLWatchFaceManager.JLTransferPicDialListener {
+                        override fun onLowPower() { if (cont.isActive) cont.resume(WatchFaceFailure.LOW_BATTERY) }
+                        override fun onJLTransferPicDialStart() {}
+                        override fun onTransferPicDialProgress(progress: Int) {
+                            _watchFaceState.value = WatchFaceUiState(busy = true, progress = progress, message = WatchFace.progressMessage(progress))
+                        }
+                        override fun onScaleBGPFileTransferComplete() {}
+                        override fun onAIPreviewTransferComplete() {}
+                        override fun onBigBGPFileTransferComplete() {}
+                        override fun onTransferComplete() { if (cont.isActive) cont.resume(null) }
+                        override fun onTransferError(code: Int, msg: String?) {
+                            Log.w(TAG, "VE30 mostrador: erro $code $msg")
+                            if (cont.isActive) cont.resume(WatchFaceFailure.TRANSFER)
+                        }
+                    })
+                }.onFailure { if (cont.isActive) cont.resume(WatchFaceFailure.TRANSFER) }
+            }
+        } ?: WatchFaceFailure.TIMEOUT
+    }
+
     private fun recordWatchDialCapabilities(fs: FunctionDeviceSupportData) {
         val caps = runCatching {
             WatchDialCapabilities(
@@ -2637,6 +2802,7 @@ class HBandBleManager(
                 watchSettingsMutex.withLock {
                     if (historySync === sync && !sync.cancelled && !userRequestedDisconnect && isVeepooConnection) {
                         writeWatchTime(manual = false)
+                        readWatchAutoMeasure()
                     }
                 }
             } catch (e: CancellationException) {
