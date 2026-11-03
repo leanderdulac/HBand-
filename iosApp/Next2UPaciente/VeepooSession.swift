@@ -983,7 +983,7 @@ final class VeepooSession: NSObject, ObservableObject {
         pm.veepooSDKReadAutoMonitSwitchInfo { [weak self] models in
             Task { @MainActor in
                 guard let self else { return }
-                let heart = models.first { $0.type == .heartRate }
+                let heart = models?.first { $0.type == .heartRate }
                 self.watchAutoHeartOn = heart?.on
                 NSLog("[Next2U] Medição automática FC: %@ (intervalo %d min)",
                       heart.map { $0.on ? "ligada" : "desligada" } ?? "n/d", Int(heart?.timeInterval ?? 0))
