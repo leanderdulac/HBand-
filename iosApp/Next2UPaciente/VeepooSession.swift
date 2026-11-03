@@ -58,6 +58,14 @@ final class VeepooSession: NSObject, ObservableObject {
     @Published var watchPhotoDialCount: Int = UserDefaults.standard.integer(forKey: "watch_photo_dial_count")
     @Published var watchScreenTypes: Int = UserDefaults.standard.integer(forKey: "watch_screen_types")
     var watchSupportsPhotoDial: Bool { watchPhotoDialCount > 0 }
+    /// Troca da foto do mostrador (Ajustes > Relógio). Textos voltados ao paciente.
+    @Published var watchFaceBusy = false
+    @Published var watchFaceProgress: Double?
+    @Published var watchFaceStatus = ""
+    @Published var watchFaceLastOk: Bool?
+    /// Medição automática de batimentos configurada no relógio (nil = não informado).
+    @Published var watchAutoHeartOn: Bool?
+    private var watchFaceAttempt: UUID?
     private var watchTimeAttempt: UUID?
     private static var is24HourClock: Bool {
         let f = DateFormatter.dateFormat(fromTemplate: "j", options: 0, locale: .current) ?? "HH"
@@ -197,6 +205,16 @@ final class VeepooSession: NSObject, ObservableObject {
         }
         nc.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.handleWillEnterForeground() }
+        }
+        // Fuso ou hora do iPhone mudou: reacerta o relógio se houver sessão.
+        for name in [Notification.Name.NSSystemTimeZoneDidChange, UIApplication.significantTimeChangeNotification] {
+            nc.addObserver(forName: name, object: nil, queue: .main) { [weak self] n in
+                MainActor.assumeIsolated {
+                    guard let self, self.hardwareReady else { return }
+                    self.note("Hora: \(n.name.rawValue) — reacertando relógio.")
+                    self.syncWatchTime(manual: false)
+                }
+            }
         }
     }
 
@@ -837,6 +855,7 @@ final class VeepooSession: NSObject, ObservableObject {
                     self.note("Histórico do band lido. FC.")
                     // Acerta a hora depois do histórico (como no Android): no handshake o VE30 ignora o comando.
                     self.syncWatchTime(manual: false)
+                    self.readWatchAutoMeasure()
                     if let current = self.connected {
                         self.adoptSdkMac(from: current)
                     }
@@ -955,6 +974,105 @@ final class VeepooSession: NSObject, ObservableObject {
                     NSLog("[Next2U] Hora: falha ao sincronizar (manual=%@)", manual ? "sim" : "não")
                 }
             }
+        }
+    }
+
+    /// Lê se o relógio está medindo os batimentos sozinho (veepooSDKReadAutoMonitSwitchInfo).
+    func readWatchAutoMeasure() {
+        guard hardwareReady, let pm = manager.peripheralManage else { return }
+        pm.veepooSDKReadAutoMonitSwitchInfo { [weak self] models in
+            Task { @MainActor in
+                guard let self else { return }
+                let heart = models?.first { $0.type == .heartRate }
+                self.watchAutoHeartOn = heart?.on
+                NSLog("[Next2U] Medição automática FC: %@ (intervalo %d min)",
+                      heart.map { $0.on ? "ligada" : "desligada" } ?? "n/d", Int(heart?.timeInterval ?? 0))
+            }
+        }
+    }
+
+    /// Envia uma foto ao mostrador: lê o modelo de foto do relógio, ajusta a imagem ao tamanho
+    /// exato da tela (1x) e transmite, como no demo oficial (VPPhotoDialViewController).
+    func setWatchPhoto(_ image: UIImage) {
+        guard hardwareReady, let pm = manager.peripheralManage else {
+            watchFaceLastOk = false
+            watchFaceStatus = "Conecte o relógio para trocar a foto."
+            return
+        }
+        guard watchSupportsPhotoDial else {
+            watchFaceLastOk = false
+            watchFaceStatus = "Este relógio não permite trocar a foto do mostrador."
+            return
+        }
+        guard !watchFaceBusy else { return }
+        watchFaceBusy = true
+        watchFaceLastOk = nil
+        watchFaceProgress = nil
+        watchFaceStatus = "Preparando a foto…"
+        let attempt = UUID()
+        watchFaceAttempt = attempt
+        let fail: @MainActor (String) -> Void = { [weak self] reason in
+            guard let self, self.watchFaceAttempt == attempt else { return }
+            self.watchFaceAttempt = nil
+            self.watchFaceBusy = false
+            self.watchFaceProgress = nil
+            self.watchFaceLastOk = false
+            self.watchFaceStatus = "Não foi possível enviar a foto. Deixe o relógio perto do celular e tente de novo."
+            self.note("Mostrador: falha (\(reason)).")
+        }
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 180_000_000_000)
+            guard let self, self.watchFaceAttempt == attempt else { return }
+            fail("tempo esgotado")
+        }
+        pm.veepooSDK_dialChannel(with: .read, dialType: .photo, photoDialModel: nil, result: { [weak self] photoModel, _, error in
+            Task { @MainActor in
+                guard let self, self.watchFaceAttempt == attempt else { return }
+                guard error == nil, let model = photoModel else { fail("leitura: \(String(describing: error))"); return }
+                let size = model.configModel.screenSize
+                guard size.width > 0, size.height > 0, let fitted = Self.fitWatchFace(image, to: size) else {
+                    fail("imagem")
+                    return
+                }
+                model.isDefaultBG = false
+                model.transformImage = fitted
+                self.watchFaceStatus = "Enviando a foto para o relógio…"
+                pm.veepooSDK_dialChannel(with: .setupPhotoDial, dialType: .photo, photoDialModel: model, result: { _, _, err in
+                    Task { @MainActor in
+                        if let err { fail("envio: \(err)") }
+                    }
+                }, transformProgress: { progress in
+                    Task { @MainActor in
+                        guard self.watchFaceAttempt == attempt else { return }
+                        let pct = Int((min(max(progress, 0), 1) * 100).rounded())
+                        self.watchFaceProgress = min(max(progress, 0), 1)
+                        self.watchFaceStatus = "Enviando a foto para o relógio… \(pct)%"
+                        if progress >= 1 {
+                            self.watchFaceAttempt = nil
+                            self.watchFaceBusy = false
+                            self.watchFaceProgress = nil
+                            self.watchFaceLastOk = true
+                            self.watchFaceStatus = "Foto do mostrador atualizada."
+                            self.note("Mostrador: foto enviada.")
+                        }
+                    }
+                })
+            }
+        }, transformProgress: { _ in })
+    }
+
+    /// Recorte central no formato da tela e redimensiona para o tamanho exato em pixels (escala 1).
+    static func fitWatchFace(_ image: UIImage, to size: CGSize) -> UIImage? {
+        let src = image.size
+        guard src.width > 0, src.height > 0 else { return nil }
+        let scale = max(size.width / src.width, size.height / src.height)
+        let drawn = CGSize(width: src.width * scale, height: src.height * scale)
+        let origin = CGPoint(x: (size.width - drawn.width) / 2, y: (size.height - drawn.height) / 2)
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = true
+        return UIGraphicsImageRenderer(size: size, format: format).image { _ in
+            image.draw(in: CGRect(origin: origin, size: drawn))
         }
     }
 

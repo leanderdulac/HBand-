@@ -1549,6 +1549,20 @@
 - (void)veepooSDKListenHealthLightStatus:(void(^_Nullable)(VPHealthLightStatusType type))result;
 
 
+#pragma mark JH151 ECG 单导测试时长
+
+/// JH151-设置ECG单导测量时长
+/// - Parameters:
+///   - duration : 单导测量时长，单位秒（2字节，范围 0~65535，如 30/60/180）
+///   - result : 结果回调，success 为设置是否成功，duration 为设备回显的当前值
+- (void)veepooSDK_JH151SetECGSingleLeadTestDuration:(NSUInteger)duration callBack:(void(^_Nullable)(BOOL success, NSUInteger duration))result;
+
+/// JH151-读取ECG单导测量时长
+/// - Parameters:
+///   - result : 结果回调，success 为读取是否成功，duration 为当前单导测量时长（秒）
+- (void)veepooSDK_JH151ReadECGSingleLeadTestDuration:(void(^_Nullable)(BOOL success, NSUInteger duration))result;
+
+
 #pragma mark SN码
 
 /// 读取SN码
@@ -1592,6 +1606,26 @@
 ///   - status: YM23PRO 测试状态（见 VPM23ProTestStatus 枚举：0空闲/退出 1检测中 2修复中 3检测完成 4修复完成 5检测暂停 6修复暂停）
 ///   - result: 应答回调 (ack: 0不支持 1成功 2失败; currentStatus: 设备实际状态)
 - (void)veepooSDK_YM23ProSendTest:(VPM23ProTestStatus)status callBack:(void(^_Nullable)(NSInteger ack, NSInteger currentStatus))result;
+
+#pragma mark 佩戴方式
+
+/// 读取佩戴方式
+/// - result: 返回当前佩戴手 type(0不支持, 1 左手,2 右手)
+- (void)veepooSDK_readWearConfig:(void(^_Nullable)(NSInteger type))result;
+
+/// 设置佩戴方式
+/// - type: 1 左手,2 右手
+- (void)veepooSDK_setWearConfig:(int)type callBack:(void(^_Nullable)(BOOL success))result;
+
+#pragma mark 马达震动
+
+/// 读取马达震动强度
+/// - result: 返回当前马达震动强度 type(1:弱, 2:中,3:强)
+- (void)veepooSDK_readMotorVibrationType:(void(^_Nullable)(NSInteger type))result;
+
+/// 设置马达震动强度
+/// - type: 1:弱, 2:中,3:强
+- (void)veepooSDK_setMotorVibrationType:(NSInteger)type callBack:(void(^_Nullable)(BOOL success))result;
 
 @end
 
