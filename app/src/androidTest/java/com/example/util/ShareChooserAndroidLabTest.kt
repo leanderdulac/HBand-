@@ -30,7 +30,7 @@ class ShareChooserAndroidLabTest {
     @Test fun productionDialogDeliversReadOnlyCardThroughAndroidChooser() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext
-        val target = "com.aistudio.hbandhealthtech.pxq97m.storagelab"
+        val target = "br.com.next2u.saude.paciente.storagelab"
         val recipient = "$target.test"
         check(context.packageName == target)
         check(context.applicationContext.javaClass == Application::class.java)

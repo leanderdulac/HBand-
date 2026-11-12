@@ -118,6 +118,9 @@ fun HomeScreen(
     val autoMeasureState by viewModel.autoMeasureState.collectAsStateWithLifecycle()
     val wearDetectState by viewModel.wearDetectState.collectAsStateWithLifecycle()
     val watchClockState by viewModel.watchClockState.collectAsStateWithLifecycle()
+    val watchFaceState by viewModel.watchFaceState.collectAsStateWithLifecycle()
+    val watchAutoMeasureState by viewModel.watchAutoMeasureState.collectAsStateWithLifecycle()
+    val watchDialCapabilities by viewModel.watchDialCapabilities.collectAsStateWithLifecycle()
     val historySyncState by viewModel.historySyncState.collectAsStateWithLifecycle()
     val isHardwareConnected by viewModel.isHardwareConnected.collectAsStateWithLifecycle()
     val ecgState by viewModel.ecgState.collectAsStateWithLifecycle()
@@ -351,6 +354,10 @@ fun HomeScreen(
                     onSyncHistory = { viewModel.requestHistorySync() },
                     watchClockState = watchClockState,
                     onSyncWatchTime = { viewModel.syncWatchTime() },
+                    watchFaceState = watchFaceState,
+                    watchAutoMeasureState = watchAutoMeasureState,
+                    watchPhotoSupported = watchDialCapabilities.supportsPhotoDial,
+                    onWatchPhotoPicked = { viewModel.setWatchPhoto(it) },
                     alarmState = alarmState,
                     heartWarningState = heartWarningState,
                     longSeatState = longSeatState,

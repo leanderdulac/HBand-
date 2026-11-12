@@ -57,11 +57,11 @@ android {
   compileSdk { version = release(36) { minorApiLevel = 1 } }
 
   defaultConfig {
-    applicationId = "com.aistudio.hbandhealthtech.pxq97m"
+    applicationId = "br.com.next2u.saude.paciente"
     minSdk = 24
     targetSdk = 36
-    versionCode = 16
-    versionName = "1.7.4"
+    versionCode = 17
+    versionName = "1.7.5"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     buildConfigField("boolean", "BLE_LAB", "false")
@@ -82,11 +82,28 @@ android {
 
   signingConfigs {
     create("release") {
-      val keystorePath = System.getenv("KEYSTORE_PATH") ?: "${rootDir}/my-upload-key.jks"
-      storeFile = file(keystorePath)
-      storePassword = System.getenv("STORE_PASSWORD")
-      keyAlias = "upload"
-      keyPassword = System.getenv("KEY_PASSWORD")
+      // Upload key for Google Play. Secrets live OUTSIDE the repo in a properties file
+      // (storeFile, storePassword, keyAlias, keyPassword). Path from
+      // -Pnext2u.signing.properties=... or NEXT2U_SIGNING_PROPERTIES; falls back to the
+      // legacy env vars (KEYSTORE_PATH/STORE_PASSWORD/KEY_PASSWORD). Debug builds never use this.
+      val signingPropsPath = providers.gradleProperty("next2u.signing.properties").orNull
+        ?: System.getenv("NEXT2U_SIGNING_PROPERTIES")
+      val signingProps = signingPropsPath?.let { file(it) }?.takeIf { it.isFile }?.let { f ->
+        Properties().apply { f.inputStream().use { load(it) } }
+      }
+      if (signingProps != null) {
+        val propsDir = file(signingPropsPath!!).parentFile
+        storeFile = propsDir.resolve(signingProps.getProperty("storeFile"))
+        storePassword = signingProps.getProperty("storePassword")
+        keyAlias = signingProps.getProperty("keyAlias", "upload")
+        keyPassword = signingProps.getProperty("keyPassword")
+      } else {
+        val keystorePath = System.getenv("KEYSTORE_PATH") ?: "${rootDir}/my-upload-key.jks"
+        storeFile = file(keystorePath)
+        storePassword = System.getenv("STORE_PASSWORD")
+        keyAlias = "upload"
+        keyPassword = System.getenv("KEY_PASSWORD")
+      }
     }
     create("debugConfig") {
       storeFile = file("${rootDir}/debug.keystore")

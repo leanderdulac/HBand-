@@ -9,7 +9,7 @@ param(
 $ErrorActionPreference='Stop'
 $Serial='emulator-5590'
 $ExpectedAvd='Next2U_Upgrade466d_Lab_20260925'
-$labPackage='com.aistudio.hbandhealthtech.pxq97m.storagelab'
+$labPackage='br.com.next2u.saude.paciente.storagelab'
 $testPackage="$labPackage.test"
 $oldHash='b1b8046ed1bfbf23c8179b28d6e2aa8af21888ed5b0f42d1c21c48846a11e8b5'
 $newHash='7b36f18fc9ae1c8785d09fa2ef529a8cd442c93e6934526315e56eb95545cb73'

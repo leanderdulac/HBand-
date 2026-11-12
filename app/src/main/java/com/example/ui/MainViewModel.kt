@@ -98,6 +98,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val watchDialCapabilities = bleManager.watchDialCapabilities
 
     fun syncWatchTime() = bleManager.requestWatchTimeSync()
+    val watchFaceState = bleManager.watchFaceState
+    val watchAutoMeasureState = bleManager.watchAutoMeasureState
+
+    /** Recorta/reduz a foto fora da main thread e envia ao relógio. */
+    fun setWatchPhoto(uri: android.net.Uri) {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val path = com.example.util.WatchFaceImage.prepare(getApplication(), uri)
+            if (path == null) bleManager.reportWatchPhotoImageError() else bleManager.requestWatchPhotoDial(path)
+        }
+    }
     val historySyncState: StateFlow<HistorySyncUiState> = bleManager.historySyncState
     val isHardwareConnected: StateFlow<Boolean> = bleManager.isHardwareConnected
     val ecgState: StateFlow<DetectSessionUiState> = bleManager.ecgState
