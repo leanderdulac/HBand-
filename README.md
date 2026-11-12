@@ -15,7 +15,7 @@ O APK instalável está na pasta **[App principal](App%20principal/)**.
 | | |
 |---|---|
 | Arquivo | [App principal/App principal.apk](App%20principal/App%20principal.apk) |
-| Pacote | `com.aistudio.hbandhealthtech.pxq97m` |
+| Pacote | `br.com.next2u.saude.paciente` |
 | Versão | 1.0 |
 | Branch | `feature/next2u-patient-ui` |
 

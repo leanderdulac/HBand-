@@ -7,7 +7,7 @@ param(
 $ErrorActionPreference='Stop'
 $Serial='emulator-5588'
 $ExpectedAvd='Next2U_Receipt_Lab_20260925'
-$labPackage='com.aistudio.hbandhealthtech.pxq97m.storagelab'
+$labPackage='br.com.next2u.saude.paciente.storagelab'
 $testPackage="$labPackage.test"
 $adb=Join-Path $SdkRoot 'platform-tools/adb.exe'
 $aapt=Join-Path $SdkRoot 'build-tools/36.0.0/aapt.exe'

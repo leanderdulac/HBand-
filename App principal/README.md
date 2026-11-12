@@ -10,7 +10,7 @@ Este é o APK do HealthSync de tela branca (next2u SAÚDE), o app do paciente.
 
 **[App principal.apk](App%20principal.apk)**
 
-- Pacote: `com.aistudio.hbandhealthtech.pxq97m`
+- Pacote: `br.com.next2u.saude.paciente`
 - Versão: 1.0 (`versionCode` 1)
 - minSdk 24, targetSdk 36
 - Instalado no Galaxy Z Flip5 (`SM-F731B`)
