@@ -64,6 +64,34 @@ class DashboardAiInsightOrderTest {
         compose.onRoot().captureRoboImage(filePath = "build/patient-ui/dashboard_ai_insight_on.png")
     }
 
+    @Test fun without_consent_card_stays_after_watch_and_does_not_show_summary() {
+        compose.setContent {
+            MyApplicationTheme {
+                Box(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
+                    DashboardTab(
+                        syncDisplayStatus = SyncDisplayStatus.FULLY_SYNCED,
+                        pendingCount = 0, syncedCount = 0, failedCount = 0,
+                        syncLogs = emptyList(), apiHealth = ApiHealthState(),
+                        connectedDevice = null, latestTelemetry = null, sensorMetrics = emptyList(),
+                        autoIngestLive = true,
+                        onTriggerSync = {}, onRefreshHealth = {}, onRetryQueueRead = {},
+                        onToggleAutoIngest = {}, onSpotCheck = {}, onShowNotification = {},
+                        onScanClick = {}, onDisconnect = {},
+                        geminiInsightText = "NÃO DEVE APARECER",
+                        aiInsightConsented = false,
+                    )
+                }
+            }
+        }
+        val watch = top("device_control_card")
+        val insight = top("ai_insight_highlight_card")
+        assertTrue("watch=$watch insight=$insight", watch < insight)
+        compose.onNodeWithTag("ai_insight_consent_needed").assertExists()
+        compose.onNodeWithTag("gemini_insight_text").assertDoesNotExist()
+        compose.onNodeWithTag("refresh_gemini_insight_button").assertDoesNotExist()
+        compose.onRoot().captureRoboImage(filePath = "build/patient-ui/dashboard_ai_insight_consent_needed.png")
+    }
+
     @Test fun empty_state_keeps_the_card_visible() {
         show(insightText = "")
         compose.onNodeWithTag("ai_insight_highlight_card").assertExists()

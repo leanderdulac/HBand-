@@ -92,7 +92,7 @@ fun TelemetryStatusBanners(
 }
 
 
-/** "Versão 1.7.4 (12)" from BuildConfig, shown in Ajustes and as a Home footer. */
+/** "Versão 1.7.6 (18)" from BuildConfig, shown in Ajustes and as a Home footer. */
 fun appVersionLabel(name: String = com.example.BuildConfig.VERSION_NAME, code: Int = com.example.BuildConfig.VERSION_CODE): String =
     "Versão $name ($code)"
 
