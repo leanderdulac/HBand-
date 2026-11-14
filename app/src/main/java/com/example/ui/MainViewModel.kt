@@ -42,6 +42,8 @@ import androidx.lifecycle.asFlow
 import androidx.work.WorkManager
 
 import com.example.ui.components.SyncLogEntry
+import com.example.data.local.AiInsightConsentStore
+import com.example.data.local.shouldGenerateAiInsight
 import com.example.ui.theme.AppThemeOption
 import com.example.util.HrAlertGate
 import com.example.util.HrNotificationHelper
@@ -229,9 +231,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
 
     private val insightPolicy = insightPolicy(com.example.BuildConfig.DEBUG, com.example.BuildConfig.AI_INSIGHT_ENABLED)
+    private val aiInsightConsentStore = AiInsightConsentStore(prefs)
+    private val _aiInsightConsent = MutableStateFlow(aiInsightConsentStore.snapshot())
+    val aiInsightConsent: StateFlow<AiInsightConsentStore.Snapshot> = _aiInsightConsent.asStateFlow()
     private val insightReview = PatientInsightReview(
         viewModelScope, insightPolicy.manualRequests, repository.allSensorMetrics, automatic = insightPolicy.automatic,
+        consented = { _aiInsightConsent.value.consented },
     ) { metrics ->
+        if (!shouldGenerateAiInsight(insightPolicy.showInsight, _aiInsightConsent.value.consented)) {
+            return@PatientInsightReview ""
+        }
         com.example.data.remote.GeminiHealthAnalyzer.generateSevenDayInsight(
             metrics,
             db.userProfileDao().getUserProfile(),
@@ -308,6 +317,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun saveBreathingSession(token: String, durationSeconds: Int) = breathingSave.save(token, durationSeconds)
 
     fun generateGeminiInsight() = insightReview.request()
+
+    fun grantAiInsightConsent() {
+        _aiInsightConsent.value = aiInsightConsentStore.grant()
+        insightReview.request()
+        showNotification("Resumo com IA autorizado. Você pode desligar em Ajustes.")
+    }
+
+    fun withdrawAiInsightConsent() {
+        _aiInsightConsent.value = aiInsightConsentStore.withdraw()
+        insightReview.clear()
+        showNotification("Resumo com IA desligado. Nada mais é enviado para gerar o resumo.")
+    }
+
+    fun markAiInsightConsentPromptShown() {
+        _aiInsightConsent.value = aiInsightConsentStore.markPromptShown()
+    }
 
     init {
         bleManager.isAutoReconnectEnabled = _autoReconnectBle.value

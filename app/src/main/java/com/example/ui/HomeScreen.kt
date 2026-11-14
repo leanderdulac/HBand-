@@ -147,6 +147,8 @@ fun HomeScreen(
     val geminiInsightText by viewModel.geminiInsightText.collectAsStateWithLifecycle()
     val isGeneratingGeminiInsight by viewModel.isGeneratingGeminiInsight.collectAsStateWithLifecycle()
     val geminiInsightMeta by viewModel.geminiInsightMeta.collectAsStateWithLifecycle()
+    val aiInsightConsent by viewModel.aiInsightConsent.collectAsStateWithLifecycle()
+    var showAiInsightConsentDialog by rememberSaveable { mutableStateOf(false) }
 
     val hydrationRead by viewModel.todayHydrationMl.collectAsStateWithLifecycle()
     val todayHydrationMl = hydrationRead.valueOrNull()
@@ -179,6 +181,24 @@ fun HomeScreen(
     PatientNotificationEffect(notification, snackbarHostState, viewModel::dismissNotification)
 
     com.example.ui.components.BatteryOptimizationPrompt(hasPairedWatch = connectedDevice != null)
+
+    com.example.ui.components.AiInsightFirstConnectionPrompt(
+        featureEnabled = com.example.BuildConfig.AI_INSIGHT_ENABLED,
+        consented = aiInsightConsent.consented,
+        promptShown = aiInsightConsent.promptShown,
+        hasPairedWatch = connectedDevice != null,
+        onAuthorize = viewModel::grantAiInsightConsent,
+        onNotNow = viewModel::markAiInsightConsentPromptShown,
+    )
+    if (showAiInsightConsentDialog) {
+        com.example.ui.components.AiInsightConsentDialog(
+            onAuthorize = {
+                showAiInsightConsentDialog = false
+                viewModel.grantAiInsightConsent()
+            },
+            onNotNow = { showAiInsightConsentDialog = false },
+        )
+    }
 
     com.example.ui.components.PatientAdaptiveScaffold(
         modifier = modifier,
@@ -244,6 +264,9 @@ fun HomeScreen(
                     onRefreshGeminiInsight = { viewModel.generateGeminiInsight() },
                     geminiInsightGeneratedAtMillis = geminiInsightMeta.generatedAtMillis,
                     geminiInsightFailed = geminiInsightMeta.failed,
+                    showAiInsight = com.example.BuildConfig.AI_INSIGHT_ENABLED,
+                    aiInsightConsented = aiInsightConsent.consented,
+                    onRequestAiInsightConsent = { showAiInsightConsentDialog = true },
                     todayHydrationMl = todayHydrationMl,
                     hydrationTargetMl = userProfile?.targetWaterMl,
                     onAddWater = { viewModel.addWaterIntake(it) },
@@ -375,6 +398,12 @@ fun HomeScreen(
                     ingestDiagnostics = ingestDiagnostics,
                     themeOption = themeOption,
                     onThemeOptionChange = { viewModel.setThemeOption(it) },
+                    aiInsightFeatureEnabled = com.example.BuildConfig.AI_INSIGHT_ENABLED,
+                    aiInsightConsented = aiInsightConsent.consented,
+                    onAiInsightConsentChange = { enabled ->
+                        if (enabled) viewModel.grantAiInsightConsent()
+                        else viewModel.withdrawAiInsightConsent()
+                    },
                 )
             }
         }
@@ -432,6 +461,9 @@ internal fun DashboardTab(
     onRefreshGeminiInsight: () -> Unit = {},
     geminiInsightGeneratedAtMillis: Long? = null,
     geminiInsightFailed: Boolean = false,
+    showAiInsight: Boolean = true,
+    aiInsightConsented: Boolean = true,
+    onRequestAiInsightConsent: () -> Unit = {},
     todayHydrationMl: Int? = null,
     hydrationTargetMl: Int? = null,
     onAddWater: (Int) -> Unit = {},
@@ -502,14 +534,18 @@ internal fun DashboardTab(
                 onDisconnect = onDisconnect,
             )
 
-            com.example.ui.components.AiInsightHighlightCard(
-                insightText = geminiInsightText,
-                isLoading = isGeneratingGeminiInsight,
-                onRefreshInsight = onRefreshGeminiInsight,
-                generatedAtMillis = geminiInsightGeneratedAtMillis,
-                failed = geminiInsightFailed,
-                modifier = Modifier.fillMaxWidth(),
-            )
+            if (showAiInsight) {
+                com.example.ui.components.AiInsightHighlightCard(
+                    insightText = geminiInsightText,
+                    isLoading = isGeneratingGeminiInsight,
+                    onRefreshInsight = onRefreshGeminiInsight,
+                    generatedAtMillis = geminiInsightGeneratedAtMillis,
+                    failed = geminiInsightFailed,
+                    consented = aiInsightConsented,
+                    onRequestConsent = onRequestAiInsightConsent,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
 
             com.example.ui.components.LowBatteryWarningCard(
                 device = connectedDevice,

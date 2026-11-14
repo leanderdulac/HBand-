@@ -80,6 +80,29 @@ class AiInsightHighlightCardTest {
         compose.onNodeWithTag("ai_insight_review_label").assertExists()
     }
 
+    @Test fun without_consent_hides_summary_and_asks_to_enable() {
+        var refresh = 0
+        var consent = 0
+        compose.setContent {
+            MyApplicationTheme {
+                Column(Modifier.verticalScroll(rememberScrollState()).padding(16.dp)) {
+                    AiInsightHighlightCard(
+                        "texto que não deve aparecer", false, { refresh++ },
+                        consented = false, onRequestConsent = { consent++ },
+                    )
+                }
+            }
+        }
+        compose.onNodeWithTag("ai_insight_consent_needed").assertExists()
+        compose.onNodeWithTag("gemini_insight_text").assertDoesNotExist()
+        compose.onNodeWithTag("refresh_gemini_insight_button").assertDoesNotExist()
+        compose.onNodeWithTag("ai_insight_enable_button").performClick()
+        compose.runOnIdle {
+            assertEquals(0, refresh)
+            assertEquals(1, consent)
+        }
+    }
+
     @Test fun empty_state_is_friendly_and_has_no_timestamp() {
         show()
         compose.onNodeWithTag("ai_insight_empty").assertTextContains("resumo dos últimos 7 dias aparece aqui", substring = true)
