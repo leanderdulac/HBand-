@@ -79,7 +79,7 @@ Não há onboarding de “primeiro uso” separado no Android: o pareamento **é
 | Item | Android | iOS | Classe | Esforço |
 |---|---|---|---|---|
 | Busca / lista / conectar / desligar | Completo + permissões Android 12 + “conectar por MAC” + falhas de scan | `WatchScreen` + `VeepooSession` (scan, senha `0000`, FC, SpO₂, bateria) | **Simplificado** — P0 funciona no iPhone; falta MAC manual, mensagens de permissão alinhadas, scan failure tipado | M |
-| Handshake senha `0000` + sensores vivos | FC, SpO₂, PA, temp, HRV em revezamento | FC + SpO₂; sem PA/temp/HRV contínuos | **Simplificado** | M |
+| Handshake senha `0000` + sensores vivos | FC, SpO₂, PA, temp, HRV em revezamento | FC + SpO₂ + PA (ciclo, ~30 min) + passos do dia; sem temp/HRV contínuos | **Simplificado** | M |
 | Histórico do relógio (origin / sono / HRV) | `VeepooHistorySync` | Leitura diária só para liberar o PPG | **Ausente** como produto | L |
 | Auto-reconnect persistido | Preferência em Ajustes | `automaticConnection` do SDK + último endereço | **Simplificado** | S |
 | Serviço em primeiro plano / boot | `HBandBleService` + `HBandBootReceiver` | `bluetooth-central` + restore sidecar | **Intencional** — ver §10 | — |
@@ -96,7 +96,7 @@ Não há onboarding de “primeiro uso” separado no Android: o pareamento **é
 | Badge na aba Envios | Contagem real | Não | **Ausente** | S |
 | Retry item / retry todos / apagar / limpar sincronizados / JSON | Sim + `JsonPayloadModal` | Não | **Ausente** | M |
 | WorkManager 15 min + one-shot | `HBandIngestWorker` | `BGTaskScheduler` declarado, **não agendado** | **Intencional** o mecanismo; flush periódico: **ausente** | M (BGTask, com limites iOS) |
-| Auto-envio das leituras vivas | Toggle na Início | Flush após cada FC/SpO₂ se a chave serve | **Simplificado** | S |
+| Auto-envio das leituras vivas | Toggle na Início | Flush após cada FC/SpO₂/PA/passos se a chave serve | **Simplificado** | S |
 
 ---
 

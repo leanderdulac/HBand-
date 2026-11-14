@@ -97,17 +97,19 @@ struct HomeScreen: View {
     }
 
     private var homeMetrics: [HomeMetricCard] {
-        var cards: [HomeMetricCard] = [
+        _ = session.localMetricCount
+        return [
             HomeMetricCard.heart(live: session.heartRate),
             HomeMetricCard.spo2(live: session.spo2),
             .hrv,
             .sleep,
-            .steps,
+            HomeMetricCard.steps(live: session.steps, at: session.stepsUpdatedAt),
+            HomeMetricCard.pressure(
+                liveSys: session.systolic,
+                liveDia: session.diastolic,
+                at: session.bloodUpdatedAt
+            ),
         ]
-        if PatientCharts.shared.hasPressureHistory() || HomeMetricCard.pressure.available {
-            cards.append(.pressure)
-        }
-        return cards
     }
 }
 
@@ -177,7 +179,11 @@ struct HomeMetricCard: Identifiable {
                               value: "Sem dado", time: "Ainda não há medição", hasValue: false)
     }
 
-    static var steps: HomeMetricCard {
+    static func steps(live: Int, at: Date?) -> HomeMetricCard {
+        if live > 0 {
+            return HomeMetricCard(id: "steps", title: "Passos", icon: "figure.walk",
+                                  value: "\(live)", time: liveCaption(at), hasValue: true)
+        }
         let row = PatientReadings.latest { $0.steps > 0 }
         if let row {
             return HomeMetricCard(id: "steps", title: "Passos", icon: "figure.walk",
@@ -188,15 +194,26 @@ struct HomeMetricCard: Identifiable {
                               value: "Sem dado", time: "Ainda não há medição", hasValue: false)
     }
 
-    static var pressure: HomeMetricCard {
+    static func pressure(liveSys: Int, liveDia: Int, at: Date?) -> HomeMetricCard {
+        if liveSys > 0, liveDia > 0 {
+            return HomeMetricCard(id: "pressure", title: "Pressão", icon: "drop.fill",
+                                  value: "\(liveSys)/\(liveDia) mmHg",
+                                  time: liveCaption(at), hasValue: true)
+        }
         let row = PatientReadings.latest { $0.systolicBp > 0 && $0.diastolicBp > 0 }
         if let row {
             return HomeMetricCard(id: "pressure", title: "Pressão", icon: "drop.fill",
-                                  value: "\(row.systolicBp)/\(row.diastolicBp)",
+                                  value: "\(row.systolicBp)/\(row.diastolicBp) mmHg",
                                   time: PatientReadings.shortTime(row.timestampMillis), hasValue: true)
         }
         return HomeMetricCard(id: "pressure", title: "Pressão", icon: "drop.fill",
                               value: "Sem dado", time: "Ainda não há medição", hasValue: false)
+    }
+
+    private static func liveCaption(_ date: Date?) -> String {
+        guard let date else { return "Agora" }
+        if Date().timeIntervalSince(date) < 3 * 60 { return "Agora" }
+        return PatientReadings.shortTime(Int64(date.timeIntervalSince1970 * 1000))
     }
 }
 

@@ -170,7 +170,7 @@ object IngestPayload {
             }
             if (telemetry.spO2 > 0) put("spo2", telemetry.spO2)
             if (telemetry.temperatureCelsius > 0f) put("temperature", telemetry.temperatureCelsius.toDouble())
-            put("steps", telemetry.steps)
+            if (telemetry.steps > 0) put("steps", telemetry.steps)
             put("calories", telemetry.calories.toDouble())
             if (telemetry.distanceMeters > 0f) put("distance", telemetry.distanceMeters.toDouble())
             if (telemetry.hrvScore > 0) put("hrv_score", telemetry.hrvScore)
@@ -184,10 +184,16 @@ object IngestPayload {
         val jsonObj = Json.parseToJsonElement(raw).jsonObject
         val alreadyFlat = jsonObj.containsKey("patient_id") && !jsonObj.containsKey("metrics")
         if (alreadyFlat) {
-            if (jsonObj.containsKey("service")) return pretty.encodeToString(JsonObject.serializer(), jsonObj)
+            val steps = intOrNull(jsonObj["steps"])
+            val stripped = if (steps != null && steps <= 0) {
+                JsonObject(jsonObj.filterKeys { it != "steps" })
+            } else {
+                jsonObj
+            }
+            if (stripped.containsKey("service")) return pretty.encodeToString(JsonObject.serializer(), stripped)
             return pretty.encodeToString(
                 JsonObject.serializer(),
-                JsonObject(jsonObj + ("service" to JsonPrimitive(SERVICE_NAME))),
+                JsonObject(stripped + ("service" to JsonPrimitive(SERVICE_NAME))),
             )
         }
 
@@ -228,7 +234,7 @@ object IngestPayload {
             }
             if (spo2 != null && coreFloatNumber(spo2)?.let { it <= 0 } != true) put("spo2", spo2)
             if (temp != null && temp > 0.0) put("temperature", temp)
-            if (steps != null) put("steps", steps)
+            if (steps != null && steps > 0) put("steps", steps)
             if (calories != null) put("calories", calories)
             if (hrv != null && hrv > 0) put("hrv_score", hrv)
             if (isReal != null) put("is_real_sensor_data", isReal)

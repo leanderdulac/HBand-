@@ -5,6 +5,9 @@ import shared
 /// Maps Veepoo SDK database history (filled by `veepooSdkStartReadDeviceAllData`)
 /// into the shared ingest queue. IDs are device + metric + record time so the
 /// Core treats reconnect/replay as the same reading.
+///
+/// Origin rows already carry `stepValue` / `systolic` / `diastolic` when the
+/// watch stored them. Live steps/BP are a separate path in `VeepooSession`.
 enum VeepooHistoryIngest {
     static let maxDays = 7
 

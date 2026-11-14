@@ -42,7 +42,7 @@ struct WatchScreen: View {
         }
         guard session.hardwareReady else { return "Conectando ao relógio…" }
         let msg = session.sessionMessage
-        let friendlyPrefixes = ["Batimentos:", "Medição concluída", "O relógio não está no pulso", "Ligue o Bluetooth"]
+        let friendlyPrefixes = ["Batimentos:", "Pressão:", "Medição concluída", "O relógio não está no pulso", "Ligue o Bluetooth", "Medindo a pressão"]
         if friendlyPrefixes.contains(where: { msg.hasPrefix($0) }) { return msg }
         return "Relógio conectado. As medições são feitas automaticamente."
     }

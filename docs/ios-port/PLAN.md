@@ -377,7 +377,9 @@ Vendor do `VeepooBleSDK.framework` (2.2.107.15) está em `iosApp/Vendor/`.
       (pasta `2.2.XX.15`). Android continua em `vpprotocol-2.3.80.15`.
       Gap documentado em `iosApp/Vendor/THIRD_PARTY_NOTICE.md`.
 - [x] SwiftUI P0: scan, connect, senha `0000`, FC ao vivo, SpO₂ em
-      revezamento, bateria. PA (~50 s) fica de fora.
+      revezamento, bateria. PA ao vivo a cada ~30 min em primeiro plano
+      (teste ~50–55 s, sem colidir com FC/SpO₂); em segundo plano só na
+      oportunidade BGTask. Passos pelo `readStepData` do dia.
 - [x] Leituras entram em `IngestRuntime` (KMP): `client_reading_id` no
       insert, lote ≤ 50, recibo seletivo.
 - [x] `bluetooth-central` + restore id sidecar; limites em

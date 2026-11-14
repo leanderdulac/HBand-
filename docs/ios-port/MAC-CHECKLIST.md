@@ -32,7 +32,10 @@ Esperado: as cinco abas, tema Claro, aba Relógio com «Buscar relógio».
 
 Com o relógio no pulso, em ~20 s deve aparecer um valor em bpm
 (40 pt, vermelho). Oxigênio entra no revezamento seguinte (~15 s).
-Pressão **não** é medida neste P0 (teste de ~50 s, não é barato).
+Passos (total do dia) atualizam no cartão da Início. Pressão entra no
+ciclo em primeiro plano ~a cada 30 min (teste de ~50–55 s; o relógio no
+pulso, o paciente parado). Em segundo plano a PA **não** corta a FC
+contínua — só numa oportunidade BGTask.
 
 ## 5. Confirmar ingestão HTTP 200
 
@@ -112,6 +115,8 @@ Ver `docs/ios-port/TESTFLIGHT.md`. Archive sem upload:
 `./iosApp/Scripts/archive-testflight.sh`.
 
 Rebuild `shared.framework` after pulling this branch (`./iosApp/Scripts/embed-shared.sh`).
+O omitir de passos desconhecidos (não enviar `steps: 0`) está no KMP;
+sem esse rebuild o archive ainda manda 0. `CURRENT_PROJECT_VERSION = 17`.
 
 ## O que este ambiente Linux não verificou
 

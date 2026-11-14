@@ -146,6 +146,23 @@ class IngestPayloadTest {
     }
 
     @Test
+    fun telemetry_json_omits_unknown_steps_instead_of_zero() {
+        val json = Json.parseToJsonElement(IngestPayload.telemetryToJson(telemetry(steps = 0), "PAT-42")).jsonObject
+        assertFalse(json.containsKey("steps"))
+        assertFalse(json.containsKey("blood_pressure"))
+        val normalized = Json.parseToJsonElement(
+            IngestPayload.normalizeQueuePayload(
+                buildJsonObject {
+                    put("patient_id", "PAT-42")
+                    put("heart_rate", 72)
+                    put("steps", 0)
+                }.toString(),
+            ),
+        ).jsonObject
+        assertFalse(normalized.containsKey("steps"))
+    }
+
+    @Test
     fun unmeasured_heart_rate_stays_zero() {
         val json = Json.parseToJsonElement(IngestPayload.telemetryToJson(telemetry(heartRate = 0), "")).jsonObject
         assertEquals(0, (json.getValue("heart_rate") as JsonPrimitive).content.toInt())

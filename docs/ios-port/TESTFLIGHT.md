@@ -30,8 +30,8 @@ Xcode criar o perfil e o certificado iOS Distribution do Team
 iOS Distribution found` sem essa flag). Envie pelo Organizer
 (Distribute App → App Store Connect → Upload) ou Transporter.
 
-Versão: `CFBundleShortVersionString` = `0.1.0`, `CFBundleVersion` = `1`
-(primeiro TestFlight). Incremente o build a cada envio.
+Versão: `CFBundleShortVersionString` = `0.1.0`, `CFBundleVersion` = `17`
+(build 17: passos + pressão ao vivo). Incremente o build a cada envio.
 
 ## Assinatura Release
 

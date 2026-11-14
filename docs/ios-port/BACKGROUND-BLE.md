@@ -41,6 +41,20 @@ O que o código do build 15 fazia, e por que parava:
    estava vazia, porque nenhuma leitura nova tinha sido gravada. O iOS pode
    adiar esse slot por muito mais que 15 min.
 
+## Passos e pressão (build 17)
+
+O build 16 enviava FC/SpO₂, mas `recordAndFlush` gravava **sistólica 0, diastólica 0, passos 0**. O Core omite PA se sys/dia não são > 0; passos 0 ia no JSON mesmo assim.
+
+O que o build 17 faz, **sem** quebrar a FC contínua em segundo plano:
+
+| Peça | Comportamento |
+|---|---|
+| Passos | `veepooSDK_readStepDataWithDayNumber:0` ~1×/min quando não há SpO₂/PA em curso. Depois do histórico, também o total do dia na base do SDK (`veepooSDKGetStepDataWithDate`). Guarda o último valor com horário. |
+| Pressão ao vivo | Estágio próprio no ciclo de **primeiro plano**: FC → SpO₂ → `veepooSDKTestBloodStart` (modo 0) se a última PA válida tem ≥ 30 min. O teste dura ~50–55 s; não corre em paralelo com FC/SpO₂. |
+| Pressão em segundo plano | **Não** interrompe a FC contínua (o teste longo mataria o notify GATT, o mesmo problema do SpO₂ no build 15). Só numa oportunidade `BGAppRefresh`/`BGProcessing` (`performBackgroundOpportunity`), depois do histórico, se a PA estiver vencida; em seguida reabre a FC. Histórico `origin` continua a mapear sys/dia. |
+| Ingestão | `recordAndFlush` manda a última PA válida e os últimos passos > 0. Passos desconhecidos **não** vão no JSON (não se fabrica 0). PA só se sys e dia estiverem na faixa. |
+| UI | Início: cartões Passos e Pressão (pt-BR), sem texto técnico. |
+
 ## O que está configurado (build 16)
 
 | Peça | Onde |
@@ -49,7 +63,7 @@ O que o código do build 15 fazia, e por que parava:
 | Restore identifier | `br.com.next2u.saude.paciente.ble` no manager do Veepoo |
 | Notify que acorda o processo | `CBConnectPeripheralOptionNotifyOn*` em todo `connect` (swizzle + pending connect) |
 | Reconnect | `willRestoreState` + `didDisconnect` → `connect` pendente do iOS (`connectionTimeout = .max`). Sem scan de 1 s. Scan com backoff só em **primeiro plano** e só se o UUID for desconhecido. |
-| FC contínua em segundo plano | Enquanto o relógio está ligado, o teste de FC **recomeça** ao terminar. Não troca para SpO₂ com o iPhone bloqueado. SpO₂ entra pelo histórico automático. |
+| FC contínua em segundo plano | Enquanto o relógio está ligado, o teste de FC **recomeça** ao terminar. Não troca para SpO₂ nem para PA com o iPhone bloqueado. SpO₂ e PA ao vivo entram no ciclo em primeiro plano; em fundo, SpO₂ pelo histórico e PA só na oportunidade BGTask (build 17). |
 | Wake lock | `BleWakeLock` / `BleMain.run`: `beginBackgroundTask` **síncrono** no callback BLE, depois o trabalho no main actor (sem `Task` solto). |
 | Upload que sobrevive à suspensão | `URLSessionConfiguration.background` id `br.com.next2u.saude.paciente.ingest.http` (`IngestURLSession`). `handleEventsForBackgroundURLSession` no `AppDelegate`. A fila Ktor continua a fonte da verdade; o Core deduplica por `client_reading_id`. |
 | Fallback | `BGAppRefresh` + `BGProcessing`: religa, lê o histórico do relógio, reabre a FC, envia. **Não** promete 15 min. |
