@@ -60,8 +60,8 @@ android {
     applicationId = "br.com.next2u.saude.paciente"
     minSdk = 24
     targetSdk = 36
-    versionCode = 18
-    versionName = "1.7.6"
+    versionCode = 19
+    versionName = "1.7.7"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     buildConfigField("boolean", "BLE_LAB", "false")

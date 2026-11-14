@@ -19,6 +19,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
 import androidx.core.content.ContextCompat
 import com.example.data.ingest.IngestPayloadMapper
@@ -123,6 +124,9 @@ class HBandBleManager(
     private val _isHardwareConnected = MutableStateFlow(false)
     val isHardwareConnected: StateFlow<Boolean> = _isHardwareConnected.asStateFlow()
 
+    private val _sessionPhase = MutableStateFlow(BleSessionPhase.DISCONNECTED)
+    val sessionPhase: StateFlow<BleSessionPhase> = _sessionPhase.asStateFlow()
+
     private val prefs: SharedPreferences =
         context.getSharedPreferences("hband_settings", Context.MODE_PRIVATE)
 
@@ -131,6 +135,7 @@ class HBandBleManager(
             field = value
             prefs.edit().putBoolean(PREF_AUTO_RECONNECT, value).apply()
             if (!value) cancelScheduledReconnect()
+            publishSessionPhase()
         }
     var currentPatientId: String = IngestPayloadMapper.DEFAULT_PATIENT_ID
 
@@ -264,6 +269,13 @@ class HBandBleManager(
     // registrando múltiplos connectDevice/notify em paralelo no mesmo MAC — confirmado em
     // campo: isso derruba a conexão BLE do VE30 (colisão de comandos no firmware).
     private var isConnectingVeepoo = false
+    private var connectAttemptStartedAt = 0L
+    private var connectAttemptWatchdog: Runnable? = null
+    private var veepooConnectGeneration = 0
+    private var processCreatedAtElapsed = SystemClock.elapsedRealtime()
+    private var startGraceReconnectPosted = false
+    private var bondNoneCycles = 0
+    private var suppressDisconnectReconnect = false
     // O firmware do VE30 dispara onFunctionSupportDataChange/OnPersoninfoDataChange mais de
     // uma vez por handshake (confirmado em campo: 4x em ~1s). Sem guarda, isso reenviava os
     // 5 comandos de start de sensor repetidamente e em rajada, o que pode confundir o
@@ -360,7 +372,6 @@ class HBandBleManager(
         const val PREF_DIAL_SCREEN_TAG = "watch_dial_screen_tag"
         const val PREF_DIAL_SCREEN_DES = "watch_dial_screen_des"
         const val WATCH_TIME_TIMEOUT_MS = 8_000L
-        private const val MAX_RECONNECT_ATTEMPTS = 8
 
         // Duração de cada estágio do revezamento de sensores PPG (FC/SpO2/PA) antes de
         // avançar para o próximo, mesmo sem uma leitura válida ainda. Observado em campo: o
@@ -433,6 +444,22 @@ class HBandBleManager(
 
     fun reconnectLastDevice() {
         if (!isAutoReconnectEnabled || userRequestedDisconnect || _isHardwareConnected.value) return
+        val wait = VeepooReconnectPolicy.processStartDelayMs(
+            processCreatedAtElapsed,
+            SystemClock.elapsedRealtime(),
+        )
+        if (wait > 0L) {
+            if (!startGraceReconnectPosted) {
+                startGraceReconnectPosted = true
+                Log.i(TAG, "Aguardando ${wait}ms após o início do processo antes de reconectar")
+                mainHandler.postDelayed({
+                    startGraceReconnectPosted = false
+                    reconnectLastDevice()
+                }, wait)
+            }
+            return
+        }
+        if (isConnectAttemptStale()) abortHungVeepooConnect(scheduleRetry = false)
         val mac = prefs.getString(PREF_LAST_MAC, null)?.trim().orEmpty()
         if (mac.isEmpty() || !BluetoothAdapter.checkBluetoothAddress(mac)) return
         val name = prefs.getString(PREF_LAST_NAME, null)?.takeIf { it.isNotBlank() } ?: "Relógio"
@@ -446,6 +473,11 @@ class HBandBleManager(
                 firmwareVersion = "Reconexão"
             ).withUnknownBattery(connected = false)
         )
+    }
+
+    /** Doze-proof backup: clear a hung connecting latch so the next reconnect can run. */
+    fun releaseStaleConnectAttempt() {
+        if (isConnectAttemptStale()) abortHungVeepooConnect(scheduleRetry = false)
     }
 
     @SuppressLint("MissingPermission")
@@ -477,6 +509,18 @@ class HBandBleManager(
                 // Prefer the last successful MAC. Auto-connecting the first bonded
                 // "Watch/Band/Fit" device used to grab the wrong peripheral.
                 if (isAutoReconnectEnabled && !_isHardwareConnected.value && hasPersistedSession()) {
+                    val mac = prefs.getString(PREF_LAST_MAC, null)?.trim().orEmpty()
+                    val name = prefs.getString(PREF_LAST_NAME, null)?.takeIf { it.isNotBlank() } ?: "Relógio"
+                    if (_connectedDevice.value == null && BluetoothAdapter.checkBluetoothAddress(mac)) {
+                        _connectedDevice.value = HBandDevice(
+                            deviceId = mac,
+                            name = name,
+                            macAddress = mac,
+                            isConnected = false,
+                            firmwareVersion = "Reconexão",
+                        ).withUnknownBattery(connected = false)
+                        publishSessionPhase()
+                    }
                     Log.i(TAG, "Reconectando à última pulseira persistida...")
                     reconnectLastDevice()
                 }
@@ -644,20 +688,23 @@ class HBandBleManager(
     @SuppressLint("MissingPermission")
     private fun connectDeviceViaVeepooSdk(device: HBandDevice): Boolean {
         val liveSession = hasLiveHardwareSession()
-        // Skip only an in-flight connect or a current GATT notify session.
-        // Stale HeartData after Desconectar must not block Conectar.
+        val connectingStale = isConnectAttemptStale()
+        // Skip only a fresh in-flight connect or a current GATT notify session.
+        // A hung connecting=true with no live session must retry.
         if (
             VeepooPasswordHandshake.shouldSkipDuplicateConnect(
                 connecting = isConnectingVeepoo,
                 liveSession = liveSession,
                 notifyUp = _isHardwareConnected.value,
                 confirmInFlight = passwordConfirmInFlight,
+                connectingStale = connectingStale,
             )
         ) {
             Log.i(
                 TAG,
                 "VE30 senha: connect ignorado (connecting=$isConnectingVeepoo live=$liveSession " +
-                    "notify=${_isHardwareConnected.value} confirmInFlight=$passwordConfirmInFlight)",
+                    "notify=${_isHardwareConnected.value} confirmInFlight=$passwordConfirmInFlight " +
+                    "stale=$connectingStale)",
             )
             cancelScheduledReconnect()
             if (!passwordHandshakeSucceeded && _isHardwareConnected.value && !passwordConfirmInFlight) {
@@ -665,7 +712,10 @@ class HBandBleManager(
             }
             return false
         }
+        if (connectingStale) abortHungVeepooConnect(scheduleRetry = false)
+        resetLeftoverSdkConnect()
         val hadLiveVeepoo = passwordHandshakeSucceeded && isVeepooConnection
+        val generation = ++veepooConnectGeneration
         isConnectingVeepoo = true
         isVeepooConnection = true
         isSyncingPersonInfo = false
@@ -693,6 +743,7 @@ class HBandBleManager(
         _connectedDevice.value = device.withUnknownBattery(connected = false)
         persistLastDevice(device)
         HBandBleService.start(context)
+        armConnectAttemptWatchdog(device.macAddress, device.name)
 
         registerVeepooStatusListener(device.macAddress)
 
@@ -700,28 +751,40 @@ class HBandBleManager(
             device.macAddress,
             device.name,
             IConnectResponse { code, _, _ ->
+                if (generation != veepooConnectGeneration) return@IConnectResponse
                 if (code != Constants.REQUEST_SUCCESS) {
                     Log.e(TAG, "VE30 senha: connect GATT falhou (code=$code)")
+                    cancelConnectAttemptWatchdog()
                     isConnectingVeepoo = false
+                    connectAttemptStartedAt = 0L
                     passwordConfirmInFlight = false
                     _sessionMessage.value = "Falha ao conectar ao VE30 (código $code)."
+                    publishSessionPhase()
                     scheduleReconnect(device.macAddress, device.name)
                 }
             },
             INotifyResponse { state ->
+                if (generation != veepooConnectGeneration) return@INotifyResponse
                 if (state == Constants.REQUEST_SUCCESS) {
                     Log.i(TAG, "VE30 senha: notify GATT OK — enviando confirmDevicePwd")
+                    cancelConnectAttemptWatchdog()
+                    connectAttemptStartedAt = 0L
+                    bondNoneCycles = 0
                     _isHardwareConnected.value = true
                     reconnectAttempt = 0
                     cancelScheduledReconnect()
                     _connectedDevice.value = _connectedDevice.value?.copy(isConnected = true)
                     persistLastDevice(_connectedDevice.value ?: device)
+                    publishSessionPhase()
                     confirmVeepooPassword()
                 } else {
                     Log.e(TAG, "VE30 senha: notify GATT falhou (state=$state)")
+                    cancelConnectAttemptWatchdog()
                     isConnectingVeepoo = false
+                    connectAttemptStartedAt = 0L
                     passwordConfirmInFlight = false
                     _sessionMessage.value = "Falha ao ativar notificações do VE30."
+                    publishSessionPhase()
                     scheduleReconnect(device.macAddress, device.name)
                 }
             },
@@ -862,6 +925,8 @@ class HBandBleManager(
         cancelPendingPwdTimeout()
         cancelScheduledReconnect()
         cancelLiveLinkWatchdog()
+        cancelConnectAttemptWatchdog()
+        connectAttemptStartedAt = 0L
         runCatching { vpManager.removeConnectionConfirmationTask() }
         if (!_isHardwareConnected.value) {
             Log.i(TAG, "VE30 senha: latch hardwareConnected após $reason")
@@ -869,6 +934,7 @@ class HBandBleManager(
         _isHardwareConnected.value = true
         isConnectingVeepoo = true
         reconnectAttempt = 0
+        publishSessionPhase()
         val current = _connectedDevice.value
         if (current != null && !current.isConnected) {
             _connectedDevice.value = current.copy(isConnected = true)
@@ -909,10 +975,13 @@ class HBandBleManager(
                 passwordConfirmInFlight = false
                 decision.sessionMessage?.let { _sessionMessage.value = it }
                 cancelScheduledReconnect()
+                cancelConnectAttemptWatchdog()
+                connectAttemptStartedAt = 0L
                 isConnectingVeepoo = true
                 if (decision.keepLiveSession) {
                     _isHardwareConnected.value = true
                 }
+                publishSessionPhase()
                 if (!isSyncingPersonInfo && !hasStartedVeepooSensors) {
                     Log.i(TAG, "VE30 senha: timeout esgotado — syncPersonInfo na sessão GATT viva")
                     syncVeepooPersonInfo()
@@ -921,8 +990,11 @@ class HBandBleManager(
             VeepooPasswordHandshake.Action.RECONNECT -> {
                 passwordConfirmInFlight = false
                 isConnectingVeepoo = false
+                connectAttemptStartedAt = 0L
+                cancelConnectAttemptWatchdog()
                 _isHardwareConnected.value = false
                 _sessionMessage.value = decision.sessionMessage
+                publishSessionPhase()
                 val device = _connectedDevice.value
                 if (device != null) {
                     scheduleReconnect(device.macAddress, device.name)
@@ -1163,7 +1235,10 @@ class HBandBleManager(
             isConnectingVeepoo = true
         }
         reconnectAttempt = 0
+        cancelConnectAttemptWatchdog()
+        connectAttemptStartedAt = 0L
         cancelScheduledReconnect()
+        publishSessionPhase()
         val current = _connectedDevice.value
         if (current != null && !current.isConnected) {
             _connectedDevice.value = current.copy(isConnected = true)
@@ -1197,11 +1272,14 @@ class HBandBleManager(
             Log.w(TAG, "Live detect went quiet after GATT disconnect — clearing hardware latch")
             hasStartedVeepooSensors = false
             isConnectingVeepoo = false
+            connectAttemptStartedAt = 0L
+            cancelConnectAttemptWatchdog()
             isSyncingPersonInfo = false
             advancedDetectActive = false
             ppgStageGeneration++
             _isHardwareConnected.value = false
             markDeviceDisconnected()
+            publishSessionPhase()
             scheduleReconnect(address, name)
         }
         liveLinkWatchdog = runnable
@@ -1240,8 +1318,14 @@ class HBandBleManager(
                     }
                     Constants.STATUS_DISCONNECTED -> {
                         Log.w(TAG, "Veepoo GATT desconectado: $address")
+                        if (suppressDisconnectReconnect) {
+                            suppressDisconnectReconnect = false
+                            return
+                        }
                         if (userRequestedDisconnect) {
                             isConnectingVeepoo = false
+                            connectAttemptStartedAt = 0L
+                            cancelConnectAttemptWatchdog()
                             hasStartedVeepooSensors = false
                             isSyncingPersonInfo = false
                             cancelHistorySync()
@@ -1251,6 +1335,7 @@ class HBandBleManager(
                             cancelLiveLinkWatchdog()
                             _isHardwareConnected.value = false
                             markDeviceDisconnected()
+                            publishSessionPhase()
                             return
                         }
                         val liveAge = System.currentTimeMillis() - lastHardwareReadTime
@@ -1267,6 +1352,8 @@ class HBandBleManager(
                             return
                         }
                         isConnectingVeepoo = false
+                        connectAttemptStartedAt = 0L
+                        cancelConnectAttemptWatchdog()
                         hasStartedVeepooSensors = false
                         isSyncingPersonInfo = false
                         cancelHistorySync()
@@ -1275,6 +1362,7 @@ class HBandBleManager(
                         ppgStageGeneration++
                         _isHardwareConnected.value = false
                         markDeviceDisconnected()
+                        publishSessionPhase()
                         val name = _connectedDevice.value?.name ?: "VE30"
                         scheduleReconnect(address, name)
                     }
@@ -1291,20 +1379,100 @@ class HBandBleManager(
         reconnectRunnable = null
     }
 
+    private fun isConnectAttemptStale(): Boolean = VeepooReconnectPolicy.isConnectingStale(
+        connecting = isConnectingVeepoo,
+        startedAtElapsedMs = connectAttemptStartedAt,
+        nowElapsedMs = SystemClock.elapsedRealtime(),
+        notifyUp = _isHardwareConnected.value,
+        liveSession = hasLiveHardwareSession(),
+    )
+
+    private fun publishSessionPhase() {
+        _sessionPhase.value = VeepooReconnectPolicy.phase(
+            hardwareConnected = _isHardwareConnected.value,
+            deviceConnected = _connectedDevice.value?.isConnected == true,
+            autoReconnect = isAutoReconnectEnabled,
+            hasPersistedSession = hasPersistedSession(),
+            userStopped = userRequestedDisconnect,
+            connecting = isConnectingVeepoo,
+            connectAttemptStale = isConnectAttemptStale(),
+            failedAttempts = reconnectAttempt,
+        )
+    }
+
+    private fun armConnectAttemptWatchdog(address: String, name: String) {
+        cancelConnectAttemptWatchdog()
+        connectAttemptStartedAt = SystemClock.elapsedRealtime()
+        val generation = veepooConnectGeneration
+        val runnable = Runnable {
+            if (generation != veepooConnectGeneration) return@Runnable
+            if (userRequestedDisconnect) return@Runnable
+            if (!isConnectAttemptStale()) return@Runnable
+            Log.w(TAG, "VE30: watchdog de connect — tentativa sem sessão ao vivo ($address/$name)")
+            abortHungVeepooConnect(scheduleRetry = true)
+        }
+        connectAttemptWatchdog = runnable
+        mainHandler.postDelayed(runnable, VeepooReconnectPolicy.CONNECT_ATTEMPT_TIMEOUT_MS)
+        publishSessionPhase()
+    }
+
+    private fun cancelConnectAttemptWatchdog() {
+        connectAttemptWatchdog?.let { mainHandler.removeCallbacks(it) }
+        connectAttemptWatchdog = null
+    }
+
+    private fun resetLeftoverSdkConnect() {
+        runCatching {
+            if (vpManager.isCurrentDeviceConnected) {
+                Log.w(TAG, "VE30: sessão SDK residual — desconectando antes de nova tentativa")
+                suppressDisconnectReconnect = true
+                vpManager.disconnectWatch(IBleWriteResponse {})
+            }
+        }
+    }
+
+    private fun abortHungVeepooConnect(scheduleRetry: Boolean) {
+        val device = _connectedDevice.value
+        val address = device?.macAddress.orEmpty()
+        val name = device?.name ?: "VE30"
+        Log.w(
+            TAG,
+            "VE30: abortando connect preso (connecting=$isConnectingVeepoo " +
+                "notify=${_isHardwareConnected.value} retry=$scheduleRetry)",
+        )
+        cancelConnectAttemptWatchdog()
+        veepooConnectGeneration++
+        isConnectingVeepoo = false
+        passwordConfirmInFlight = false
+        passwordHandshakeSucceeded = false
+        connectAttemptStartedAt = 0L
+        bondNoneCycles = 0
+        hasStartedVeepooSensors = false
+        isSyncingPersonInfo = false
+        cancelPendingPwdTimeout()
+        cancelPersonInfoFallback()
+        suppressDisconnectReconnect = true
+        runCatching { vpManager.disconnectWatch(IBleWriteResponse {}) }
+        _isHardwareConnected.value = false
+        markDeviceDisconnected()
+        publishSessionPhase()
+        if (scheduleRetry && address.isNotBlank()) {
+            scheduleReconnect(address, name)
+        }
+    }
+
     private fun scheduleReconnect(address: String, name: String) {
         if (userRequestedDisconnect || !isAutoReconnectEnabled) return
         if (address.isBlank() || !BluetoothAdapter.checkBluetoothAddress(address)) return
         if (_isHardwareConnected.value) return
-        if (reconnectAttempt >= MAX_RECONNECT_ATTEMPTS) {
-            _sessionMessage.value = "Não foi possível reconectar à pulseira após várias tentativas."
-            return
-        }
         cancelScheduledReconnect()
-        reconnectAttempt++
+        val next = VeepooReconnectPolicy.nextAttemptIndex(reconnectAttempt)
+        if (next == VeepooReconnectPolicy.MAX_TRACKED_ATTEMPTS && reconnectAttempt < next) {
+            _sessionMessage.value = "Ainda tentando reconectar. Aproxime a pulseira deste celular."
+        }
+        reconnectAttempt = next
         val notWorn = _wearDetectState.value.enabled && lastKnownWorn == false
-        val shift = if (notWorn) 3 else 0
-        val capMs = if (notWorn) 120_000L else 60_000L
-        val delayMs = (2_000L * (1L shl (reconnectAttempt - 1 + shift).coerceAtMost(6))).coerceAtMost(capMs)
+        val delayMs = VeepooReconnectPolicy.delayMs(reconnectAttempt, notWorn)
         Log.i(
             TAG,
             "Auto-reconnect attempt $reconnectAttempt in ${delayMs}ms to $address " +
@@ -1312,6 +1480,7 @@ class HBandBleManager(
         )
         val runnable = Runnable {
             if (!isAutoReconnectEnabled || userRequestedDisconnect || _isHardwareConnected.value) return@Runnable
+            if (isConnectAttemptStale()) abortHungVeepooConnect(scheduleRetry = false)
             connectDevice(
                 HBandDevice(
                     deviceId = address,
@@ -1324,6 +1493,7 @@ class HBandBleManager(
         }
         reconnectRunnable = runnable
         mainHandler.postDelayed(runnable, delayMs)
+        publishSessionPhase()
     }
 
     @SuppressLint("MissingPermission")
@@ -1331,6 +1501,9 @@ class HBandBleManager(
         userRequestedDisconnect = true
         cancelScheduledReconnect()
         cancelLiveLinkWatchdog()
+        cancelConnectAttemptWatchdog()
+        connectAttemptStartedAt = 0L
+        startGraceReconnectPosted = false
         cancelPendingPwdTimeout()
         cancelPersonInfoFallback()
         cancelHistorySync()
@@ -1357,12 +1530,15 @@ class HBandBleManager(
         cancelSdkBatteryPolling()
         _isHardwareConnected.value = false
         markDeviceDisconnected()
+        publishSessionPhase()
     }
 
     fun forgetDevice() {
         val target = _incompatibleWatch.value ?: _connectedDevice.value
         userRequestedDisconnect = true
         cancelScheduledReconnect()
+        cancelConnectAttemptWatchdog()
+        connectAttemptStartedAt = 0L
         p1Controller.cancelled = true
         isConnectingVeepoo = false
         isVeepooConnection = false
@@ -1381,6 +1557,7 @@ class HBandBleManager(
             unbindBond(mac)
         }
         prefs.edit().remove(PREF_LAST_MAC).remove(PREF_LAST_NAME).apply()
+        publishSessionPhase()
         startScanning()
     }
 
@@ -1392,6 +1569,8 @@ class HBandBleManager(
         cancelPersonInfoFallback()
         cancelHistorySync()
         cancelLiveLinkWatchdog()
+        cancelConnectAttemptWatchdog()
+        connectAttemptStartedAt = 0L
         p1Controller.cancelled = true
         isConnectingVeepoo = false
         isVeepooConnection = false
@@ -1412,6 +1591,7 @@ class HBandBleManager(
             prefs.edit().remove(PREF_LAST_MAC).remove(PREF_LAST_NAME).apply()
         }
         Log.w(TAG, "Relógio incompatível (${shown.name} ${shown.macAddress}); Veepoo parado.")
+        publishSessionPhase()
     }
 
     @SuppressLint("MissingPermission")
@@ -2925,17 +3105,72 @@ class HBandBleManager(
         )
     }
 
+    private val bondStateReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(ctx: Context, intent: android.content.Intent) {
+            if (intent.action != BluetoothDevice.ACTION_BOND_STATE_CHANGED) return
+            if (!hasBlePermissions()) return
+            val remote = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
+            } else {
+                @Suppress("DEPRECATION")
+                intent.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE)
+            } ?: return
+            val target = _connectedDevice.value?.macAddress ?: return
+            if (!remote.address.equals(target, ignoreCase = true)) return
+            val previous = intent.getIntExtra(BluetoothDevice.EXTRA_PREVIOUS_BOND_STATE, BluetoothDevice.ERROR)
+            val next = intent.getIntExtra(BluetoothDevice.EXTRA_BOND_STATE, BluetoothDevice.ERROR)
+            handleBondState(previous, next)
+        }
+    }
+
     // Kotlin initializes properties in declaration order. Restoring a saved watch
     // calls stopScanning and uses gattCallback, so their fields must exist first.
     init {
         VeepooSdkToasts.suppressFunctionNotSupported()
         vpManager.init(context.applicationContext)
         vpManager.setAutoConnectBTBySdk(false)
+        resetLeftoverSdkConnect()
         vpManager.registerBluetoothStateListener(object : IABluetoothStateListener() {
             override fun onBluetoothStateChanged(openOrClosed: Boolean) {
                 Log.i(TAG, "Bluetooth do sistema (Veepoo SDK): ${if (openOrClosed) "ligado" else "desligado"}")
+                if (!openOrClosed && isConnectingVeepoo && !_isHardwareConnected.value) {
+                    abortHungVeepooConnect(scheduleRetry = isAutoReconnectEnabled)
+                }
             }
         })
+        registerBondStateReceiver()
         checkBondedOrAutoConnect()
+        publishSessionPhase()
+    }
+
+    private fun registerBondStateReceiver() {
+        runCatching {
+            androidx.core.content.ContextCompat.registerReceiver(
+                context.applicationContext,
+                bondStateReceiver,
+                android.content.IntentFilter(BluetoothDevice.ACTION_BOND_STATE_CHANGED),
+                androidx.core.content.ContextCompat.RECEIVER_EXPORTED,
+            )
+        }.onFailure { Log.w(TAG, "Receiver de emparelhamento não registrado: ${it.message}") }
+    }
+
+    private fun handleBondState(previous: Int, next: Int) {
+        val decision = VeepooBondPolicy.onBondState(previous, next, bondNoneCycles)
+        bondNoneCycles = decision.noneCycles
+        Log.i(TAG, "VE30 bond: $previous->$next cycles=$bondNoneCycles action=${decision.action}")
+        if (decision.action != VeepooBondPolicy.Action.ABORT_CONNECT) return
+        if (userRequestedDisconnect || _isHardwareConnected.value) return
+        _sessionMessage.value = "Não foi possível emparelhar a pulseira. Nova tentativa em instantes."
+        abortHungVeepooConnect(scheduleRetry = false)
+        val device = _connectedDevice.value ?: return
+        cancelScheduledReconnect()
+        reconnectAttempt = VeepooReconnectPolicy.nextAttemptIndex(reconnectAttempt)
+        val runnable = Runnable {
+            if (!isAutoReconnectEnabled || userRequestedDisconnect || _isHardwareConnected.value) return@Runnable
+            connectDevice(device.copy(isConnected = false, firmwareVersion = "Reconexão"))
+        }
+        reconnectRunnable = runnable
+        mainHandler.postDelayed(runnable, VeepooReconnectPolicy.BOND_ABORT_BACKOFF_MS)
+        publishSessionPhase()
     }
 }

@@ -101,8 +101,10 @@ object VeepooPasswordHandshake {
         liveSession: Boolean,
         notifyUp: Boolean,
         confirmInFlight: Boolean,
+        connectingStale: Boolean = false,
     ): Boolean {
-        if (connecting) return true
+        // A hung connect (connecting=true, no notify, no PPG) must not block retries.
+        if (connecting && !connectingStale) return true
         // Stale HeartData after Desconectar is not a live GATT session.
         if (notifyUp && liveSession) return true
         if (notifyUp && confirmInFlight) return true

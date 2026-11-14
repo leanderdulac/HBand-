@@ -16,14 +16,23 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import com.example.data.hband.CompetingWatchApp
 import com.example.data.power.BatteryGuidance
 import com.example.data.power.BatteryOptimization
 import com.example.ui.theme.LocalStatusColors
@@ -55,6 +64,7 @@ fun TelemetryStatusBanners(
     val status = LocalStatusColors.current
     val ignoring = rememberIgnoringBatteryOptimizations()
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        CompetingWatchAppBanner()
         if (TelemetryBannerPolicy.showReconnecting(pairedMac, hardwareConnected, autoReconnect)) {
             Card(
                 modifier = Modifier.fillMaxWidth().testTag("banner_reconnecting")
@@ -91,8 +101,41 @@ fun TelemetryStatusBanners(
     }
 }
 
+@Composable
+fun CompetingWatchAppBanner(modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    val owner = LocalLifecycleOwner.current
+    var warning by remember { mutableStateOf(CompetingWatchApp.warningFor(context)) }
+    DisposableEffect(owner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) warning = CompetingWatchApp.warningFor(context)
+        }
+        owner.lifecycle.addObserver(observer)
+        onDispose { owner.lifecycle.removeObserver(observer) }
+    }
+    CompetingWatchAppCard(warning = warning, modifier = modifier)
+}
 
-/** "Versão 1.7.6 (18)" from BuildConfig, shown in Ajustes and as a Home footer. */
+@Composable
+fun CompetingWatchAppCard(warning: String?, modifier: Modifier = Modifier) {
+    if (warning.isNullOrBlank()) return
+    val status = LocalStatusColors.current
+    Card(
+        modifier = modifier.fillMaxWidth().testTag("banner_competing_watch_app")
+            .semantics { liveRegion = LiveRegionMode.Polite },
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = status.attentionContainer),
+    ) {
+        Text(
+            warning,
+            style = MaterialTheme.typography.bodyLarge,
+            color = status.attentionForeground,
+            modifier = Modifier.padding(16.dp).testTag("banner_competing_watch_app_text"),
+        )
+    }
+}
+
+/** "Versão 1.7.7 (19)" from BuildConfig, shown in Ajustes and as a Home footer. */
 fun appVersionLabel(name: String = com.example.BuildConfig.VERSION_NAME, code: Int = com.example.BuildConfig.VERSION_CODE): String =
     "Versão $name ($code)"
 
