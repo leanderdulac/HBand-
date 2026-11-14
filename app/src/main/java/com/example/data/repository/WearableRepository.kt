@@ -1,6 +1,7 @@
 package com.example.data.repository
 
 import com.example.data.hband.VeepooHistoryMapper
+import com.example.data.ingest.HistoryHourlyIngest
 import com.example.data.ingest.IngestReconciler
 import com.example.data.ingest.IngestItemOutcome
 import com.example.data.ingest.PreparedReading
@@ -103,7 +104,11 @@ class WearableRepository(
     private val _lastSyncResult = MutableStateFlow<String?>(null)
     val lastSyncResult: StateFlow<String?> = _lastSyncResult.asStateFlow()
 
-    /** Counters observed from readSportStep stay local; no HTTP, queue flush or copied vitals. */
+    /**
+     * Daily sport counters for local charts. Live ingest of those steps happens from
+     * the BLE snapshot emit after readSportStep when current HR is ingestible — this
+     * method does not fabricate HR to satisfy the Core contract.
+     */
     suspend fun persistSportReading(deviceId: String, reading: com.example.data.hband.VeepooSportReading): Long =
         withContext(Dispatchers.IO) {
             require(deviceId.isNotBlank()) { "Sport reading requires its observed device" }
@@ -207,15 +212,10 @@ class WearableRepository(
                 awakeMinutes = telemetry.sleepSummary.awakeMinutes,
             )
         }
-        val hourly = samples.indices
+        val hourlyGroups = samples.indices
             .filter { IngestPayloadMapper.isIngestible(samples[it]) }
-            .groupBy { index ->
-                val telemetry = samples[index]
-                val bucket = VeepooHistoryMapper.parseIsoToMillis(telemetry.timestamp) / 3_600_000L
-                telemetry.deviceId to bucket
-            }
-            .values
-            .mapNotNull { group -> group.maxByOrNull { samples[it].heartRate } }
+            .groupBy { HistoryHourlyIngest.hourKey(samples[it]) }
+        val allByHour = samples.indices.groupBy { HistoryHourlyIngest.hourKey(samples[it]) }
 
         var insertedCount = 0
         localWriteTransaction.run {
@@ -236,15 +236,33 @@ class WearableRepository(
             val admitted = fresh.toHashSet()
             // Keep the existing per-hour selection over the complete pull. An
             // already stored winner must not acquire another queue ID/receipt.
-            for (index in hourly) {
-                if (entities[index] !in admitted) continue
-                val telemetry = samples[index]
-                queueDao.insertItem(
-                    IngestQueueEntity(
-                        payloadJson = IngestPayloadMapper.telemetryToJson(telemetry, patientId),
-                        status = QueueStatus.PENDING.name,
+            // Origin BP/steps in the same hour still overlay the queued payload.
+            for ((key, ingestibleGroup) in hourlyGroups) {
+                val winnerIndex = ingestibleGroup.maxByOrNull { samples[it].heartRate } ?: continue
+                val hourSamples = allByHour[key]?.map { samples[it] } ?: listOf(samples[winnerIndex])
+                if (entities[winnerIndex] in admitted) {
+                    val telemetry = HistoryHourlyIngest.mergeHourly(samples[winnerIndex], hourSamples)
+                    queueDao.insertItem(
+                        IngestQueueEntity(
+                            payloadJson = IngestPayloadMapper.telemetryToJson(telemetry, patientId),
+                            status = QueueStatus.PENDING.name,
+                        )
                     )
-                )
+                    continue
+                }
+                val candidateIndex = ingestibleGroup
+                    .filter { entities[it] in admitted }
+                    .maxByOrNull { samples[it].heartRate }
+                    ?: continue
+                val merged = HistoryHourlyIngest.mergeHourly(samples[candidateIndex], hourSamples)
+                if (HistoryHourlyIngest.bringsMissingBpOrSteps(samples[winnerIndex], merged)) {
+                    queueDao.insertItem(
+                        IngestQueueEntity(
+                            payloadJson = IngestPayloadMapper.telemetryToJson(merged, patientId),
+                            status = QueueStatus.PENDING.name,
+                        )
+                    )
+                }
             }
         }
         try {

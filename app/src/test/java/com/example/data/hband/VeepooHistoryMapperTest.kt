@@ -30,6 +30,26 @@ class VeepooHistoryMapperTest {
     }
 
     @Test
+    fun `origin maps real BP and steps without fabricating missing vitals`() {
+        val origin = OriginData().apply {
+            date = "2026-09-10"
+            setmTime(time)
+            rateValue = 74
+            stepValue = 320
+            highValue = 128
+            lowValue = 84
+        }
+        val mapped = VeepooHistoryMapper.fromOrigin(origin, "AA:BB", "VE30")
+        assertNotNull(mapped)
+        assertEquals(74, mapped!!.telemetry.heartRate)
+        assertEquals(320, mapped.telemetry.steps)
+        assertEquals(128, mapped.telemetry.bloodPressure.systolic)
+        assertEquals(84, mapped.telemetry.bloodPressure.diastolic)
+        assertEquals(0, mapped.telemetry.spO2)
+        assertTrue(mapped.telemetry.isRealSensorData)
+    }
+
+    @Test
     fun `origin maps only real HR and steps`() {
         val origin = OriginData().apply {
             date = "2026-09-10"

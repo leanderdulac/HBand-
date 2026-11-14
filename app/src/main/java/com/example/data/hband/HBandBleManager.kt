@@ -23,6 +23,7 @@ import android.os.SystemClock
 import android.util.Log
 import androidx.core.content.ContextCompat
 import com.example.data.ingest.IngestPayloadMapper
+import com.example.data.ingest.LastValidBloodPressure
 import com.example.data.model.BloodPressure
 import com.example.data.model.HBandDevice
 import com.example.data.model.HBandTelemetry
@@ -146,6 +147,8 @@ class HBandBleManager(
     private val _incompatibleWatch = MutableStateFlow<HBandDevice?>(null)
     val incompatibleWatch: StateFlow<HBandDevice?> = _incompatibleWatch.asStateFlow()
     private val veepooWriteBackoff = VeepooWriteBackoff()
+    private val lastValidBp = LastValidBloodPressure()
+    private val bpDetectRetry = BpDetectRetry()
     private var incompatibleCardMac: String? = null
 
     private val _capabilities = MutableStateFlow(DeviceCapabilities())
@@ -1157,11 +1160,40 @@ class HBandBleManager(
     private fun runBpStage() {
         if (!isConnectingVeepoo || advancedDetectActive) return
         val generation = ++ppgStageGeneration
+        val nowElapsed = SystemClock.elapsedRealtime()
+        if (!bpDetectRetry.shouldAttempt(nowElapsed)) {
+            Log.w(
+                TAG,
+                "startDetectBP adiado após falha anterior (backoff ${bpDetectRetry.waitMs(nowElapsed)} ms)",
+            )
+            mainHandler.postDelayed({
+                if (generation != ppgStageGeneration) return@postDelayed
+                mainHandler.postDelayed({ runHrvStage() }, PPG_STAGE_GAP_MS)
+            }, PPG_STAGE_GAP_MS)
+            return
+        }
         val mac = currentConnectedMac()
         val name = currentConnectedName()
         Log.i(TAG, "[PPG] Estágio PA...")
         vpManager.startDetectBP(
-            IBleWriteResponse { code -> Log.i(TAG, "startDetectBP ACK code=$code") },
+            IBleWriteResponse { code ->
+                Log.i(TAG, "startDetectBP ACK code=$code")
+                if (generation != ppgStageGeneration) return@IBleWriteResponse
+                if (code != Constants.REQUEST_SUCCESS) {
+                    Log.e(
+                        TAG,
+                        "startDetectBP falhou no VE30 (code=$code); nova tentativa no próximo ciclo com backoff",
+                    )
+                    bpDetectRetry.onAck(success = false, nowElapsedMs = SystemClock.elapsedRealtime())
+                    ppgStageGeneration++
+                    runCatching {
+                        vpManager.stopDetectBP(IBleWriteResponse {}, EBPDetectModel.DETECT_MODEL_PUBLIC)
+                    }
+                    mainHandler.postDelayed({ runHrvStage() }, PPG_STAGE_GAP_MS)
+                } else {
+                    bpDetectRetry.onAck(success = true, nowElapsedMs = SystemClock.elapsedRealtime())
+                }
+            },
             IBPDetectDataListener { data ->
                 Log.i(TAG, "onDataChange(BpData): ${data.highPressure}/${data.lowPressure} (progress=${data.progress})")
                 if (generation != ppgStageGeneration) return@IBPDetectDataListener
@@ -1169,6 +1201,7 @@ class HBandBleManager(
                 if (data.highPressure in 60..240 && data.lowPressure in 30..160) {
                     currentSystolic = data.highPressure
                     currentDiastolic = data.lowPressure
+                    lastValidBp.remember(data.highPressure, data.lowPressure, System.currentTimeMillis())
                     emitRealTelemetry(mac, name)
                 }
             },
@@ -2211,22 +2244,30 @@ class HBandBleManager(
             timeZone = TimeZone.getTimeZone("UTC")
         }
 
-        _latestTelemetry.value = HBandTelemetry(
-            deviceId = mac,
-            deviceModel = model,
-            timestamp = isoFormat.format(Date()),
-            heartRate = currentHeartRate,
-            bloodPressure = BloodPressure(currentSystolic, currentDiastolic),
-            spO2 = currentSpO2,
-            temperatureCelsius = currentTemp,
-            steps = currentSteps,
-            calories = currentCalories,
-            distanceMeters = currentDistance,
-            hrvScore = currentHrvScore,
-            sleepSummary = SleepSummary(0, 0, 0),
-            isRealSensorData = true
-        )
+        _latestTelemetry.value = liveSnapshot(mac, model, isoFormat.format(Date()), realSensorData = true)
     }
+
+    private fun liveSnapshot(
+        mac: String,
+        model: String,
+        timestamp: String,
+        realSensorData: Boolean,
+        nowMs: Long = System.currentTimeMillis(),
+    ): HBandTelemetry = HBandTelemetry(
+        deviceId = mac,
+        deviceModel = model,
+        timestamp = timestamp,
+        heartRate = currentHeartRate,
+        bloodPressure = lastValidBp.resolve(currentSystolic, currentDiastolic, nowMs),
+        spO2 = currentSpO2,
+        temperatureCelsius = currentTemp,
+        steps = currentSteps,
+        calories = currentCalories,
+        distanceMeters = currentDistance,
+        hrvScore = currentHrvScore,
+        sleepSummary = SleepSummary(0, 0, 0),
+        isRealSensorData = realSensorData,
+    )
 
     @SuppressLint("MissingPermission")
     private fun startRssiMonitoring(gatt: BluetoothGatt?) {
@@ -2331,6 +2372,8 @@ class HBandBleManager(
         currentCalories = 0.0f
         currentDistance = 0.0f
         currentHrvScore = 0
+        lastValidBp.clear()
+        bpDetectRetry.reset()
         rrIntervals.clear()
         cumulativeRscSteps = 0
         lastRscCadence = 0
@@ -2934,11 +2977,15 @@ class HBandBleManager(
                 if (historySync !== sync || sync.cancelled || !queryContext.isActive || userRequestedDisconnect) return@launch
                 extras.batteryPercent?.let { setBatteryLevel(it) }
                 extras.sport?.let { reading ->
-                    // Do not republish cached HR/BP with this counter observation's time.
                     currentSteps = reading.steps ?: 0
                     currentCalories = reading.calories ?: 0f
                     currentDistance = reading.distanceMeters ?: 0f
                     onSportReading(queryDeviceId, reading)
+                    // Core requires HR. When a live HR already exists, enqueue the
+                    // updated steps with the current HR/SpO2 instead of Room-only counters.
+                    if (IngestPayloadMapper.isIngestibleHeartRate(currentHeartRate)) {
+                        emitRealTelemetry(queryDeviceId, queryDeviceModel)
+                    }
                 }
                 // An older handshake snapshot cannot overwrite a later explicit request, even
                 // after that request has completed and is no longer pending.
@@ -2973,8 +3020,10 @@ class HBandBleManager(
                 val telemetries = pull.samples.map { it.telemetry }
                 if (telemetries.isNotEmpty()) {
                     onHistorySamples(telemetries)
+                    lastValidBp.rememberFromHistory(telemetries)
                     // History retains its original measurement times in the repository.
                     // Never re-emit interval counters or old vitals as live measurements.
+                    // Last valid BP may still ride along on later HR-only live snapshots.
                 }
                 Log.i(TAG, "Histórico Veepoo: ${historyReadStatusText(pull.state)}")
                 // Acerta a hora do VE30 a cada conexão: depois do histórico (não atrasa a leitura)
@@ -3087,21 +3136,11 @@ class HBandBleManager(
         val isoFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
             timeZone = TimeZone.getTimeZone("UTC")
         }
-
-        return HBandTelemetry(
-            deviceId = device.macAddress,
-            deviceModel = device.name,
+        return liveSnapshot(
+            mac = device.macAddress,
+            model = device.name,
             timestamp = isoFormat.format(Date()),
-            heartRate = currentHeartRate,
-            bloodPressure = BloodPressure(currentSystolic, currentDiastolic),
-            spO2 = currentSpO2,
-            temperatureCelsius = currentTemp,
-            steps = currentSteps,
-            calories = currentCalories,
-            distanceMeters = currentDistance,
-            hrvScore = currentHrvScore,
-            sleepSummary = SleepSummary(0, 0, 0),
-            isRealSensorData = hasReceivedRealSensorData
+            realSensorData = hasReceivedRealSensorData,
         )
     }
 
