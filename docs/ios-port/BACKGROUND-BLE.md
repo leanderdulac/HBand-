@@ -6,28 +6,74 @@ Um sidecar com o mesmo restore id **não** via as ligações do VE30 — o iOS s
 restaura o manager que fez o `connect`. Por isso o sidecar antigo não relançava
 a sessão depois do silêncio em background.
 
-Este app **substitui** o manager do SDK, no `didFinishLaunching`, por um
-`CBCentralManager` com:
+Este app **injeta** o restore id no `CBCentralManager` criado pelo SDK
+(`N2UBleRestore.m`) e, se a injeção falhar, substitui o manager no
+`didFinishLaunching` por um com:
 
 - restore id `br.com.next2u.saude.paciente.ble`
 - delegate `VeepooCentralForwarder` (encaminha para o SDK e intercepta
   `willRestoreState` / disconnect)
+- `connectPeripheral:options:` com `NotifyOnConnection` /
+  `NotifyOnDisconnection` / `NotifyOnNotification` (QA1866), para o iOS
+  relançar o processo nas notificações GATT
 
 A UI (`VeepooSession.shared`) nasce aí, **antes** do store abrir, para o iOS
 conseguir entregar `willRestoreState` (TN3115).
 
-## O que está configurado
+## Causa do silêncio (Sérgio, 14/11/2026, build 15)
+
+O envio ao vivo funcionava com o app aberto. A última leitura chegou ao Core
+às 17:30 BRT; depois, com o iPhone bloqueado e o app em segundo plano, nada
+por mais de uma hora — o painel marca Offline após 50 min.
+
+O que o código do build 15 fazia, e por que parava:
+
+1. **Upload ao vivo** no máximo a cada 60 s; **histórico** no máximo a cada
+   5 min; ciclo pontual FC→SpO₂ com pausa de 5–30 min.
+2. Em segundo plano tentava FC contínua, mas o teste Veepoo **termina**
+   (estado ≥ 2) e o código ia para SpO₂. O SpO₂ é longo; se o iOS suspendesse
+   no meio, o watchdog de 3 s **não corre** e não havia mais notify GATT.
+3. Os callbacks do SDK/CoreBluetooth saltavam com `Task { @MainActor }` **sem**
+   `beginBackgroundTask` na hora. A janela de wake acabava e o trabalho
+   agendado era descartado.
+4. O POST usava o Darwin/Ktor em sessão *foreground*: morria com a suspensão.
+5. `BGAppRefresh` (`earliestBeginDate` 15 min) só esvaziava a fila — que
+   estava vazia, porque nenhuma leitura nova tinha sido gravada. O iOS pode
+   adiar esse slot por muito mais que 15 min.
+
+## O que está configurado (build 16)
 
 | Peça | Onde |
 |---|---|
-| `UIBackgroundModes` = `bluetooth-central`, `fetch`, `processing` | `iosApp/Next2UPaciente/Info.plist` |
-| Restore identifier | `br.com.next2u.saude.paciente.ble` no manager do Veepoo (não num sidecar vazio) |
-| Pending connect sem timeout do app | `central.connect(peripheral, options:)` + `connectionTimeout = .max` (o 30 s do vendor cancelava a pending connect) |
-| Notify que acorda o processo | `CBConnectPeripheralOptionNotifyOnConnectionKey` / `Disconnection` / `Notification` |
-| Reconnect no launch / foreground | UUID em `UserDefaults` `last_veepoo_uuid` + `retrievePeripherals` |
-| Upload a partir do callback BLE | `recordAndFlush` em cada FC/SpO₂; `beginBackgroundTask` em volta da rede |
-| Sem timers de rotação | FC↔SpO₂ muda no próprio notify ( `asyncAfter` congela em background) |
-| Diagnóstico | cartão em Envios e Ajustes + `os_log` categoria `ble` |
+| `UIBackgroundModes` = `bluetooth-central`, `fetch`, `processing` | `iosApp/Next2UPaciente/Info.plist` — só o que a revisão da App Store justifica: sessão BLE do relógio, `BGAppRefresh` e `BGProcessing` de reserva. Sem `audio`, `location`, `voip` ou `remote-notification`. |
+| Restore identifier | `br.com.next2u.saude.paciente.ble` no manager do Veepoo |
+| Notify que acorda o processo | `CBConnectPeripheralOptionNotifyOn*` em todo `connect` (swizzle + pending connect) |
+| Reconnect | `willRestoreState` + `didDisconnect` → `connect` pendente do iOS (`connectionTimeout = .max`). Sem scan de 1 s. Scan com backoff só em **primeiro plano** e só se o UUID for desconhecido. |
+| FC contínua em segundo plano | Enquanto o relógio está ligado, o teste de FC **recomeça** ao terminar. Não troca para SpO₂ com o iPhone bloqueado. SpO₂ entra pelo histórico automático. |
+| Wake lock | `BleWakeLock` / `BleMain.run`: `beginBackgroundTask` **síncrono** no callback BLE, depois o trabalho no main actor (sem `Task` solto). |
+| Upload que sobrevive à suspensão | `URLSessionConfiguration.background` id `br.com.next2u.saude.paciente.ingest.http` (`IngestURLSession`). `handleEventsForBackgroundURLSession` no `AppDelegate`. A fila Ktor continua a fonte da verdade; o Core deduplica por `client_reading_id`. |
+| Fallback | `BGAppRefresh` + `BGProcessing`: religa, lê o histórico do relógio, reabre a FC, envia. **Não** promete 15 min. |
+
+## Heartbeat / last_seen (contrato do Core)
+
+O Core (`POST api/v1/wearables/batch-ingest` e o ingest avulso) **exige**
+`heart_rate` em 20–250 (`IngestPayload.isIngestibleJson`). Campos extras passam
+(`extra=allow`, ex.: `device_label`), mas um corpo **sem FC** é recusado. Não
+há endpoint de heartbeat nem campo `last_seen`.
+
+Este app **não** reenvia a última FC para fingir presença — isso inventaria
+sinal clínico (o Android também não publica telemetria de keep-alive).
+Enquanto o relógio estiver ligado, a FC contínua e o histórico automático
+alimentam o Core. Sem amostra nova, o painel marca Offline após 50 min.
+
+Para um heartbeat verdadeiro o Core precisaria, **sem** mudar o contrato das
+leituras:
+
+- `POST api/v1/wearables/heartbeat` com `patient_id`, `device_id`,
+  `connected_at`; **ou**
+- aceitar `ingest_source=companion_keepalive` **sem** `heart_rate`, usado só
+  para `last_seen` no painel; **ou**
+- o painel usar o estado da ligação BLE em vez da idade da última leitura.
 
 ## Limites (não são bugs do app)
 
@@ -41,31 +87,32 @@ conseguir entregar `willRestoreState` (TN3115).
 4. Não há FGS Android. Notify GATT *pode* acordar o processo; o sistema pode
    mesmo assim suspender depois de alguns minutos sem eventos.
 5. Reinício com passcode: sem BLE até o primeiro unlock.
-6. `BGTaskScheduler`: `BGAppRefresh` (`br.com.next2u.saude.paciente.ingest.refresh`,
-   `earliestBeginDate` ~15 min) é o slot preferido; `BGProcessing`
-   (`br.com.next2u.saude.paciente.ingest`) fica de reserva. **Não** promete 15 min.
-   O flush principal continua o callback BLE. Force-quit **para** os envios.
+6. `BGTaskScheduler` **não** promete 15 min. O caminho principal continua o
+   notify GATT + URLSession background. Force-quit **para** os envios.
 7. Exceção de bateria (PR #19) **não existe** no iOS. Ligar Atualização em
    Segundo Plano; não inventar «liberar bateria».
 8. No **iOS 26**, alguns toggles do Control Center só relançam apps com
    AccessorySetupKit (fora deste PR).
 
-## O que Leandro deve testar
+## Como testar com o iPhone bloqueado por 1 h
 
-1. Parear o VE30, deixar FC a enviar (~12 s). Confirmar HTTP 200 em Envios.
-2. Ir à tela inicial **sem** deslizar o app para fechar. Esperar 20–40 min.
-   Os envios devem continuar ou retomar sozinhos quando o relógio notificar.
-3. Abrir Envios / Ajustes: cartão **Diagnóstico BLE** com último evento,
-   estado da ligação e último HTTP. No Console.app: subsystem
-   `br.com.next2u.saude.paciente`, categoria `ble`.
-4. Desligar o Bluetooth do iPhone: o cartão deve dizer que o rádio está off
-   e os envios param. Religar: pending connect / restore deve voltar.
-5. **Force-quit** (fechar pela lista): o app **não** deve voltar sozinho.
-   Abrir o app deve religar o último UUID.
-6. Reinstalar o app: **não** espera-se restore automático — parear outra vez.
+1. Parear o VE30 / Veepoo no next2u SAÚDE. Confirmar batimentos na Início e
+   um HTTP 200 (Debug: Envios). **Não** force-quit; só ir para a tela inicial.
+2. Bloquear o iPhone. Deixar o relógio no pulso, Bluetooth ligado, o app **não**
+   deslizado para fechar. Atualização em Segundo Plano ligada para o next2u.
+3. Esperar **60 min**. No painel, a última leitura desse `device_id` deve
+   renovar pelo menos a cada ~15–20 min (FC ao vivo ou histórico). Não deve
+   ficar Offline (limiar 50 min) se o relógio permaneceu ligado.
+4. Abrir o app: a Início mostra as medições; a fila não deve ter crescido
+   sem envio. Console.app: subsystem `br.com.next2u.saude.paciente`,
+   categoria `ble`; linhas `URLSession background: HTTP`.
+5. Desligar o Bluetooth: os envios param. Religar: pending connect / restore
+   deve voltar.
+6. **Force-quit**: o app **não** volta sozinho. Abrir o app religa o último UUID.
 
 ## Impacto no piloto
 
-Telemetria 24 h como no Android continua **melhor esforço**. O relógio deve
-guardar medidas automáticas; o iPhone sincroniza ao notify, ao restore, ou
-ao abrir. Compare a fila iOS com a Android no mesmo `patient_id`.
+Telemetria 24 h como no Android continua **melhor esforço** (não há FGS). Com
+este build o caminho esperado, relógio ligado e app só em segundo plano, é
+FC por notify GATT + POST em URLSession background, com BGTask e histórico
+como rede de segurança.

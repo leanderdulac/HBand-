@@ -2,8 +2,10 @@ import BackgroundTasks
 import Foundation
 import shared
 
-/// Opportunistic Core flush. iOS does not promise a 15-minute cadence.
-/// BGAppRefresh is the preferred slot; BGProcessing stays as a longer backup.
+/// Fallback Core sync when BLE notifies have been quiet.
+/// iOS does not promise a 15-minute cadence — the live path is GATT notifies
+/// (`bluetooth-central`) plus a background URLSession. These tasks reconnect,
+/// pull watch history, restart FC streaming, then flush.
 enum IngestBackground {
     static let processingTaskId = SigningPlaceholders.ingestTaskId
     static let refreshTaskId = SigningPlaceholders.ingestRefreshTaskId
@@ -63,16 +65,7 @@ enum IngestBackground {
         if Task.isCancelled { return false }
         guard prepareStoreAndIngest() else { return false }
         if Task.isCancelled { return false }
-        do {
-            let flush = try await IngestRuntime.shared.flush()
-            if Task.isCancelled { return false }
-            VeepooSession.shared.noteBackgroundFlush(flush)
-            return flush.failedCount == 0
-        } catch is CancellationError {
-            return false
-        } catch {
-            return false
-        }
+        return await VeepooSession.shared.performBackgroundOpportunity(reason: "BGTask")
     }
 
     /// BG launch can skip the SwiftUI `.task` that normally opens the store.

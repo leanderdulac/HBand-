@@ -28,12 +28,22 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
+        // BGTask identifiers must be registered before launch returns, and before any schedule().
+        IngestBackground.register()
+        IngestURLSession.shared.prepare()
         // Restore id must be on a CBCentralManager before this method returns (TN3115).
         MainActor.assumeIsolated {
             VeepooSession.installAtLaunch()
         }
-        IngestBackground.register()
         IngestBackground.schedule()
         return true
+    }
+
+    func application(
+        _ application: UIApplication,
+        handleEventsForBackgroundURLSession identifier: String,
+        completionHandler: @escaping () -> Void
+    ) {
+        IngestURLSession.shared.handleEvents(identifier: identifier, completionHandler: completionHandler)
     }
 }

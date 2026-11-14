@@ -15,6 +15,22 @@ static BOOL gInjected = NO;
 static BOOL gDisabled = NO;
 static id (*gOrigInit3)(id, SEL, id, dispatch_queue_t, NSDictionary *) = NULL;
 static id (*gOrigInit2)(id, SEL, id, dispatch_queue_t) = NULL;
+static void (*gOrigConnect)(id, SEL, CBPeripheral *, NSDictionary *) = NULL;
+
+/// iOS only relaunches for GATT notifies if the connect that created the link
+/// asked for NotifyOnNotification / Connection / Disconnection (QA1866).
+static NSDictionary *N2UConnectOptions(NSDictionary *options) {
+    NSMutableDictionary *opts = options ? [[options mutableCopy] autorelease] : [NSMutableDictionary dictionary];
+    opts[CBConnectPeripheralOptionNotifyOnConnectionKey] = @YES;
+    opts[CBConnectPeripheralOptionNotifyOnDisconnectionKey] = @YES;
+    opts[CBConnectPeripheralOptionNotifyOnNotificationKey] = @YES;
+    return opts;
+}
+
+static void N2UConnect(id self, SEL _cmd, CBPeripheral *peripheral, NSDictionary *options) {
+    if (gOrigConnect == NULL || peripheral == nil) return;
+    gOrigConnect(self, _cmd, peripheral, N2UConnectOptions(options));
+}
 
 static BOOL N2UShouldInject(id delegate, NSDictionary *options) {
     if (gInjected || gDisabled || delegate == nil) return NO;
@@ -63,6 +79,13 @@ static id N2UInit2(id self, SEL _cmd, id delegate, dispatch_queue_t queue) {
         gOrigInit3 = (void *)(prev3 ?: inherited3);
         IMP prev2 = class_replaceMethod(cls, s2, (IMP)N2UInit2, method_getTypeEncoding(m2));
         gOrigInit2 = (void *)(prev2 ?: inherited2);
+        SEL sConnect = @selector(connectPeripheral:options:);
+        Method mConnect = class_getInstanceMethod(cls, sConnect);
+        if (mConnect != NULL) {
+            IMP inheritedConnect = method_getImplementation(mConnect);
+            IMP prevConnect = class_replaceMethod(cls, sConnect, (IMP)N2UConnect, method_getTypeEncoding(mConnect));
+            gOrigConnect = (void *)(prevConnect ?: inheritedConnect);
+        }
     });
 }
 

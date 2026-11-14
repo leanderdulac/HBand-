@@ -175,6 +175,10 @@ final class VeepooSession: NSObject, ObservableObject {
     /// can deliver `willRestoreState` (TN3115).
     static func installAtLaunch() {
         _ = shared
+        IngestURLSession.shared.prepare()
+        if UIApplication.shared.applicationState != .active {
+            shared.handleColdBackgroundLaunch()
+        }
     }
 
     override init() {
@@ -281,6 +285,10 @@ final class VeepooSession: NSObject, ObservableObject {
 
     /// Primeira tentativa após ciclo vazio (fora do pulso/ocupado) em 2 min; depois 4, 8, 16, 30.
     static let emptyRetrySeconds: TimeInterval = 2 * 60
+    /// Relógio ocupado no teste de FC: espera curta, sem loop de 1 s.
+    static let backgroundBusyRetry: TimeInterval = 15
+    /// Sem amostra nova neste intervalo: puxa o histórico gravado no relógio.
+    static let staleHistoryPull: TimeInterval = 12 * 60
 
     static func idleSeconds(afterEmptyCycles empty: Int) -> TimeInterval {
         guard empty > 0 else { return cycleIdleSeconds }
@@ -312,6 +320,7 @@ final class VeepooSession: NSObject, ObservableObject {
             return
         }
         if backgroundStreaming, !heartRunning, !spo2Running {
+            if now < nextCycleAt { return }
             startHeart()
             return
         }
@@ -497,15 +506,27 @@ final class VeepooSession: NSObject, ObservableObject {
     /// Envia o que está na fila (com beginBackgroundTask) e passa a FC contínua para que
     /// as notificações do relógio continuem acordando o app com o iPhone bloqueado.
     func handleEnteredBackground() {
+        BleWakeLock.shared.ping()
         note("App em segundo plano.")
         Task { await self.performFlush() }
+        scheduleBackgroundUpload()
         IngestBackground.schedule()
         guard hardwareReady else { return }
         backgroundStreaming = true
+        if spo2Running { stopOxygen() }
         if !heartRunning {
-            stopOxygen()
             startHeart()
         }
+    }
+
+    /// Restore / BGTask / GATT notify can relaunch into `.background` without
+    /// `didEnterBackground` (the observer never fires on a cold start).
+    func handleColdBackgroundLaunch() {
+        BleWakeLock.shared.ping()
+        note("Lançamento em segundo plano (restore, BLE ou BGTask).")
+        reconnectLastKnown(reason: "lançamento em background")
+        flushQueueOnly()
+        scheduleBackgroundUpload()
     }
 
     func handleWillEnterForeground() {
@@ -528,15 +549,17 @@ final class VeepooSession: NSObject, ObservableObject {
         stopOxygen()
         note("Lendo histórico do relógio (\(reason)).")
         manager.peripheralManage.veepooSdkStartReadDeviceAllData { [weak self] state, _, _, _ in
-            Task { @MainActor in
+            BleMain.run {
                 guard let self, state.rawValue == 2 else { return }
                 if let current = self.connected { self.adoptSdkMac(from: current) }
-                await self.enqueueWatchHistoryThenFlush()
-                if self.backgroundStreaming || Self.isInBackground {
-                    self.backgroundStreaming = true
-                    if !self.heartRunning { self.startHeart() }
-                } else {
-                    self.advanceMeasurementCycle()
+                Task { @MainActor in
+                    await self.enqueueWatchHistoryThenFlush()
+                    if self.backgroundStreaming || Self.isInBackground {
+                        self.backgroundStreaming = true
+                        if !self.heartRunning { self.startHeart() }
+                    } else {
+                        self.advanceMeasurementCycle()
+                    }
                 }
             }
         }
@@ -693,7 +716,7 @@ final class VeepooSession: NSObject, ObservableObject {
         manager.automaticConnection = false
         note("Connect Veepoo \(watch.name)")
         manager.veepooSDKConnectDevice(watch.model, deviceConnect: { [weak self] state in
-            Task { @MainActor in
+            BleMain.run {
                 self?.handleConnect(state, watch: watch)
             }
         })
@@ -807,7 +830,7 @@ final class VeepooSession: NSObject, ObservableObject {
             with: SynchronousPasswordType(rawValue: 0)!,
             password: Self.defaultPassword,
             synchronizationResult: { [weak self] result in
-                Task { @MainActor in
+                BleMain.run {
                     guard let self else { return }
                     switch result.rawValue {
                     case 1, 5, 6:
@@ -848,7 +871,7 @@ final class VeepooSession: NSObject, ObservableObject {
         recordDialCapabilities()
         readBattery()
         manager.peripheralManage.veepooSdkStartReadDeviceAllData { [weak self] state, _, _, _ in
-            Task { @MainActor in
+            BleMain.run {
                 guard let self else { return }
                 if state.rawValue == 2 {
                     self.sessionMessage = "Histórico do relógio lido. Medindo batimentos…"
@@ -860,8 +883,10 @@ final class VeepooSession: NSObject, ObservableObject {
                         self.adoptSdkMac(from: current)
                     }
                     self.lastHistoryPullAt = Date()
-                    await self.enqueueWatchHistoryThenFlush()
-                    self.advanceMeasurementCycle()
+                    Task { @MainActor in
+                        await self.enqueueWatchHistoryThenFlush()
+                        self.advanceMeasurementCycle()
+                    }
                 }
             }
         }
@@ -1109,7 +1134,7 @@ final class VeepooSession: NSObject, ObservableObject {
         // 3 s, e o relógio nunca completava uma medição (syslog 30/10 01:45–01:50).
         lastSampleAt = Date()
         manager.peripheralManage.veepooSDKTestHeartStart(true) { [weak self] state, value in
-            Task { @MainActor in
+            BleMain.run {
                 guard let self else { return }
                 if state.rawValue == 1, value >= 30, value <= 240 {
                     self.heartRate = Int(value)
@@ -1121,7 +1146,10 @@ final class VeepooSession: NSObject, ObservableObject {
                     self.note("FC: amostra \(self.heartSamplesThisBurst) recebida.")
                     self.cycleGotReading = true
                     self.recordAndFlush()
-                    if !self.backgroundStreaming, self.heartSamplesThisBurst >= Self.heartSamplesPerCycle {
+                    if self.backgroundStreaming || Self.isInBackground {
+                        self.backgroundStreaming = true
+                        self.scheduleBackgroundUpload()
+                    } else if self.heartSamplesThisBurst >= Self.heartSamplesPerCycle {
                         self.stopHeart()
                         self.startOxygen()
                     }
@@ -1134,6 +1162,17 @@ final class VeepooSession: NSObject, ObservableObject {
                 if state.rawValue >= 2, self.heartRunning {
                     self.heartRunning = false // o relógio já encerrou este teste
                     let reason = state.rawValue == 2 ? "fora do pulso" : state.rawValue == 3 ? "relógio ocupado" : "FC encerrada pelo relógio"
+                    if self.backgroundStreaming || Self.isInBackground {
+                        self.backgroundStreaming = true
+                        if state.rawValue == 2 || state.rawValue == 3 {
+                            let wait = state.rawValue == 2 ? Self.emptyRetrySeconds : Self.backgroundBusyRetry
+                            self.nextCycleAt = Date().addingTimeInterval(wait)
+                            self.note("FC: \(reason); nova tentativa em \(Int(wait)) s.")
+                        } else {
+                            self.startHeart()
+                        }
+                        return
+                    }
                     if self.cycleGotReading { self.startOxygen() } else { self.finishCycle(reason: reason) }
                 }
             }
@@ -1146,7 +1185,7 @@ final class VeepooSession: NSObject, ObservableObject {
         spo2Running = true
         measureStartedAt = Date()
         manager.peripheralManage.veepooSDKTestOxygenStart(true) { [weak self] state, value in
-            Task { @MainActor in
+            BleMain.run {
                 guard let self else { return }
                 guard self.spo2Running else { return }
                 // 2 fora do pulso, 3 ocupado, 4 encerrado, 5 sem SpO₂: o teste já acabou.
@@ -1242,6 +1281,7 @@ final class VeepooSession: NSObject, ObservableObject {
     @discardableResult
     func performFlush() async -> Bool {
         guard PatientStore.shared.status == .ready else { return false }
+        BleWakeLock.shared.ping()
         configureIngest()
         let task = beginIngestTask()
         defer { endIngestTask(task) }
@@ -1252,6 +1292,75 @@ final class VeepooSession: NSObject, ObservableObject {
         } catch {
             return false
         }
+    }
+
+    /// BGAppRefresh / BGProcessing: religa, lê o histórico do relógio, reabre a FC
+    /// e envia. Um flush da fila vazia não tira o painel do Offline.
+    @discardableResult
+    func performBackgroundOpportunity(reason: String) async -> Bool {
+        BleWakeLock.shared.ping()
+        note("Oportunidade em segundo plano (\(reason)).")
+        reconnectLastKnown(reason: reason)
+        if hardwareReady {
+            backgroundStreaming = true
+            await pullWatchHistoryAndWait(reason: reason)
+            if !heartRunning { startHeart() }
+        }
+        let ok = await performFlush()
+        scheduleBackgroundUpload()
+        return ok
+    }
+
+    private func pullWatchHistoryAndWait(reason: String) async {
+        guard hardwareReady else { return }
+        if Date().timeIntervalSince(lastHistoryPullAt) < Self.historyPullMinInterval,
+           Date().timeIntervalSince(lastRecordAt) < Self.staleHistoryPull {
+            return
+        }
+        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+            var resumed = false
+            let finish = {
+                guard !resumed else { return }
+                resumed = true
+                cont.resume()
+            }
+            lastHistoryPullAt = Date()
+            if heartRunning { stopHeart() }
+            stopOxygen()
+            note("Lendo histórico do relógio (\(reason)).")
+            manager.peripheralManage.veepooSdkStartReadDeviceAllData { [weak self] state, _, _, _ in
+                BleMain.run {
+                    guard let self, state.rawValue == 2 else {
+                        finish()
+                        return
+                    }
+                    if let current = self.connected { self.adoptSdkMac(from: current) }
+                    Task { @MainActor in
+                        await self.enqueueWatchHistoryThenFlush()
+                        finish()
+                    }
+                }
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 20) { finish() }
+        }
+        if backgroundStreaming || Self.isInBackground {
+            backgroundStreaming = true
+            if !heartRunning { startHeart() }
+        }
+    }
+
+    private func scheduleBackgroundUpload() {
+        let override = ingestKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        let apiKey = override.isEmpty ? (Self.bundledString("Next2UIngestApiKey") ?? "") : override
+        let patientId = PatientStore.shared.status == .ready
+            ? PatientStore.shared.profile().patientId
+            : ""
+        IngestURLSession.shared.uploadPending(
+            baseUrl: ingestUrl,
+            apiKey: apiKey,
+            appVersion: Self.appVersionString,
+            patientId: patientId
+        )
     }
 
     /// Honors the shared backoff (exponential + jitter, Retry-After floor).
@@ -1351,7 +1460,16 @@ final class VeepooSession: NSObject, ObservableObject {
 
     /// Envia no máximo 1x/min; leituras intermediárias ficam na fila durável e saem no
     /// próximo envio (adiado ou acordado pela próxima notificação do relógio).
+    /// Em segundo plano o `Task.sleep` morre com a suspensão: envia já, nesta janela.
     private func throttledFlush() async {
+        if backgroundStreaming || Self.isInBackground {
+            lastFlushAt = Date()
+            deferredFlush?.cancel()
+            deferredFlush = nil
+            await performFlush()
+            scheduleBackgroundUpload()
+            return
+        }
         let wait = Self.minUploadInterval - Date().timeIntervalSince(lastFlushAt)
         if wait <= 0 {
             lastFlushAt = Date()
@@ -1454,6 +1572,7 @@ final class VeepooSession: NSObject, ObservableObject {
     func onWillRestoreState(_ dict: [String: Any]) {
         let peripherals = (dict[CBCentralManagerRestoredStatePeripheralsKey] as? [CBPeripheral]) ?? []
         note("willRestoreState: \(peripherals.count) periférico(s).")
+        scheduleBackgroundUpload()
         sessionMessage = "O iOS restaurou o Bluetooth. Repondo a sessão do relógio."
         for peripheral in peripherals {
             rememberPeripheral(peripheral)
@@ -1488,8 +1607,12 @@ final class VeepooSession: NSObject, ObservableObject {
         resetBackoffScan()
         if gattUpSince == nil { gattUpSince = Date() }
         note("didConnect \(peripheral.identifier.uuidString)")
+        if Self.isInBackground { backgroundStreaming = true }
         if !hardwareReady {
             resumeSession(peripheral)
+        } else if backgroundStreaming || Self.isInBackground {
+            if !heartRunning { startHeart() }
+            scheduleBackgroundUpload()
         }
     }
 
@@ -1526,7 +1649,7 @@ final class VeepooSession: NSObject, ObservableObject {
         note("Reposiciona sessão Veepoo (senha + FC).")
         manager.deviceShowConfirm = false
         manager.veepooSDKConnectDevice(model, deviceConnect: { [weak self] state in
-            Task { @MainActor in
+            BleMain.run {
                 self?.handleConnect(state, watch: watch)
             }
         })
@@ -1559,7 +1682,7 @@ final class VeepooSession: NSObject, ObservableObject {
         manager.automaticConnection = false
         note("Reconnect UUID \(peripheral.identifier.uuidString)")
         manager.veepooSDKConnectDevice(model, deviceConnect: { [weak self] state in
-            Task { @MainActor in
+            BleMain.run {
                 self?.handleConnect(state, watch: watch)
             }
         })
@@ -1706,14 +1829,14 @@ final class VeepooCentralForwarder: NSObject, CBCentralManagerDelegate {
 
     func centralManagerDidUpdateState(_ central: CBCentralManager) {
         sdkDelegate?.centralManagerDidUpdateState(central)
-        Task { @MainActor in
+        BleMain.run {
             self.session?.onCentralState(central.state)
         }
     }
 
     func centralManager(_ central: CBCentralManager, willRestoreState dict: [String: Any]) {
         sdkDelegate?.centralManager?(central, willRestoreState: dict)
-        Task { @MainActor in
+        BleMain.run {
             self.session?.onWillRestoreState(dict)
         }
     }
@@ -1730,7 +1853,7 @@ final class VeepooCentralForwarder: NSObject, CBCentralManagerDelegate {
             advertisementData: advertisementData,
             rssi: RSSI
         )
-        Task { @MainActor in
+        BleMain.run {
             self.session?.onDidDiscover(
                 peripheral: peripheral,
                 advertisementData: advertisementData,
@@ -1741,21 +1864,21 @@ final class VeepooCentralForwarder: NSObject, CBCentralManagerDelegate {
 
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
         sdkDelegate?.centralManager?(central, didConnect: peripheral)
-        Task { @MainActor in
+        BleMain.run {
             self.session?.onDidConnect(peripheral)
         }
     }
 
     func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
         sdkDelegate?.centralManager?(central, didFailToConnect: peripheral, error: error)
-        Task { @MainActor in
+        BleMain.run {
             self.session?.onDidDisconnect(peripheral, reason: error?.localizedDescription ?? "falha ao ligar")
         }
     }
 
     func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
         sdkDelegate?.centralManager?(central, didDisconnectPeripheral: peripheral, error: error)
-        Task { @MainActor in
+        BleMain.run {
             self.session?.onDidDisconnect(peripheral, reason: error?.localizedDescription ?? "desconectado")
         }
     }
@@ -1766,7 +1889,7 @@ final class VeepooCentralForwarder: NSObject, CBCentralManagerDelegate {
         for peripheral: CBPeripheral
     ) {
         sdkDelegate?.centralManager?(central, connectionEventDidOccur: event, for: peripheral)
-        Task { @MainActor in
+        BleMain.run {
             if event == .peerConnected {
                 self.session?.onDidConnect(peripheral)
             } else {

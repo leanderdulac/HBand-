@@ -7,6 +7,8 @@ enum SigningPlaceholders {
     static let bundleId = "br.com.next2u.saude.paciente"
     static let ingestTaskId = "br.com.next2u.saude.paciente.ingest"
     static let ingestRefreshTaskId = "br.com.next2u.saude.paciente.ingest.refresh"
+    /// Background URLSession for Core POSTs that outlive a BLE wake window.
+    static let ingestHttpSessionId = "br.com.next2u.saude.paciente.ingest.http"
 
     static let summary = """
     Team ID: \(teamId) (Next2U).
