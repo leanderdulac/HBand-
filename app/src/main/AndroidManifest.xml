@@ -22,6 +22,11 @@
 
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />
 
+    <!-- Package visibility for the official H Band app, which grabs the VE30 GATT session. -->
+    <queries>
+        <package android:name="com.veepoo.hband" />
+    </queries>
+
     <application
         android:name=".HBandHealthSyncApp"
         android:allowBackup="true"

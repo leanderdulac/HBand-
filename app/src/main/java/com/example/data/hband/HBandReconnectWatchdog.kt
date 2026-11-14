@@ -70,6 +70,7 @@ class HBandWatchdogReceiver : BroadcastReceiver() {
         val userStopped = app.startupStopRequested
         if (!ReconnectWatchdogPolicy.shouldKeepArmed(manager.isAutoReconnectEnabled, persisted, userStopped)) return
         try {
+            manager.releaseStaleConnectAttempt()
             if (ReconnectWatchdogPolicy.shouldReconnect(
                     manager.isAutoReconnectEnabled, persisted, manager.isHardwareConnected.value, userStopped)
             ) {

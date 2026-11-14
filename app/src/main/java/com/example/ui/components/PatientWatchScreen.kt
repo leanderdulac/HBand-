@@ -157,6 +157,7 @@ internal fun PatientWatchContent(
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Text("Meu relógio", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.semantics { heading() })
+        CompetingWatchAppBanner()
         IncompatibleWatchCard(device = incompatibleDevice, onForget = onForgetIncompatible)
         PatientSummaryLayout(first = {
             Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
