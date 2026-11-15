@@ -293,6 +293,14 @@ class HBandBleManager(
     // contínuo, nunca em paralelo. `ppgStageGeneration` invalida callbacks/timeouts de um
     // estágio já abandonado (nova conexão ou avanço de estágio).
     private var ppgStageGeneration = 0
+    private var ppgCycleRunning = false
+    private var ppgCycleGotReading = false
+    private var ppgEmptyCycles = 0
+    private var ppgConsecutiveFailures = 0
+    private var ppgNextCycleAtElapsedMs = 0L
+    private var ppgNextCycleRunnable: Runnable? = null
+    private var lastBpSuccessElapsedMs: Long? = null
+    private var bpUnsupported = false
     private var activeSpo2Listener: ISpo2hDataListener? = null
     private var activeHrvListener: IHrvDetectListener? = null
     private var activeTempListener: ITemptureDetectDataListener? = null
@@ -387,7 +395,7 @@ class HBandBleManager(
         private const val SPO2_STAGE_TIMEOUT_MS = 30_000L
         private const val BP_STAGE_TIMEOUT_MS = 40_000L
         private const val HRV_STAGE_TIMEOUT_MS = 15_000L
-        private const val PPG_STAGE_GAP_MS = 400L
+        private const val PPG_STAGE_GAP_MS = PpgCyclePolicy.STAGE_GAP_MS
         // VE30 can fire STATUS_DISCONNECTED while HeartData still streams.
         // Keep the live latch until packets go quiet for this window.
         private const val LIVE_LINK_STALE_MS = 8_000L
@@ -1070,7 +1078,7 @@ class HBandBleManager(
         }
         hasStartedVeepooSensors = true
         startTemperatureMonitoring()
-        runHeartStage()
+        startPpgCycle(reason = "sessão Veepoo", force = true)
     }
 
     /** Temperatura usa um sensor térmico independente — não compete pelo PPG, roda à parte. */
@@ -1116,6 +1124,7 @@ class HBandBleManager(
                 latchLiveHardwareLink()
                 if (heart.data in 30..240) {
                     currentHeartRate = heart.data
+                    ppgCycleGotReading = true
                     emitRealTelemetry(mac, name)
                 }
             },
@@ -1140,6 +1149,7 @@ class HBandBleManager(
             latchLiveHardwareLink()
             if (data.value in 50..100) {
                 currentSpO2 = data.value
+                ppgCycleGotReading = true
                 emitRealTelemetry(mac, name)
             }
         }
@@ -1161,6 +1171,14 @@ class HBandBleManager(
         if (!isConnectingVeepoo || advancedDetectActive) return
         val generation = ++ppgStageGeneration
         val nowElapsed = SystemClock.elapsedRealtime()
+        if (!PpgCyclePolicy.bloodIsDue(bpUnsupported, lastBpSuccessElapsedMs, nowElapsed)) {
+            Log.i(TAG, "Estágio PA adiado: última medição ainda dentro de 30 min")
+            mainHandler.postDelayed({
+                if (generation != ppgStageGeneration) return@postDelayed
+                mainHandler.postDelayed({ runHrvStage() }, PPG_STAGE_GAP_MS)
+            }, PPG_STAGE_GAP_MS)
+            return
+        }
         if (!bpDetectRetry.shouldAttempt(nowElapsed)) {
             Log.w(
                 TAG,
@@ -1202,6 +1220,8 @@ class HBandBleManager(
                     currentSystolic = data.highPressure
                     currentDiastolic = data.lowPressure
                     lastValidBp.remember(data.highPressure, data.lowPressure, System.currentTimeMillis())
+                    lastBpSuccessElapsedMs = SystemClock.elapsedRealtime()
+                    ppgCycleGotReading = true
                     emitRealTelemetry(mac, name)
                 }
             },
@@ -1244,9 +1264,79 @@ class HBandBleManager(
         mainHandler.postDelayed({
             if (generation != ppgStageGeneration) return@postDelayed
             activeHrvListener?.let { vpManager.stopDetectHrv(BleWriteResponse {}, it) }
-            // Reinicia o revezamento para manter FC/SpO2/PA atualizados continuamente.
-            mainHandler.postDelayed({ runHeartStage() }, PPG_STAGE_GAP_MS)
+            finishPpgCycle(failed = false)
         }, HRV_STAGE_TIMEOUT_MS)
+    }
+
+    private fun startPpgCycle(reason: String, force: Boolean = false) {
+        val now = SystemClock.elapsedRealtime()
+        if (!PpgCyclePolicy.shouldStartCycle(
+                hardwareReady = isConnectingVeepoo && !advancedDetectActive,
+                cycleRunning = ppgCycleRunning,
+                nowElapsedMs = now,
+                nextCycleAtElapsedMs = ppgNextCycleAtElapsedMs,
+                force = force,
+            )
+        ) {
+            Log.d(TAG, "Ciclo PPG adiado ($reason); próxima em ${ (ppgNextCycleAtElapsedMs - now).coerceAtLeast(0L) } ms")
+            return
+        }
+        cancelPpgNextCycle()
+        ppgCycleRunning = true
+        ppgCycleGotReading = false
+        Log.i(TAG, "Ciclo PPG: início ($reason)")
+        runHeartStage()
+    }
+
+    private fun finishPpgCycle(failed: Boolean) {
+        stopPpgSensors()
+        ppgCycleRunning = false
+        if (failed) {
+            ppgConsecutiveFailures++
+        } else if (ppgCycleGotReading) {
+            ppgConsecutiveFailures = 0
+        }
+        ppgEmptyCycles = if (ppgCycleGotReading) 0 else ppgEmptyCycles + 1
+        val rest = PpgCyclePolicy.restAfterCycle(
+            emptyCycles = ppgEmptyCycles,
+            consecutiveFailures = ppgConsecutiveFailures,
+            failed = failed,
+        )
+        ppgNextCycleAtElapsedMs = SystemClock.elapsedRealtime() + rest
+        Log.i(
+            TAG,
+            "Ciclo PPG: fim; leitura=${if (ppgCycleGotReading) "sim" else "não"}; próxima em ${rest / 1000}s",
+        )
+        schedulePpgNextCycle(rest)
+    }
+
+    private fun schedulePpgNextCycle(delayMs: Long) {
+        cancelPpgNextCycle()
+        val generation = ppgStageGeneration
+        val runnable = Runnable {
+            if (generation != ppgStageGeneration) return@Runnable
+            if (userRequestedDisconnect || !isConnectingVeepoo || advancedDetectActive) return@Runnable
+            startPpgCycle(reason = "pausa concluída", force = false)
+        }
+        ppgNextCycleRunnable = runnable
+        mainHandler.postDelayed(runnable, delayMs)
+    }
+
+    private fun cancelPpgNextCycle() {
+        ppgNextCycleRunnable?.let { mainHandler.removeCallbacks(it) }
+        ppgNextCycleRunnable = null
+    }
+
+    /** Para todos os testes PPG/HRV e invalida callbacks pendentes. */
+    private fun stopPpgSensors() {
+        ppgStageGeneration++
+        ppgCycleRunning = false
+        runCatching { vpManager.stopDetectHeart(IBleWriteResponse {}) }
+        activeSpo2Listener?.let { runCatching { vpManager.stopDetectSPO2H(IBleWriteResponse {}, it) } }
+        activeSpo2Listener = null
+        runCatching { vpManager.stopDetectBP(IBleWriteResponse {}, EBPDetectModel.DETECT_MODEL_PUBLIC) }
+        activeHrvListener?.let { runCatching { vpManager.stopDetectHrv(BleWriteResponse {}, it) } }
+        activeHrvListener = null
     }
 
     private fun currentConnectedMac(): String = _connectedDevice.value?.macAddress ?: ""
@@ -1309,7 +1399,8 @@ class HBandBleManager(
             cancelConnectAttemptWatchdog()
             isSyncingPersonInfo = false
             advancedDetectActive = false
-            ppgStageGeneration++
+            cancelPpgNextCycle()
+            stopPpgSensors()
             _isHardwareConnected.value = false
             markDeviceDisconnected()
             publishSessionPhase()
@@ -1364,7 +1455,8 @@ class HBandBleManager(
                             cancelHistorySync()
                             if (passwordHandshakeSucceeded) p1Controller.stopAllDetect() else p1Controller.cancelled = true
                             advancedDetectActive = false
-                            ppgStageGeneration++
+                            cancelPpgNextCycle()
+                            stopPpgSensors()
                             cancelLiveLinkWatchdog()
                             _isHardwareConnected.value = false
                             markDeviceDisconnected()
@@ -2879,7 +2971,9 @@ class HBandBleManager(
     private fun beginAdvancedDetect(supported: Boolean): Boolean {
         if (!supported || !hasLiveHardwareSession() || !isVeepooConnection) return false
         advancedDetectActive = true
-        ppgStageGeneration++
+        cancelPpgNextCycle()
+        stopPpgSensors()
+        ppgCycleRunning = false
         stopTemperatureMonitoring()
         runCatching { vpManager.stopDetectHeart(IBleWriteResponse {}) }
         activeSpo2Listener?.let { runCatching { vpManager.stopDetectSPO2H(IBleWriteResponse {}, it) } }
