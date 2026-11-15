@@ -135,7 +135,7 @@ fun CompetingWatchAppCard(warning: String?, modifier: Modifier = Modifier) {
     }
 }
 
-/** "Versão 1.7.8 (20)" from BuildConfig, shown in Ajustes and as a Home footer. */
+/** "Versão 1.7.9 (21)" from BuildConfig, shown in Ajustes and as a Home footer. */
 fun appVersionLabel(name: String = com.example.BuildConfig.VERSION_NAME, code: Int = com.example.BuildConfig.VERSION_CODE): String =
     "Versão $name ($code)"
 
