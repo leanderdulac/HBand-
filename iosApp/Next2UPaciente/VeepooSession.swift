@@ -288,34 +288,35 @@ final class VeepooSession: NSObject, ObservableObject {
 
     // MARK: - Ciclo de medição pontual (FC → SpO₂ → PA se devida → pausa)
 
-    /// Pausa entre ciclos com leitura. Ciclos sem leitura dobram a pausa (até 30 min).
-    static let cycleIdleSeconds: TimeInterval = 5 * 60
-    static let maxIdleSeconds: TimeInterval = 30 * 60
+    /// Pausa e cadência: ver `MeasurementCyclePolicy` (5 min FC/SpO₂, 30 min PA).
+    static let cycleIdleSeconds: TimeInterval = MeasurementCyclePolicy.cycleIdleSeconds
+    static let maxIdleSeconds: TimeInterval = MeasurementCyclePolicy.maxIdleSeconds
     static let heartStageTimeout: TimeInterval = 45
     static let oxygenStageTimeout: TimeInterval = 40
     /// O teste Veepoo de pressão leva ~50–55 s; um pouco de folga para o callback.
     static let bloodStageTimeout: TimeInterval = 70
-    /// Pressão ao vivo no máximo a cada 30 min (primeiro plano / oportunidade em fundo).
-    static let bloodCadence: TimeInterval = 30 * 60
+    static let bloodCadence: TimeInterval = MeasurementCyclePolicy.bloodCadence
     /// Leitura do total de passos do dia, sem coincidir com testes longos.
     static let stepPullInterval: TimeInterval = 60
     static let heartSamplesPerCycle = 2
+    private var consecutiveStageFailures = 0
     private var bloodIsDue: Bool {
-        guard !bloodUnsupported else { return false }
-        guard let at = bloodUpdatedAt else { return true }
-        return Date().timeIntervalSince(at) >= Self.bloodCadence
+        MeasurementCyclePolicy.bloodIsDue(
+            unsupported: bloodUnsupported,
+            lastSuccessAt: bloodUpdatedAt,
+            now: Date()
+        )
     }
 
     /// Primeira tentativa após ciclo vazio (fora do pulso/ocupado) em 2 min; depois 4, 8, 16, 30.
-    static let emptyRetrySeconds: TimeInterval = 2 * 60
+    static let emptyRetrySeconds: TimeInterval = MeasurementCyclePolicy.emptyRetrySeconds
     /// Relógio ocupado no teste de FC: espera curta, sem loop de 1 s.
     static let backgroundBusyRetry: TimeInterval = 15
     /// Sem amostra nova neste intervalo: puxa o histórico gravado no relógio.
     static let staleHistoryPull: TimeInterval = 12 * 60
 
     static func idleSeconds(afterEmptyCycles empty: Int) -> TimeInterval {
-        guard empty > 0 else { return cycleIdleSeconds }
-        return min(maxIdleSeconds, emptyRetrySeconds * pow(2, Double(min(empty - 1, 4))))
+        MeasurementCyclePolicy.idleSeconds(afterEmptyCycles: empty)
     }
 
     /// Chamado pelo watchdog (3 s) e por eventos BLE: encerra estágio vencido e inicia o
@@ -326,33 +327,19 @@ final class VeepooSession: NSObject, ObservableObject {
         if bloodRunning {
             if now.timeIntervalSince(measureStartedAt) > Self.bloodStageTimeout {
                 note("Ciclo: pressão sem resultado em \(Int(Self.bloodStageTimeout)) s.")
-                endBlood(reason: "pressão sem resultado")
-            }
-            return
-        }
-        if heartRunning, backgroundStreaming {
-            // FC contínua: só reinicia se o relógio parou de mandar amostras.
-            if now.timeIntervalSince(lastSampleAt) > Self.heartStageTimeout {
-                note("FC contínua sem amostras; reiniciando.")
-                stopHeart()
-                startHeart()
+                endBlood(reason: "pressão sem resultado", failed: true)
             }
             return
         }
         if heartRunning, now.timeIntervalSince(measureStartedAt) > Self.heartStageTimeout {
             note("Ciclo: FC sem resultado completo em \(Int(Self.heartStageTimeout)) s.")
             stopHeart()
-            if cycleGotReading { startOxygen() } else { finishCycle(reason: "FC sem leitura") }
+            if cycleGotReading { startOxygen() } else { finishCycle(reason: "FC sem leitura", failed: true) }
             return
         }
         if spo2Running, now.timeIntervalSince(measureStartedAt) > Self.oxygenStageTimeout {
             note("Ciclo: SpO₂ sem resultado em \(Int(Self.oxygenStageTimeout)) s.")
-            continueAfterOxygen(reason: "SpO₂ sem resultado")
-            return
-        }
-        if backgroundStreaming, !sensorBusy {
-            if now < nextCycleAt { return }
-            startHeart()
+            continueAfterOxygen(reason: "SpO₂ sem resultado", failed: true)
             return
         }
         if !sensorBusy, now >= nextCycleAt {
@@ -361,29 +348,40 @@ final class VeepooSession: NSObject, ObservableObject {
     }
 
     private func startCycle(reason: String, force: Bool = false) {
-        guard hardwareReady, !sensorBusy else { return }
-        if !force, Date() < nextCycleAt { return }
+        guard MeasurementCyclePolicy.shouldStartCycle(
+            hardwareReady: hardwareReady,
+            sensorBusy: sensorBusy,
+            now: Date(),
+            nextCycleAt: nextCycleAt,
+            force: force
+        ) else { return }
         cycleGotReading = false
         note("Ciclo de medição: início (\(reason)).")
         NSLog("[Next2U] Ciclo de medição: início (%@)", reason)
         startHeart()
     }
 
-    private func finishCycle(reason: String) {
+    /// Encerra todos os testes ao vivo e agenda a próxima janela. Nunca religa a FC aqui:
+    /// religar imediatamente (build 16/17 em segundo plano) deixava o PPG do VE30
+    /// ligado até acabar a bateria.
+    private func finishCycle(reason: String, failed: Bool = false) {
         stopSensors()
+        if failed {
+            consecutiveStageFailures += 1
+        } else if cycleGotReading {
+            consecutiveStageFailures = 0
+        }
         consecutiveEmptyCycles = cycleGotReading ? 0 : consecutiveEmptyCycles + 1
-        let idle = Self.idleSeconds(afterEmptyCycles: consecutiveEmptyCycles)
+        var idle = Self.idleSeconds(afterEmptyCycles: consecutiveEmptyCycles)
+        if failed {
+            idle = max(idle, MeasurementCyclePolicy.failureBackoff(afterConsecutiveFailures: consecutiveStageFailures))
+        }
         nextCycleAt = Date().addingTimeInterval(idle)
         let msg = "Ciclo de medição: fim (\(reason)); leitura=\(cycleGotReading ? "sim" : "não"); próxima em \(Int(idle / 60)) min."
         note(msg)
         NSLog("[Next2U] %@", msg)
         if cycleGotReading {
             sessionMessage = "Medição concluída. Próxima em \(Int(idle / 60)) min."
-        }
-        if backgroundStreaming || Self.isInBackground {
-            // Em segundo plano uma pausa sem tráfego BLE = app suspenso. Reabre a FC já.
-            backgroundStreaming = true
-            if hardwareReady { startHeart() }
         }
     }
 
@@ -544,10 +542,13 @@ final class VeepooSession: NSObject, ObservableObject {
         IngestBackground.schedule()
         guard hardwareReady else { return }
         backgroundStreaming = true
+        // Não manter um teste óptico ligado só para acordar o app: isso esgota a bateria.
         if spo2Running { stopOxygen() }
         abortBlood(reason: "segundo plano")
-        if !heartRunning {
-            startHeart()
+        if heartRunning {
+            // Deixa a FC pontual do ciclo atual terminar pelo watchdog/callback.
+        } else {
+            advanceMeasurementCycle()
         }
     }
 
@@ -587,12 +588,7 @@ final class VeepooSession: NSObject, ObservableObject {
                 if let current = self.connected { self.adoptSdkMac(from: current) }
                 Task { @MainActor in
                     await self.enqueueWatchHistoryThenFlush()
-                    if self.backgroundStreaming || Self.isInBackground {
-                        self.backgroundStreaming = true
-                        if !self.heartRunning { self.startHeart() }
-                    } else {
-                        self.advanceMeasurementCycle()
-                    }
+                    self.advanceMeasurementCycle()
                 }
             }
         }
@@ -1180,10 +1176,8 @@ final class VeepooSession: NSObject, ObservableObject {
                     self.note("FC: amostra \(self.heartSamplesThisBurst) recebida.")
                     self.cycleGotReading = true
                     self.recordAndFlush()
-                    if self.backgroundStreaming || Self.isInBackground {
-                        self.backgroundStreaming = true
-                        self.scheduleBackgroundUpload()
-                    } else if self.heartSamplesThisBurst >= Self.heartSamplesPerCycle {
+                    self.scheduleBackgroundUpload()
+                    if self.heartSamplesThisBurst >= Self.heartSamplesPerCycle {
                         self.stopHeart()
                         self.startOxygen()
                     }
@@ -1195,16 +1189,10 @@ final class VeepooSession: NSObject, ObservableObject {
                 }
                 if state.rawValue >= 2, self.heartRunning {
                     self.heartRunning = false // o relógio já encerrou este teste
+                    self.stopHeart()
                     let reason = state.rawValue == 2 ? "fora do pulso" : state.rawValue == 3 ? "relógio ocupado" : "FC encerrada pelo relógio"
-                    if self.backgroundStreaming || Self.isInBackground {
-                        self.backgroundStreaming = true
-                        if state.rawValue == 2 || state.rawValue == 3 {
-                            let wait = state.rawValue == 2 ? Self.emptyRetrySeconds : Self.backgroundBusyRetry
-                            self.nextCycleAt = Date().addingTimeInterval(wait)
-                            self.note("FC: \(reason); nova tentativa em \(Int(wait)) s.")
-                        } else {
-                            self.startHeart()
-                        }
+                    if state.rawValue == 2 || state.rawValue == 3 {
+                        self.finishCycle(reason: reason, failed: true)
                         return
                     }
                     if self.cycleGotReading { self.startOxygen() } else { self.finishCycle(reason: reason) }
@@ -1240,17 +1228,17 @@ final class VeepooSession: NSObject, ObservableObject {
         }
     }
 
-    private func continueAfterOxygen(reason: String) {
+    private func continueAfterOxygen(reason: String, failed: Bool = false) {
         stopOxygen()
-        if backgroundStreaming || Self.isInBackground {
-            finishCycle(reason: reason)
+        if failed, !cycleGotReading {
+            finishCycle(reason: reason, failed: true)
             return
         }
         if bloodIsDue {
             startBlood()
             return
         }
-        finishCycle(reason: reason)
+        finishCycle(reason: reason, failed: failed)
     }
 
     /// Pressão ao vivo: um teste de ~50–55 s, nunca em paralelo com FC/SpO₂.
@@ -1300,7 +1288,11 @@ final class VeepooSession: NSObject, ObservableObject {
                 } else {
                     self.note("Pressão: teste encerrado (\(state.rawValue)).")
                 }
-                self.endBlood(reason: "pressão encerrada (\(state.rawValue))")
+                let bpOk = state.rawValue == 4
+                    && (60...240).contains(Int(high))
+                    && (30...160).contains(Int(low))
+                // Estado 5 (sem função) não entra em backoff: bloodUnsupported já impede nova PA.
+                self.endBlood(reason: "pressão encerrada (\(state.rawValue))", failed: !bpOk && state.rawValue != 5)
             }
         }
     }
@@ -1317,25 +1309,17 @@ final class VeepooSession: NSObject, ObservableObject {
             DispatchQueue.main.asyncAfter(deadline: .now() + Self.bloodStageTimeout) { [weak self] in
                 guard let self, self.bloodRunning else { return }
                 self.note("Pressão: tempo esgotado na oportunidade em segundo plano.")
-                self.endBlood(reason: "pressão tempo esgotado")
+                self.endBlood(reason: "pressão tempo esgotado", failed: true)
             }
         }
     }
 
-    private func endBlood(reason: String) {
+    private func endBlood(reason: String, failed: Bool = false) {
         stopBlood()
         let waiter = bloodWaiter
         bloodWaiter = nil
-        if let waiter {
-            waiter.resume()
-            return
-        }
-        if backgroundStreaming || Self.isInBackground {
-            backgroundStreaming = true
-            if hardwareReady, !heartRunning { startHeart() }
-            return
-        }
-        finishCycle(reason: reason)
+        finishCycle(reason: reason, failed: failed)
+        waiter?.resume()
     }
 
     private func resumeBloodWaiter() {
@@ -1560,7 +1544,7 @@ final class VeepooSession: NSObject, ObservableObject {
                 stopOxygen()
                 await measureBloodOnce()
             }
-            if !heartRunning { startHeart() }
+            if !heartRunning { advanceMeasurementCycle() }
         }
         let ok = await performFlush()
         scheduleBackgroundUpload()
@@ -1600,10 +1584,7 @@ final class VeepooSession: NSObject, ObservableObject {
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 20) { finish() }
         }
-        if backgroundStreaming || Self.isInBackground {
-            backgroundStreaming = true
-            if !heartRunning { startHeart() }
-        }
+        advanceMeasurementCycle()
     }
 
     private func scheduleBackgroundUpload() {
@@ -1872,13 +1853,18 @@ final class VeepooSession: NSObject, ObservableObject {
         if Self.isInBackground { backgroundStreaming = true }
         if !hardwareReady {
             resumeSession(peripheral)
-        } else if backgroundStreaming || Self.isInBackground {
-            if !heartRunning { startHeart() }
+        } else {
             scheduleBackgroundUpload()
+            advanceMeasurementCycle()
         }
     }
 
     func onDidDisconnect(_ peripheral: CBPeripheral, reason: String) {
+        // Para os testes no relógio enquanto as flags ainda estão true.
+        stopSensors()
+        resumeBloodWaiter()
+        deferredFlush?.cancel()
+        deferredFlush = nil
         hardwareReady = false
         heartRunning = false
         spo2Running = false
