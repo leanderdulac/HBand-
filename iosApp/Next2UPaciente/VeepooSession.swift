@@ -297,7 +297,7 @@ final class VeepooSession: NSObject, ObservableObject {
     static let bloodStageTimeout: TimeInterval = 70
     static let bloodCadence: TimeInterval = MeasurementCyclePolicy.bloodCadence
     /// Leitura do total de passos do dia, sem coincidir com testes longos.
-    static let stepPullInterval: TimeInterval = 60
+    static let stepPullInterval: TimeInterval = WatchBatteryPolicy.stepPullSeconds
     static let heartSamplesPerCycle = 2
     private var consecutiveStageFailures = 0
     private var bloodIsDue: Bool {
@@ -342,8 +342,80 @@ final class VeepooSession: NSObject, ObservableObject {
             continueAfterOxygen(reason: "SpO₂ sem resultado", failed: true)
             return
         }
-        if !sensorBusy, now >= nextCycleAt {
+        if WatchBatteryPolicy.automaticLiveLoop, !sensorBusy, now >= nextCycleAt {
             startCycle(reason: "pausa concluída")
+            return
+        }
+        // Build 19: o relógio mede sozinho (medição automática do firmware); o app só lê o
+        // histórico gravado a cada 30 min, sem ligar sensor óptico.
+        if !sensorBusy, WatchBatteryPolicy.historyPollDue(lastPullAt: lastHistoryPullAt, now: now) {
+            pullWatchHistory(reason: "leitura periódica do histórico")
+        }
+    }
+
+    private var lastManualMeasureAt: Date?
+
+    /// Toque do paciente em "Medir agora" (primeiro plano): um ciclo FC → SpO₂ → PA (se
+    /// devida), sem reagendar. Único caminho que liga o teste óptico ao vivo no build 19.
+    func measureNow() {
+        let now = Date()
+        guard hardwareReady else {
+            sessionMessage = "Conecte o relógio para medir."
+            return
+        }
+        guard WatchBatteryPolicy.manualAllowed(lastManualAt: lastManualMeasureAt, now: now, foreground: !Self.isInBackground) else {
+            sessionMessage = "Medição recente. Aguarde um minuto para medir de novo."
+            return
+        }
+        guard !sensorBusy else {
+            sessionMessage = "O relógio já está medindo."
+            return
+        }
+        lastManualMeasureAt = now
+        sessionMessage = "Medindo no relógio… mantenha a pulseira no pulso."
+        startCycle(reason: "medição manual", force: true)
+    }
+
+    /// Deixa no relógio a medição automática econômica (FC 30 min, PA 60 min, resto desligado).
+    private func applyBatterySafeAutoMonitor() {
+        guard hardwareReady, let pm = manager.peripheralManage else { return }
+        pm.veepooSDKReadAutoMonitSwitchInfo { [weak self] models in
+            Task { @MainActor in
+                guard let self, self.hardwareReady, let models else { return }
+                var changes: [VPAutoMonitTestModel] = []
+                for model in models {
+                    let slot = WatchBatteryPolicy.Slot(
+                        kind: Int(model.type.rawValue),
+                        on: model.on,
+                        intervalMinutes: Int(model.timeInterval),
+                        minStep: Int(model.minStepValue)
+                    )
+                    guard let target = WatchBatteryPolicy.desired(slot) else { continue }
+                    model.on = target.on
+                    model.timeInterval = UInt16(clamping: target.intervalMinutes)
+                    changes.append(model)
+                }
+                NSLog("[Next2U] Medição automática: %d ajuste(s) pela política de bateria", changes.count)
+                self.writeAutoMonitSequentially(changes)
+            }
+        }
+    }
+
+    /// Uma escrita por vez: o firmware descarta comandos sobrepostos.
+    private func writeAutoMonitSequentially(_ models: [VPAutoMonitTestModel]) {
+        guard let model = models.first else {
+            readWatchAutoMeasure()
+            return
+        }
+        guard hardwareReady, let pm = manager.peripheralManage else { return }
+        let rest = Array(models.dropFirst())
+        pm.veepooSDKSetAutoMonitSwitch(with: model) { [weak self] success, _ in
+            Task { @MainActor in
+                NSLog("[Next2U] Medição automática tipo %d → %@ a cada %d min: %@",
+                      Int(model.type.rawValue), model.on ? "ligada" : "desligada",
+                      Int(model.timeInterval), success ? "ok" : "falhou")
+                self?.writeAutoMonitSequentially(rest)
+            }
         }
     }
 
@@ -542,13 +614,11 @@ final class VeepooSession: NSObject, ObservableObject {
         IngestBackground.schedule()
         guard hardwareReady else { return }
         backgroundStreaming = true
-        // Não manter um teste óptico ligado só para acordar o app: isso esgota a bateria.
-        if spo2Running { stopOxygen() }
-        abortBlood(reason: "segundo plano")
-        if heartRunning {
-            // Deixa a FC pontual do ciclo atual terminar pelo watchdog/callback.
-        } else {
-            advanceMeasurementCycle()
+        // Não manter um teste óptico ligado em segundo plano: os timers congelam e o PPG
+        // ficava ligado até acabar a bateria. Medição manual em curso é encerrada aqui.
+        if sensorBusy {
+            stopSensors()
+            finishCycle(reason: "segundo plano")
         }
     }
 
@@ -893,8 +963,8 @@ final class VeepooSession: NSObject, ObservableObject {
         gattUpSince = nil
         lastSampleAt = Date()
         bleConnectionLabel = "Relógio pronto"
-        sessionMessage = "Relógio pronto. Lendo dados do dia e depois a frequência cardíaca."
-        note("Handshake. Reinscreve serviços e inicia FC.")
+        sessionMessage = "Relógio pronto. Lendo os dados gravados no relógio."
+        note("Handshake. Lê histórico; sem teste ao vivo automático (build 19).")
         // Link (re)established, e.g. after state restoration: push what queued meanwhile.
         flushQueueOnly()
         recordDialCapabilities()
@@ -903,11 +973,11 @@ final class VeepooSession: NSObject, ObservableObject {
             BleMain.run {
                 guard let self else { return }
                 if state.rawValue == 2 {
-                    self.sessionMessage = "Histórico do relógio lido. Medindo batimentos…"
-                    self.note("Histórico do band lido. FC.")
+                    self.sessionMessage = "Histórico do relógio lido."
+                    self.note("Histórico do band lido.")
                     // Acerta a hora depois do histórico (como no Android): no handshake o VE30 ignora o comando.
                     self.syncWatchTime(manual: false)
-                    self.readWatchAutoMeasure()
+                    self.applyBatterySafeAutoMonitor()
                     if let current = self.connected {
                         self.adoptSdkMac(from: current)
                     }
@@ -920,7 +990,7 @@ final class VeepooSession: NSObject, ObservableObject {
             }
         }
         if Self.isInBackground { backgroundStreaming = true }
-        startCycle(reason: "relógio conectado", force: true)
+        // Build 19: sem ciclo forçado a cada (re)conexão — era um dos gatilhos do consumo.
     }
 
     /// After password verification the SDK fills `deviceAddress` with the radio MAC
@@ -1539,12 +1609,8 @@ final class VeepooSession: NSObject, ObservableObject {
             backgroundStreaming = true
             await pullWatchHistoryAndWait(reason: reason)
             pullTodayStepsIfDue(now: Date(), force: true)
-            if bloodIsDue {
-                stopHeart()
-                stopOxygen()
-                await measureBloodOnce()
-            }
-            if !heartRunning { advanceMeasurementCycle() }
+            // Build 19: nenhuma PA ao vivo em segundo plano; a PA vem da medição automática.
+            advanceMeasurementCycle()
         }
         let ok = await performFlush()
         scheduleBackgroundUpload()
