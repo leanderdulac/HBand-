@@ -586,6 +586,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun triggerSpotCheck() {
         if (!profileReadReady()) return
+        if (bleManager.isVeepooSession) {
+            // Medição ao vivo só por toque (política de bateria); as leituras entram na fila
+            // pelo fluxo normal de telemetria quando o relógio responder.
+            if (bleManager.requestManualMeasurement()) {
+                showNotification("Medindo no relógio. Mantenha a pulseira no pulso por cerca de 2 minutos.")
+            }
+            return
+        }
         val telemetry = bleManager.triggerSpotCheck()
         if (telemetry == null || !IngestPayloadMapper.isIngestible(telemetry)) {
             showNotification(
