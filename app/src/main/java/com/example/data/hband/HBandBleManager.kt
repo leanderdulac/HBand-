@@ -267,6 +267,7 @@ class HBandBleManager(
     // recebeu o comando de start real).
     private val vpManager: VPOperateManager = VPOperateManager.getInstance()
     private var isVeepooConnection = false
+    val isVeepooSession: Boolean get() = isVeepooConnection
     // Sem esta guarda, um duplo-toque (ou recomposição da UI) em "Conectar" chamava
     // connectDeviceViaVeepooSdk duas ou mais vezes antes do handshake anterior terminar,
     // registrando múltiplos connectDevice/notify em paralelo no mesmo MAC — confirmado em
@@ -298,6 +299,9 @@ class HBandBleManager(
     private var ppgEmptyCycles = 0
     private var ppgConsecutiveFailures = 0
     private var ppgNextCycleAtElapsedMs = 0L
+    private var lastManualMeasureElapsedMs: Long? = null
+    private var historyPollRunnable: Runnable? = null
+    private var consecutiveReconnectFailures = 0
     private var ppgNextCycleRunnable: Runnable? = null
     private var lastBpSuccessElapsedMs: Long? = null
     private var bpUnsupported = false
@@ -373,6 +377,7 @@ class HBandBleManager(
         const val PREF_LAST_MAC = "last_ble_mac"
         const val PREF_LAST_NAME = "last_ble_name"
         const val PREF_AUTO_MEASURE = "auto_measure_hr"
+        const val PREF_AUTO_MEASURE_USER_OFF = "auto_measure_hr_user_off"
         const val PREF_SPO2_AUTO = "spo2_night_auto"
         const val PREF_WEAR_DETECT = "wear_detect_enabled"
         const val PREF_WATCH_TIME_SYNC_AT = "watch_time_sync_at"
@@ -1077,8 +1082,109 @@ class HBandBleManager(
             return
         }
         hasStartedVeepooSensors = true
-        startTemperatureMonitoring()
-        startPpgCycle(reason = "sessão Veepoo", force = true)
+        // Política de bateria: o relógio mede sozinho (medição automática do firmware) e o
+        // app só lê o histórico. Nenhum teste óptico/temperatura começa aqui; só no toque
+        // do paciente em "medir agora" (requestManualMeasurement).
+        if (WatchBatteryPolicy.CONTINUOUS_TEMPERATURE) startTemperatureMonitoring()
+        Log.i(TAG, "Sessão Veepoo pronta: sem teste ao vivo automático (política de bateria)")
+        scheduleHistoryPoll()
+    }
+
+    /**
+     * Toque do paciente em medir (app em primeiro plano): um único ciclo FC → SpO2 → PA
+     * (se devida) → HRV, sem reagendar. No máximo um a cada [WatchBatteryPolicy.MANUAL_MIN_GAP_MS].
+     */
+    fun requestManualMeasurement(): Boolean {
+        if (!isVeepooConnection || userRequestedDisconnect) return false
+        val now = SystemClock.elapsedRealtime()
+        if (!WatchBatteryPolicy.manualAllowed(lastManualMeasureElapsedMs, now, foreground = true)) {
+            _sessionMessage.value = "Medição recente. Aguarde um minuto para medir de novo."
+            return false
+        }
+        if (!isConnectingVeepoo || advancedDetectActive || ppgCycleRunning) {
+            _sessionMessage.value = "Relógio ocupado ou desconectado. Tente de novo em instantes."
+            return false
+        }
+        lastManualMeasureElapsedMs = now
+        _sessionMessage.value = "Medindo no relógio… mantenha a pulseira no pulso."
+        startPpgCycle(reason = "medição manual", force = true)
+        return true
+    }
+
+    private fun scheduleHistoryPoll() {
+        cancelHistoryPoll()
+        val runnable = Runnable {
+            historyPollRunnable = null
+            if (userRequestedDisconnect || !isVeepooConnection || !hasLiveHardwareSession()) return@Runnable
+            if (advancedDetectActive || ppgCycleRunning || _historySyncState.value.isRunning) {
+                scheduleHistoryPoll()
+                return@Runnable
+            }
+            pollWatchHistory()
+        }
+        historyPollRunnable = runnable
+        mainHandler.postDelayed(runnable, WatchBatteryPolicy.HISTORY_POLL_MS)
+    }
+
+    private fun cancelHistoryPoll() {
+        historyPollRunnable?.let { mainHandler.removeCallbacks(it) }
+        historyPollRunnable = null
+    }
+
+    /** Lê só o dia de hoje do histórico gravado pelo relógio (sem sensor ligado) e passos. */
+    private fun pollWatchHistory() {
+        val sync = historyClient()
+        val deviceId = currentConnectedMac()
+        val deviceModel = currentConnectedName()
+        scope.launch(Dispatchers.Main) {
+            try {
+                val caps = _capabilities.value.copy(historyDays = 1)
+                val sport = watchSettingsMutex.withLock {
+                    if (!currentSettingsClient(sync)) return@launch
+                    sync.readSportOnce()
+                }
+                sport?.let { reading ->
+                    currentSteps = reading.steps ?: currentSteps
+                    currentCalories = reading.calories ?: currentCalories
+                    currentDistance = reading.distanceMeters ?: currentDistance
+                    onSportReading(deviceId, reading)
+                }
+                val pull = watchSettingsMutex.withLock {
+                    if (!currentSettingsClient(sync)) return@launch
+                    sync.pullHistoryWithoutSleep(caps, deviceId, deviceModel) {
+                        if (historySync === sync && !sync.cancelled) _historySyncState.value = it
+                    }
+                }
+                if (!currentSettingsClient(sync)) return@launch
+                _historySyncState.value = pull.state
+                val telemetries = pull.samples.map { it.telemetry }
+                if (telemetries.isNotEmpty()) {
+                    onHistorySamples(telemetries)
+                    lastValidBp.rememberFromHistory(telemetries)
+                }
+                Log.i(TAG, "Histórico periódico (hoje): ${historyReadStatusText(pull.state)}")
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "Histórico periódico falhou: ${e.message}")
+            } finally {
+                if (!userRequestedDisconnect && isVeepooConnection && hasLiveHardwareSession()) scheduleHistoryPoll()
+            }
+        }
+    }
+
+    /** Mantém no relógio a medição automática econômica (ver [WatchBatteryPolicy]). */
+    private suspend fun applyBatterySafeAutoMeasure(sync: VeepooHistorySync) {
+        if (!_capabilities.value.isSupportAutoMeasure) return
+        val current = lastAutoMeasureSettings
+        if (current.isEmpty()) return
+        val userOff = prefs.getBoolean(PREF_AUTO_MEASURE_USER_OFF, false)
+        val updated = sync.applyBatteryPolicy(current, heartRateUserOff = userOff) ?: return
+        if (currentSettingsClient(sync)) {
+            lastAutoMeasureSettings = updated
+            applyAutoMeasureUi(updated, null, updateReadTime = false)
+            Log.i(TAG, "VE30 medição automática ajustada: ${updated.joinToString { "${it.funType}=${it.isSwitchOpen}/${it.measureInterval}min" }}")
+        }
     }
 
     /** Temperatura usa um sensor térmico independente — não compete pelo PPG, roda à parte. */
@@ -1307,7 +1413,7 @@ class HBandBleManager(
             TAG,
             "Ciclo PPG: fim; leitura=${if (ppgCycleGotReading) "sim" else "não"}; próxima em ${rest / 1000}s",
         )
-        schedulePpgNextCycle(rest)
+        if (WatchBatteryPolicy.AUTOMATIC_LIVE_LOOP) schedulePpgNextCycle(rest)
     }
 
     private fun schedulePpgNextCycle(delayMs: Long) {
@@ -1439,6 +1545,7 @@ class HBandBleManager(
                     Constants.STATUS_CONNECTED -> {
                         Log.i(TAG, "Veepoo GATT conectado: $address")
                         reconnectAttempt = 0
+                        consecutiveReconnectFailures = 0
                     }
                     Constants.STATUS_DISCONNECTED -> {
                         Log.w(TAG, "Veepoo GATT desconectado: $address")
@@ -1597,7 +1704,10 @@ class HBandBleManager(
         }
         reconnectAttempt = next
         val notWorn = _wearDetectState.value.enabled && lastKnownWorn == false
-        val delayMs = VeepooReconnectPolicy.delayMs(reconnectAttempt, notWorn)
+        val delayMs = WatchBatteryPolicy.reconnectDelayMs(
+            VeepooReconnectPolicy.delayMs(reconnectAttempt, notWorn),
+            consecutiveReconnectFailures++,
+        )
         Log.i(
             TAG,
             "Auto-reconnect attempt $reconnectAttempt in ${delayMs}ms to $address " +
@@ -2366,7 +2476,7 @@ class HBandBleManager(
         rssiPollJob?.cancel()
         rssiPollJob = scope.launch(Dispatchers.IO) {
             while (currentGatt != null && _connectedDevice.value?.isConnected == true) {
-                delay(4000)
+                delay(WatchBatteryPolicy.RSSI_POLL_MS)
                 try {
                     currentGatt?.readRemoteRssi()
                 } catch (e: Exception) {
@@ -2447,6 +2557,10 @@ class HBandBleManager(
 
     @SuppressLint("MissingPermission")
     fun triggerSpotCheck(): HBandTelemetry? {
+        if (isVeepooConnection) {
+            requestManualMeasurement()
+            return _latestTelemetry.value
+        }
         requestManualSensorRead()
         // The request is asynchronous. Only a received sample supplies measurement time;
         // preserve the last published sample (or its absence) until a callback replaces it.
@@ -2721,7 +2835,8 @@ class HBandBleManager(
     fun setAutoMeasureEnabled(enabled: Boolean) {
         if (_autoMeasureState.value.heartRateConfirmation == WatchSettingConfirmation.PENDING) return
         autoMeasureRevision++
-        prefs.edit().putBoolean(PREF_AUTO_MEASURE, enabled).apply()
+        prefs.edit().putBoolean(PREF_AUTO_MEASURE, enabled)
+            .putBoolean(PREF_AUTO_MEASURE_USER_OFF, !enabled).apply()
         _autoMeasureState.value = _autoMeasureState.value.copy(heartRateConfirmation = WatchSettingConfirmation.UNCONFIRMED)
         if (!hasLiveHardwareSession() || !_capabilities.value.isSupportAutoMeasure) return
         val sync = historyClient()
@@ -3045,7 +3160,7 @@ class HBandBleManager(
             val queryDeviceId = currentConnectedMac()
             val queryDeviceModel = currentConnectedName()
             try {
-                if (includeLiveSensors) {
+                if (includeLiveSensors && WatchBatteryPolicy.CONTINUOUS_TEMPERATURE) {
                     startTemperatureMonitoring()
                 }
                 var caps = _capabilities.value
@@ -3126,6 +3241,7 @@ class HBandBleManager(
                     if (historySync === sync && !sync.cancelled && !userRequestedDisconnect && isVeepooConnection) {
                         writeWatchTime(manual = false)
                         readWatchAutoMeasure()
+                        applyBatterySafeAutoMeasure(sync)
                     }
                 }
             } catch (e: CancellationException) {
@@ -3217,6 +3333,7 @@ class HBandBleManager(
     }
 
     private fun cancelHistorySync() {
+        cancelHistoryPoll()
         invalidateSettingConfirmations()
         historySync?.cancelled = true
         postHandshakeJob?.cancel()

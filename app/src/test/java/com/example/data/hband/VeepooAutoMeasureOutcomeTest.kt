@@ -66,6 +66,31 @@ class VeepooAutoMeasureOutcomeTest {
         assertEquals(EAutoMeasureType.PULSE_RATE, result.single().funType)
     }
 
+    @Test fun battery_policy_sets_hr_every_30_min_and_turns_spo2_off() = runTest {
+        Sdk.write = { _, listener -> listener.onSettingDataChangeSuccess() }
+        val hr = original().apply { isSwitchOpen = true; measureInterval = 5 }
+        val spo2 = original(EAutoMeasureType.BLOOD_OXYGEN).apply { isSwitchOpen = true }
+        val result = client.applyBatteryPolicy(listOf(hr, spo2), heartRateUserOff = false)!!
+        assertEquals(2, Sdk.sent.size)
+        val sentHr = Sdk.sent.first { it.funType == EAutoMeasureType.PULSE_RATE }
+        assertTrue(sentHr.isSwitchOpen)
+        assertEquals(30, sentHr.measureInterval)
+        assertFalse(Sdk.sent.first { it.funType == EAutoMeasureType.BLOOD_OXYGEN }.isSwitchOpen)
+        assertEquals(2, result.size)
+        assertEquals(5, hr.measureInterval) // não muta a última leitura
+    }
+    @Test fun battery_policy_does_not_write_compliant_settings() = runTest {
+        val hr = original().apply { isSwitchOpen = true; measureInterval = 30 }
+        val spo2 = original(EAutoMeasureType.BLOOD_OXYGEN).apply { isSwitchOpen = false }
+        assertNull(client.applyBatteryPolicy(listOf(hr, spo2), heartRateUserOff = false))
+        assertTrue(Sdk.sent.isEmpty())
+    }
+    @Test fun battery_policy_failed_write_is_not_a_confirmation() = runTest {
+        val hr = original().apply { isSwitchOpen = false }
+        assertNull(client.applyBatteryPolicy(listOf(hr), heartRateUserOff = false))
+        assertEquals(1, Sdk.sent.size)
+    }
+
     @Implements(VPOperateManager::class)
     class Sdk {
         companion object {
