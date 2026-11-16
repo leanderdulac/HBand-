@@ -50,3 +50,76 @@ enum MeasurementCyclePolicy {
 
     static var restartsHeartImmediatelyAfterStageEnd: Bool { false }
 }
+
+/// Política de bateria do VE30 (iOS build 19 / Android 1.8.0).
+///
+/// Beta testers relataram o relógio esgotando a bateria com leituras demais. Mesmo
+/// com a pausa de 5 min do build 18, o app ligava o PPG ~1,5–3 min a cada ~6–7 min
+/// e, a cada reconexão, começava um ciclo forçado (sem pausa). Agora:
+/// - quem mede é o próprio relógio (medição automática do firmware): FC a cada
+///   30 min, PA a cada 60 min; SpO₂/HRV/estresse/temperatura/glicose desligados;
+/// - o app só lê o histórico gravado no relógio a cada 30 min (sem sensor ligado);
+/// - teste ao vivo (FC → SpO₂ → PA) só quando o paciente toca em "Medir agora",
+///   em primeiro plano, no máximo um por minuto.
+enum WatchBatteryPolicy {
+    static let heartRateAutoIntervalMinutes = 30
+    static let bloodPressureAutoIntervalMinutes = 60
+    static let historyPollSeconds: TimeInterval = 30 * 60
+    /// Passos do dia (leitura BLE simples, sem sensor óptico). Antes: 60 s.
+    static let stepPullSeconds: TimeInterval = 10 * 60
+    static let manualMinGapSeconds: TimeInterval = 60
+    /// O ciclo ao vivo nunca começa sozinho (pausa concluída / reconexão / segundo plano).
+    static let automaticLiveLoop = false
+
+    /// Valores brutos de `VPAutoMonitTestType` (VPAutoMonitTestModel.h, SDK 2.2.110.15).
+    enum Kind: Int {
+        case heartRate = 0, bloodPressure, bloodGlucose, stress, bloodOxygen,
+             bodyTemperature, lorentz, hrv, bloodComponents, fallReminder
+    }
+
+    static let offKinds: Set<Kind> = [
+        .bloodGlucose, .stress, .bloodOxygen, .bodyTemperature, .lorentz, .hrv, .bloodComponents,
+    ]
+
+    struct Slot: Equatable {
+        var kind: Int
+        var on: Bool
+        var intervalMinutes: Int
+        var minStep: Int
+    }
+
+    /// Estado desejado, ou nil se o item já está conforme (não escreve à toa).
+    static func desired(_ slot: Slot, heartRateUserOff: Bool = false) -> Slot? {
+        var target = slot
+        switch Kind(rawValue: slot.kind) {
+        case .heartRate?:
+            target.on = !heartRateUserOff
+            if target.on { target.intervalMinutes = interval(for: slot, wanted: heartRateAutoIntervalMinutes) }
+        case .bloodPressure?:
+            target.on = true
+            target.intervalMinutes = interval(for: slot, wanted: bloodPressureAutoIntervalMinutes)
+        case let kind? where offKinds.contains(kind):
+            target.on = false
+        default:
+            return nil
+        }
+        return target == slot ? nil : target
+    }
+
+    /// Arredonda para cima ao passo do firmware; nunca encurta um intervalo mais longo.
+    static func interval(for slot: Slot, wanted: Int) -> Int {
+        let step = max(1, slot.minStep)
+        let rounded = ((wanted + step - 1) / step) * step
+        return max(rounded, slot.intervalMinutes)
+    }
+
+    static func manualAllowed(lastManualAt: Date?, now: Date, foreground: Bool) -> Bool {
+        guard foreground else { return false }
+        guard let last = lastManualAt else { return true }
+        return now.timeIntervalSince(last) >= manualMinGapSeconds
+    }
+
+    static func historyPollDue(lastPullAt: Date, now: Date) -> Bool {
+        now.timeIntervalSince(lastPullAt) >= historyPollSeconds
+    }
+}

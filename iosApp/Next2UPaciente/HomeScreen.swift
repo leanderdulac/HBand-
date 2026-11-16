@@ -75,6 +75,15 @@ struct HomeScreen: View {
                 .disabled(session.isScanning)
                 .accessibilityIdentifier("connect_watch_button")
             }
+            if hardwareReady {
+                // Build 19: o relógio mede sozinho a cada 30 min; teste ao vivo só por toque.
+                Button("Medir agora") { session.measureNow() }
+                    .buttonStyle(PatientPrimaryButton())
+                    .accessibilityIdentifier("measure_now_button")
+                Text("O relógio mede sozinho a cada 30 minutos para poupar a bateria.")
+                    .font(.system(size: 15))
+                    .foregroundStyle(palette.onSurface)
+            }
         }
         .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)

@@ -57,6 +57,26 @@ struct MeasurementCyclePolicyTests {
         expect(MeasurementCyclePolicy.restartsHeartImmediatelyAfterCycle == false, "fim de ciclo não religa a FC na hora")
         expect(MeasurementCyclePolicy.restartsHeartImmediatelyAfterStageEnd == false, "fim de estágio não religa a FC na hora")
 
+        // WatchBatteryPolicy (build 19)
+        typealias P = WatchBatteryPolicy
+        let hr = P.Slot(kind: P.Kind.heartRate.rawValue, on: false, intervalMinutes: 5, minStep: 5)
+        expect(P.desired(hr) == P.Slot(kind: 0, on: true, intervalMinutes: 30, minStep: 5), "FC automática a cada 30 min")
+        expect(P.desired(P.Slot(kind: 0, on: true, intervalMinutes: 30, minStep: 5)) == nil, "FC já conforme não reescreve")
+        expect(P.desired(P.Slot(kind: 0, on: true, intervalMinutes: 60, minStep: 5)) == nil, "não encurta intervalo maior")
+        expect(P.desired(P.Slot(kind: 0, on: true, intervalMinutes: 10, minStep: 7))?.intervalMinutes == 35, "arredonda ao passo")
+        expect(P.desired(P.Slot(kind: P.Kind.bloodPressure.rawValue, on: true, intervalMinutes: 30, minStep: 30))?.intervalMinutes == 60, "PA a cada 60 min")
+        for kind in [P.Kind.bloodOxygen, .hrv, .stress, .bodyTemperature, .bloodGlucose, .bloodComponents, .lorentz] {
+            expect(P.desired(P.Slot(kind: kind.rawValue, on: true, intervalMinutes: 10, minStep: 5))?.on == false, "\(kind) desligado")
+        }
+        expect(P.desired(P.Slot(kind: P.Kind.fallReminder.rawValue, on: true, intervalMinutes: 0, minStep: 1)) == nil, "lembrete de queda intocado")
+        expect(P.manualAllowed(lastManualAt: nil, now: now, foreground: false) == false, "manual só em primeiro plano")
+        expect(P.manualAllowed(lastManualAt: nil, now: now, foreground: true), "manual liberado")
+        expect(P.manualAllowed(lastManualAt: now.addingTimeInterval(-30), now: now, foreground: true) == false, "manual no máximo 1/min")
+        expect(P.historyPollDue(lastPullAt: now.addingTimeInterval(-29 * 60), now: now) == false, "histórico: ainda não")
+        expect(P.historyPollDue(lastPullAt: now.addingTimeInterval(-30 * 60), now: now), "histórico a cada 30 min")
+        expect(P.automaticLiveLoop == false, "sem ciclo ao vivo automático")
+        expect(P.stepPullSeconds >= 10 * 60, "passos no máximo a cada 10 min")
+
         if failures > 0 {
             fputs("\(failures) teste(s) falharam.\n", stderr)
             exit(1)
