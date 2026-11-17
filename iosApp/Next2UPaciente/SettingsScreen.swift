@@ -1,7 +1,6 @@
 import SwiftUI
 import UserNotifications
 import UIKit
-import PhotosUI
 import shared
 
 struct SettingsScreen: View {
@@ -17,7 +16,6 @@ struct SettingsScreen: View {
     @State private var showProfile = false
     @State private var showContinuityHelp = false
     @State private var notifyOpenFailed = false
-    @State private var watchPhotoItem: PhotosPickerItem?
     #if DEBUG
     @State private var versionTaps = 0
     @State private var showDeveloper = false
@@ -105,41 +103,6 @@ struct SettingsScreen: View {
                           : "A medição automática de batimentos está desligada no relógio.")
                     .font(.system(size: 17))
                     .accessibilityIdentifier("watch_auto_measure_label")
-            }
-            if session.watchSupportsPhotoDial {
-                Divider()
-                Text("Coloque uma foto sua no mostrador do relógio.").font(.system(size: 17))
-                if let p = session.watchFaceProgress {
-                    ProgressView(value: p)
-                }
-                if !session.watchFaceStatus.isEmpty {
-                    Text(session.watchFaceStatus)
-                        .font(.system(size: 17))
-                        .foregroundStyle(session.watchFaceLastOk == false ? Color.red : palette.onSurface)
-                        .accessibilityIdentifier("watch_face_message")
-                }
-                PhotosPicker(selection: $watchPhotoItem, matching: .images) {
-                    Text(session.watchFaceBusy ? "Enviando foto…" : "Trocar foto do mostrador")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(PatientPrimaryButton())
-                .disabled(!session.hardwareReady || session.watchFaceBusy)
-                .accessibilityIdentifier("watch_face_pick_button")
-                .onChange(of: watchPhotoItem) { item in
-                    guard let item else { return }
-                    Task {
-                        let data = try? await item.loadTransferable(type: Data.self)
-                        await MainActor.run {
-                            watchPhotoItem = nil
-                            if let data, let image = UIImage(data: data) {
-                                session.setWatchPhoto(image)
-                            } else {
-                                session.watchFaceLastOk = false
-                                session.watchFaceStatus = "Não foi possível usar esta foto. Escolha outra."
-                            }
-                        }
-                    }
-                }
             }
         }
         .foregroundStyle(palette.onSurface)

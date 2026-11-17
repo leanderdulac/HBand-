@@ -59,18 +59,8 @@ final class VeepooSession: NSObject, ObservableObject {
     @Published var watchTimeSyncing = false
     @Published var watchTimeStatus = ""
     @Published var watchTimeLastSync: Date? = UserDefaults.standard.object(forKey: "watch_time_sync_at") as? Date
-    /// Capacidades de mostrador reportadas pelo firmware; usadas depois para liberar "Trocar foto do mostrador".
-    @Published var watchPhotoDialCount: Int = UserDefaults.standard.integer(forKey: "watch_photo_dial_count")
-    @Published var watchScreenTypes: Int = UserDefaults.standard.integer(forKey: "watch_screen_types")
-    var watchSupportsPhotoDial: Bool { watchPhotoDialCount > 0 }
-    /// Troca da foto do mostrador (Ajustes > Relógio). Textos voltados ao paciente.
-    @Published var watchFaceBusy = false
-    @Published var watchFaceProgress: Double?
-    @Published var watchFaceStatus = ""
-    @Published var watchFaceLastOk: Bool?
     /// Medição automática de batimentos configurada no relógio (nil = não informado).
     @Published var watchAutoHeartOn: Bool?
-    private var watchFaceAttempt: UUID?
     private var watchTimeAttempt: UUID?
     private static var is24HourClock: Bool {
         let f = DateFormatter.dateFormat(fromTemplate: "j", options: 0, locale: .current) ?? "HH"
@@ -967,7 +957,6 @@ final class VeepooSession: NSObject, ObservableObject {
         note("Handshake. Lê histórico; sem teste ao vivo automático (build 19).")
         // Link (re)established, e.g. after state restoration: push what queued meanwhile.
         flushQueueOnly()
-        recordDialCapabilities()
         readBattery()
         manager.peripheralManage.veepooSdkStartReadDeviceAllData { [weak self] state, _, _, _ in
             BleMain.run {
@@ -1113,104 +1102,6 @@ final class VeepooSession: NSObject, ObservableObject {
                       heart.map { $0.on ? "ligada" : "desligada" } ?? "n/d", Int(heart?.timeInterval ?? 0))
             }
         }
-    }
-
-    /// Envia uma foto ao mostrador: lê o modelo de foto do relógio, ajusta a imagem ao tamanho
-    /// exato da tela (1x) e transmite, como no demo oficial (VPPhotoDialViewController).
-    func setWatchPhoto(_ image: UIImage) {
-        guard hardwareReady, let pm = manager.peripheralManage else {
-            watchFaceLastOk = false
-            watchFaceStatus = "Conecte o relógio para trocar a foto."
-            return
-        }
-        guard watchSupportsPhotoDial else {
-            watchFaceLastOk = false
-            watchFaceStatus = "Este relógio não permite trocar a foto do mostrador."
-            return
-        }
-        guard !watchFaceBusy else { return }
-        watchFaceBusy = true
-        watchFaceLastOk = nil
-        watchFaceProgress = nil
-        watchFaceStatus = "Preparando a foto…"
-        let attempt = UUID()
-        watchFaceAttempt = attempt
-        let fail: @MainActor (String) -> Void = { [weak self] reason in
-            guard let self, self.watchFaceAttempt == attempt else { return }
-            self.watchFaceAttempt = nil
-            self.watchFaceBusy = false
-            self.watchFaceProgress = nil
-            self.watchFaceLastOk = false
-            self.watchFaceStatus = "Não foi possível enviar a foto. Deixe o relógio perto do celular e tente de novo."
-            self.note("Mostrador: falha (\(reason)).")
-        }
-        Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: 180_000_000_000)
-            guard let self, self.watchFaceAttempt == attempt else { return }
-            fail("tempo esgotado")
-        }
-        pm.veepooSDK_dialChannel(with: .read, dialType: .photo, photoDialModel: nil, result: { [weak self] photoModel, _, error in
-            Task { @MainActor in
-                guard let self, self.watchFaceAttempt == attempt else { return }
-                guard error == nil, let model = photoModel else { fail("leitura: \(String(describing: error))"); return }
-                let size = model.configModel.screenSize
-                guard size.width > 0, size.height > 0, let fitted = Self.fitWatchFace(image, to: size) else {
-                    fail("imagem")
-                    return
-                }
-                model.isDefaultBG = false
-                model.transformImage = fitted
-                self.watchFaceStatus = "Enviando a foto para o relógio…"
-                pm.veepooSDK_dialChannel(with: .setupPhotoDial, dialType: .photo, photoDialModel: model, result: { _, _, err in
-                    Task { @MainActor in
-                        if let err { fail("envio: \(err)") }
-                    }
-                }, transformProgress: { progress in
-                    Task { @MainActor in
-                        guard self.watchFaceAttempt == attempt else { return }
-                        let pct = Int((min(max(progress, 0), 1) * 100).rounded())
-                        self.watchFaceProgress = min(max(progress, 0), 1)
-                        self.watchFaceStatus = "Enviando a foto para o relógio… \(pct)%"
-                        if progress >= 1 {
-                            self.watchFaceAttempt = nil
-                            self.watchFaceBusy = false
-                            self.watchFaceProgress = nil
-                            self.watchFaceLastOk = true
-                            self.watchFaceStatus = "Foto do mostrador atualizada."
-                            self.note("Mostrador: foto enviada.")
-                        }
-                    }
-                })
-            }
-        }, transformProgress: { _ in })
-    }
-
-    /// Recorte central no formato da tela e redimensiona para o tamanho exato em pixels (escala 1).
-    static func fitWatchFace(_ image: UIImage, to size: CGSize) -> UIImage? {
-        let src = image.size
-        guard src.width > 0, src.height > 0 else { return nil }
-        let scale = max(size.width / src.width, size.height / src.height)
-        let drawn = CGSize(width: src.width * scale, height: src.height * scale)
-        let origin = CGPoint(x: (size.width - drawn.width) / 2, y: (size.height - drawn.height) / 2)
-        let format = UIGraphicsImageRendererFormat()
-        format.scale = 1
-        format.opaque = true
-        return UIGraphicsImageRenderer(size: size, format: format).image { _ in
-            image.draw(in: CGRect(origin: origin, size: drawn))
-        }
-    }
-
-    private func recordDialCapabilities() {
-        guard let model = manager.peripheralModel else { return }
-        let photo = Int(model.photoDialCount)
-        let screens = Int(model.screenTypes)
-        watchPhotoDialCount = photo
-        watchScreenTypes = screens
-        UserDefaults.standard.set(photo, forKey: "watch_photo_dial_count")
-        UserDefaults.standard.set(screens, forKey: "watch_screen_types")
-        let line = "Mostrador VE30: photoDialCount=\(photo) screenTypes=\(screens) aiDialType=\(model.aiDialType)"
-        NSLog("[Next2U] %@", line)
-        note(line)
     }
 
     private func readBattery() {
