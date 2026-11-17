@@ -12,28 +12,6 @@ data class WatchClockUiState(
     val message: String? = null,
 )
 
-/**
- * Capacidades de mostrador reportadas pelo firmware (onFunctionSupportDataChange).
- * Guardadas para liberar a futura opção "Trocar foto do mostrador" só quando suportada.
- */
-data class WatchDialCapabilities(
-    val known: Boolean = false,
-    val watchUiCustomCount: Int = 0,
-    val watchUiServerCount: Int = 0,
-    val screenType: Int = 0,
-    val screenTypeTag: Int = 0,
-    val screenTypeDes: String? = null,
-    val screenStyle: Int = 0,
-    val photoAlbum: String? = null,
-) {
-    val supportsPhotoDial: Boolean get() = known && watchUiCustomCount > 0
-
-    fun logLine(): String =
-        "Mostrador VE30: watchUiCoustomCount=$watchUiCustomCount watchUiServerCount=$watchUiServerCount " +
-            "screenType=$screenType screenTypeTag=$screenTypeTag screenTypeDes=$screenTypeDes " +
-            "screenStyle=$screenStyle photoAlbum=$photoAlbum"
-}
-
 /** Campos enviados ao relógio, derivados da hora local do telefone. */
 data class WatchTimeFields(
     val year: Int, val month: Int, val day: Int,

@@ -172,10 +172,6 @@ class HBandBleManager(
     )
     val watchClockState: StateFlow<WatchClockUiState> = _watchClockState.asStateFlow()
 
-    private val _watchDialCapabilities = MutableStateFlow(loadWatchDialCapabilities())
-    val watchDialCapabilities: StateFlow<WatchDialCapabilities> = _watchDialCapabilities.asStateFlow()
-    private val _watchFaceState = MutableStateFlow(WatchFaceUiState())
-    val watchFaceState: StateFlow<WatchFaceUiState> = _watchFaceState.asStateFlow()
     private val _watchAutoMeasureState = MutableStateFlow(WatchAutoMeasureState())
     val watchAutoMeasureState: StateFlow<WatchAutoMeasureState> = _watchAutoMeasureState.asStateFlow()
 
@@ -381,12 +377,6 @@ class HBandBleManager(
         const val PREF_SPO2_AUTO = "spo2_night_auto"
         const val PREF_WEAR_DETECT = "wear_detect_enabled"
         const val PREF_WATCH_TIME_SYNC_AT = "watch_time_sync_at"
-        const val PREF_DIAL_KNOWN = "watch_dial_caps_known"
-        const val PREF_DIAL_CUSTOM = "watch_dial_custom_count"
-        const val PREF_DIAL_SERVER = "watch_dial_server_count"
-        const val PREF_DIAL_SCREEN_TYPE = "watch_dial_screen_type"
-        const val PREF_DIAL_SCREEN_TAG = "watch_dial_screen_tag"
-        const val PREF_DIAL_SCREEN_DES = "watch_dial_screen_des"
         const val WATCH_TIME_TIMEOUT_MS = 8_000L
 
         // Duração de cada estágio do revezamento de sensores PPG (FC/SpO2/PA) antes de
@@ -889,7 +879,6 @@ class HBandBleManager(
             object : IDeviceFuctionDataListener {
                 override fun onFunctionSupportDataChange(functionSupport: FunctionDeviceSupportData) {
                     lastFunctionSupport = functionSupport
-                    recordWatchDialCapabilities(functionSupport)
                     val probed = VeepooCapabilityProbe.fromManager(vpManager, functionSupport)
                     _capabilities.value = probed
                     applyP1CapabilityFlags(probed)
@@ -2680,147 +2669,6 @@ class HBandBleManager(
         }
         recordAutoMeasure(data)
     }
-
-    /** Ajustes > Relógio > "Trocar foto do mostrador". [imagePath] já recortado/reduzido. */
-    fun requestWatchPhotoDial(imagePath: String) {
-        if (_watchFaceState.value.busy) return
-        if (!hasLiveHardwareSession() || !isVeepooConnection) {
-            _watchFaceState.value = WatchFaceUiState(lastResultOk = false, message = WatchFace.failureMessage(WatchFaceFailure.NOT_CONNECTED))
-            return
-        }
-        _watchFaceState.value = WatchFaceUiState(busy = true, message = WatchFace.PREPARING_MESSAGE)
-        scope.launch(Dispatchers.Main) {
-            val failure = watchSettingsMutex.withLock {
-                if (!hasLiveHardwareSession()) WatchFaceFailure.NOT_CONNECTED else sendWatchPhotoDial(imagePath)
-            }
-            _watchFaceState.value = if (failure == null) {
-                WatchFaceUiState(lastResultOk = true, message = WatchFace.SUCCESS_MESSAGE)
-            } else {
-                WatchFaceUiState(lastResultOk = false, message = WatchFace.failureMessage(failure))
-            }
-            Log.i(TAG, "VE30 mostrador: resultado=${failure ?: "OK"}")
-        }
-    }
-
-    fun reportWatchPhotoImageError() {
-        _watchFaceState.value = WatchFaceUiState(lastResultOk = false, message = WatchFace.failureMessage(WatchFaceFailure.IMAGE))
-    }
-
-    /** Sequência do demo oficial: notify JL → MTU 247 → auth RCSP → sistema de arquivos → foto. */
-    private suspend fun sendWatchPhotoDial(imagePath: String): WatchFaceFailure? {
-        val jl = runCatching { vpManager.isJLDevice() }.getOrDefault(false)
-        if (!jl) return WatchFaceFailure.UNSUPPORTED
-        withTimeoutOrNull(5_000L) {
-            suspendCancellableCoroutine<Unit> { cont ->
-                runCatching {
-                    vpManager.openJLDataNotify(object : com.inuker.bluetooth.library.connect.response.BleNotifyResponse {
-                        override fun onNotify(service: java.util.UUID?, character: java.util.UUID?, value: ByteArray?) {}
-                        override fun onResponse(code: Int) { if (cont.isActive) cont.resume(Unit) }
-                    })
-                }.onFailure { if (cont.isActive) cont.resume(Unit) }
-            }
-        }
-        withTimeoutOrNull(5_000L) {
-            suspendCancellableCoroutine<Unit> { cont ->
-                runCatching {
-                    vpManager.changeMTU(247, com.veepoo.protocol.listener.data.IMtuChangeListener { if (cont.isActive) cont.resume(Unit) })
-                }.onFailure { if (cont.isActive) cont.resume(Unit) }
-            }
-        }
-        val authOk = withTimeoutOrNull(20_000L) {
-            suspendCancellableCoroutine<Boolean> { cont ->
-                runCatching {
-                    vpManager.startJLDeviceAuth(object : com.inuker.bluetooth.library.jieli.response.RcspAuthResponse {
-                        override fun onRcspAuthStart() {}
-                        override fun onRcspAuthSuccess() { if (cont.isActive) cont.resume(true) }
-                        override fun onRcspAuthFailed() { if (cont.isActive) cont.resume(false) }
-                    })
-                }.onFailure { if (cont.isActive) cont.resume(false) }
-            }
-        } ?: return WatchFaceFailure.TIMEOUT
-        if (!authOk) return WatchFaceFailure.AUTH
-        val fsOk = withTimeoutOrNull(30_000L) {
-            suspendCancellableCoroutine<Boolean> { cont ->
-                runCatching {
-                    vpManager.listJLWatchList(object : com.inuker.bluetooth.library.jieli.dial.JLWatchFaceManager.OnWatchDialInfoGetListener {
-                        override fun onGettingWatchDialInfo() {}
-                        override fun onWatchDialInfoGetStart() {}
-                        override fun onWatchDialInfoGetComplete() {}
-                        override fun onWatchDialInfoGetSuccess(
-                            system: MutableList<com.jieli.jl_fatfs.model.FatFile>?,
-                            server: MutableList<com.jieli.jl_fatfs.model.FatFile>?,
-                            pic: com.jieli.jl_fatfs.model.FatFile?,
-                        ) { if (cont.isActive) cont.resume(true) }
-                        override fun onWatchDialInfoGetFailed(error: com.jieli.jl_rcsp.model.base.BaseError?) {
-                            Log.w(TAG, "VE30 mostrador: listJLWatchList falhou: $error")
-                            if (cont.isActive) cont.resume(false)
-                        }
-                    })
-                }.onFailure { if (cont.isActive) cont.resume(false) }
-            }
-        } ?: return WatchFaceFailure.TIMEOUT
-        if (!fsOk) return WatchFaceFailure.TRANSFER
-        return withTimeoutOrNull(180_000L) {
-            suspendCancellableCoroutine<WatchFaceFailure?> { cont ->
-                runCatching {
-                    vpManager.setJLWatchPhotoDial(imagePath, object : com.inuker.bluetooth.library.jieli.dial.JLWatchFaceManager.JLTransferPicDialListener {
-                        override fun onLowPower() { if (cont.isActive) cont.resume(WatchFaceFailure.LOW_BATTERY) }
-                        override fun onJLTransferPicDialStart() {}
-                        override fun onTransferPicDialProgress(progress: Int) {
-                            _watchFaceState.value = WatchFaceUiState(busy = true, progress = progress, message = WatchFace.progressMessage(progress))
-                        }
-                        override fun onScaleBGPFileTransferComplete() {}
-                        override fun onAIPreviewTransferComplete() {}
-                        override fun onBigBGPFileTransferComplete() {}
-                        override fun onTransferComplete() { if (cont.isActive) cont.resume(null) }
-                        override fun onTransferError(code: Int, msg: String?) {
-                            Log.w(TAG, "VE30 mostrador: erro $code $msg")
-                            if (cont.isActive) cont.resume(WatchFaceFailure.TRANSFER)
-                        }
-                    })
-                }.onFailure { if (cont.isActive) cont.resume(WatchFaceFailure.TRANSFER) }
-            }
-        } ?: WatchFaceFailure.TIMEOUT
-    }
-
-    private fun recordWatchDialCapabilities(fs: FunctionDeviceSupportData) {
-        val caps = runCatching {
-            WatchDialCapabilities(
-                known = true,
-                watchUiCustomCount = fs.watchUiCoustomCount,
-                watchUiServerCount = fs.watchUiServerCount,
-                screenType = fs.screenType,
-                screenTypeTag = fs.screenTypeTag,
-                screenTypeDes = fs.screenTypeDes,
-                screenStyle = fs.screenstyle,
-                photoAlbum = fs.photoAlbum?.name,
-            )
-        }.getOrElse {
-            Log.w(TAG, "Mostrador VE30: leitura de capacidades falhou: ${it.message}")
-            return
-        }
-        Log.i(TAG, caps.logLine())
-        _watchDialCapabilities.value = caps
-        prefs.edit()
-            .putBoolean(PREF_DIAL_KNOWN, true)
-            .putInt(PREF_DIAL_CUSTOM, caps.watchUiCustomCount)
-            .putInt(PREF_DIAL_SERVER, caps.watchUiServerCount)
-            .putInt(PREF_DIAL_SCREEN_TYPE, caps.screenType)
-            .putInt(PREF_DIAL_SCREEN_TAG, caps.screenTypeTag)
-            .putString(PREF_DIAL_SCREEN_DES, caps.screenTypeDes)
-            .apply()
-    }
-
-    private fun loadWatchDialCapabilities(): WatchDialCapabilities =
-        if (!prefs.getBoolean(PREF_DIAL_KNOWN, false)) WatchDialCapabilities()
-        else WatchDialCapabilities(
-            known = true,
-            watchUiCustomCount = prefs.getInt(PREF_DIAL_CUSTOM, 0),
-            watchUiServerCount = prefs.getInt(PREF_DIAL_SERVER, 0),
-            screenType = prefs.getInt(PREF_DIAL_SCREEN_TYPE, 0),
-            screenTypeTag = prefs.getInt(PREF_DIAL_SCREEN_TAG, 0),
-            screenTypeDes = prefs.getString(PREF_DIAL_SCREEN_DES, null),
-        )
 
     fun requestHistorySync() {
         if (!hasLiveHardwareSession() || !isVeepooConnection) {
