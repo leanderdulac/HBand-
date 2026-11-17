@@ -2,7 +2,6 @@ package com.example.data.hband
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.Calendar
 
@@ -18,11 +17,5 @@ class WatchClockTest {
         assertEquals("Hora do relógio atualizada às 22:05", WatchClock.successMessage(t))
         assertEquals("Última sincronização: 16/10 22:05", WatchClock.lastSyncLabel(t))
         assertEquals("Última sincronização: nunca", WatchClock.lastSyncLabel(null))
-    }
-
-    @Test fun photoDialGating() {
-        assertFalse(WatchDialCapabilities().supportsPhotoDial)
-        assertFalse(WatchDialCapabilities(known = true, watchUiCustomCount = 0).supportsPhotoDial)
-        assertTrue(WatchDialCapabilities(known = true, watchUiCustomCount = 1).supportsPhotoDial)
     }
 }

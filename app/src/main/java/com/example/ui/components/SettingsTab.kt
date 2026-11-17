@@ -95,10 +95,7 @@ fun SettingsTab(
     onSyncHistory: () -> Unit = {},
     watchClockState: com.example.data.hband.WatchClockUiState = com.example.data.hband.WatchClockUiState(),
     onSyncWatchTime: () -> Unit = {},
-    watchFaceState: com.example.data.hband.WatchFaceUiState = com.example.data.hband.WatchFaceUiState(),
     watchAutoMeasureState: com.example.data.hband.WatchAutoMeasureState = com.example.data.hband.WatchAutoMeasureState(),
-    watchPhotoSupported: Boolean = false,
-    onWatchPhotoPicked: (android.net.Uri) -> Unit = {},
     alarmState: com.example.data.hband.AlarmUiState = com.example.data.hband.AlarmUiState(),
     heartWarningState: com.example.data.hband.HeartWarningUiState = com.example.data.hband.HeartWarningUiState(),
     longSeatState: com.example.data.hband.LongSeatUiState = com.example.data.hband.LongSeatUiState(),
@@ -212,15 +209,9 @@ fun SettingsTab(
 
         ThemeSelectorCard(themeOption = themeOption, onThemeOptionChange = onThemeOptionChange)
 
-        PatientSection(title = "Relógio", forceExpanded = watchClockState.syncing || watchFaceState.busy) {
+        PatientSection(title = "Relógio", forceExpanded = watchClockState.syncing) {
             WatchClockCard(state = watchClockState, enabled = actionsEnabled, onSyncTime = onSyncWatchTime)
-            WatchFaceCard(
-                state = watchFaceState,
-                autoMeasure = watchAutoMeasureState,
-                enabled = actionsEnabled,
-                supported = watchPhotoSupported,
-                onPhotoPicked = onWatchPhotoPicked,
-            )
+            WatchFaceCard(autoMeasure = watchAutoMeasureState)
         }
 
         PatientSection(title = "Opções do relógio", forceExpanded = historySyncState.isRunning || findDeviceState.finding) {
