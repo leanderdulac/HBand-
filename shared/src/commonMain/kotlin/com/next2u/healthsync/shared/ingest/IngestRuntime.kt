@@ -91,12 +91,42 @@ object IngestRuntime {
         deviceLabel = sanitizeDeviceLabel(raw)
     }
 
-    /** Versão do app (ex.: "ios-1.4.0+21"), enviada no header X-App-Version de todo envio. */
+    /**
+     * Versão do app (ex.: "ios-0.1.0+21"), enviada no header X-App-Version de todo
+     * pedido Ktor (health, ingest e batch). Se o valor não trouxer `+<build>`, o
+     * cliente usa o header lido do bundle iOS, que inclui o build.
+     */
     var appVersion: String? = null
         private set
 
     fun setAppVersion(raw: String?) {
         appVersion = raw?.trim()?.filter { it.code in 0x21..0x7E }?.take(64)?.takeIf { it.isNotEmpty() }
+    }
+
+    /**
+     * Contexto do envio (`app_state`, `screen_locked`, `watch_battery_pct`).
+     * `watchBatteryPct` fora de 0..100 (o app iOS manda -1) vira JSON null.
+     * `appState` só aceita `foreground` ou `background`; outro valor limpa o contexto.
+     */
+    var uploadContext: UploadContext? = null
+        private set
+
+    fun setUploadContext(appState: String, screenLocked: Boolean, watchBatteryPct: Int) {
+        uploadContext = UploadContext.of(appState, screenLocked, watchBatteryPct)
+    }
+
+    fun clearUploadContext() {
+        uploadContext = null
+    }
+
+    /** JSON de uma leitura já ajustada, com o contexto atual. A fila não é reescrita. */
+    fun stampUploadContext(json: String): String {
+        val context = uploadContext ?: return json
+        return try {
+            IngestPayload.withUploadContext(json, context)
+        } catch (_: Exception) {
+            json
+        }
     }
 
     /**
@@ -184,6 +214,7 @@ object IngestRuntime {
         store = next
         deduper = IngestDeduper()
         _lastHttpCode = 0
+        uploadContext = null
     }
 
     fun useEngine(engine: HttpClientEngine?) {

@@ -459,6 +459,7 @@ final class VeepooSession: NSObject, ObservableObject {
         }
         IngestRuntime.shared.setDeviceLabel(raw: deviceLabel)
         IngestRuntime.shared.setAppVersion(raw: Self.appVersionString)
+        publishUploadContext()
         IngestRuntime.shared.configure(
             baseUrl: ingestUrl,
             overrideKey: key.isEmpty ? nil : key,
@@ -470,13 +471,33 @@ final class VeepooSession: NSObject, ObservableObject {
     }
 
     private static var loggedIngestConfig = false
-    /// "1.2.3+45" (CFBundleShortVersionString+CFBundleVersion) → header X-App-Version.
+    /// "ios-<marketing>+<build>" (CFBundleShortVersionString+CFBundleVersion).
+    /// Both the Ktor client and the background URLSession send this as X-App-Version.
+    /// An unexpanded xcconfig placeholder is not a version.
     static let appVersionString: String = {
         let info = Bundle.main.infoDictionary
-        let short = info?["CFBundleShortVersionString"] as? String ?? "0"
-        let build = info?["CFBundleVersion"] as? String ?? "0"
-        return "ios-\(short)+\(build)"
+        func expanded(_ key: String, fallback: String) -> String {
+            let raw = (info?[key] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if raw.isEmpty || raw.hasPrefix("$(") { return fallback }
+            return raw
+        }
+        return "ios-\(expanded("CFBundleShortVersionString", fallback: "0.1.0"))+\(expanded("CFBundleVersion", fallback: "0"))"
     }()
+
+    /// Send-time snapshot. `screen_locked` is the inverse of protected-data
+    /// availability (no location). Battery is the last SDK percent, or -1 when
+    /// the SDK has not reported one (the shared client sends JSON null).
+    func publishUploadContext() {
+        let state = UIApplication.shared.applicationState == .background ? "background" : "foreground"
+        let locked = !UIApplication.shared.isProtectedDataAvailable
+        let percent = batteryPercent ?? -1
+        IngestRuntime.shared.setUploadContext(
+            appState: state,
+            screenLocked: locked,
+            watchBatteryPct: Int32(percent)
+        )
+    }
+
     /// Nome da pulseira escolhido pelo paciente em Meu perfil (vazio = segue o nome do perfil).
     static let wristbandNameKey = "wristband_name"
     /// Último `device_label` efetivo (cache para envios antes de o perfil abrir).
@@ -1430,6 +1451,7 @@ final class VeepooSession: NSObject, ObservableObject {
                 self.isFlushing = false
                 self.endIngestTask(task)
             }
+            self.publishUploadContext()
             guard let flush = try? await IngestRuntime.shared.flush() else { return }
             applyFlush(flush)
         }
@@ -1478,6 +1500,7 @@ final class VeepooSession: NSObject, ObservableObject {
         guard PatientStore.shared.status == .ready else { return false }
         BleWakeLock.shared.ping()
         configureIngest()
+        publishUploadContext()
         let task = beginIngestTask()
         defer { endIngestTask(task) }
         do {
@@ -1545,6 +1568,7 @@ final class VeepooSession: NSObject, ObservableObject {
     }
 
     private func scheduleBackgroundUpload() {
+        publishUploadContext()
         let override = ingestKey.trimmingCharacters(in: .whitespacesAndNewlines)
         let apiKey = override.isEmpty ? (Self.bundledString("Next2UIngestApiKey") ?? "") : override
         let patientId = PatientStore.shared.status == .ready

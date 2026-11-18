@@ -131,6 +131,19 @@ object IngestPayload {
         false
     }
 
+    /**
+     * Acrescenta `app_state`, `screen_locked` e `watch_battery_pct` no JSON que vai
+     * ao Core. Chaves extras (`extra=allow`), como `device_label`. Não altera a fila.
+     * `watch_battery_pct` ausente sai como JSON null.
+     */
+    fun withUploadContext(json: String, context: UploadContext): String {
+        val obj = Json.parseToJsonElement(json).jsonObject
+        return pretty.encodeToString(
+            JsonObject.serializer(),
+            JsonObject(obj + context.jsonFields()),
+        )
+    }
+
     /** Acrescenta `device_label` se ainda não houver (leituras antigas da fila também ganham). */
     fun withDeviceLabel(json: String, label: String?): String {
         if (label.isNullOrBlank()) return json
