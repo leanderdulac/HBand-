@@ -39,7 +39,7 @@ fun Next2uBrandLogo(
 ) {
     Image(
         painter = painterResource(R.drawable.next2u_saude_logo),
-        contentDescription = "next2u SAÚDE",
+        contentDescription = "Next2U Paciente",
         modifier = modifier
             .height(48.dp)
             .testTag("next2u_brand_logo"),
