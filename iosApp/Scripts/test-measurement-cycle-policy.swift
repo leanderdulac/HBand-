@@ -76,6 +76,16 @@ struct MeasurementCyclePolicyTests {
         expect(P.historyPollDue(lastPullAt: now.addingTimeInterval(-30 * 60), now: now), "histórico a cada 30 min")
         expect(P.automaticLiveLoop == false, "sem ciclo ao vivo automático")
         expect(P.stepPullSeconds >= 10 * 60, "passos no máximo a cada 10 min")
+        expect(P.acceptLiveSample(manualCycleActive: false) == false, "amostra ao vivo fora do ciclo manual é descartada")
+        expect(P.acceptLiveSample(manualCycleActive: true), "amostra ao vivo no ciclo manual entra")
+        expect(P.shouldSendStop(force: true, locallyRunning: false), "parar mesmo sem flag local")
+        expect(P.shouldSendStop(force: false, locallyRunning: true), "parar o teste que o app abriu")
+        expect(P.shouldSendStop(force: false, locallyRunning: false) == false, "sem teste local não reenvia parada")
+        let closed = Set(P.legacySwitchesToClose.map(\.rawValue))
+        expect(closed.contains(17), "PPG contínuo entra na lista de fechar")
+        expect(closed.contains(1000), "SpO₂ noturno entra na lista de fechar")
+        expect(closed.contains(24) && closed.contains(26), "temperatura e ECG sempre aberto são fechados")
+        expect(!closed.contains(5) && !closed.contains(6), "FC/PA automáticas ficam no intervalo, não no interruptor legado")
 
         if failures > 0 {
             fputs("\(failures) teste(s) falharam.\n", stderr)

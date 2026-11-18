@@ -113,6 +113,34 @@ enum WatchBatteryPolicy {
         return max(rounded, slot.intervalMinutes)
     }
 
+    /// `VPSettingBaseFunctionSwitchType` (VPPublicDefine.h). Estes interruptores
+    /// ficam gravados no relógio e um app antigo pode tê-los deixado ligados.
+    /// FC/PA automáticas não entram aqui: o intervalo vem de `VPAutoMonitTestModel`.
+    enum LegacySwitch: Int {
+        case automaticHrv = 13
+        case automaticPpg = 17
+        case automaticTemperature = 24
+        case ecgNormallyOpen = 26
+        case automaticBloodGlucose = 27
+        case stress = 29
+        case automaticBloodComponent = 31
+        case nightBloodOxygen = 1000
+    }
+
+    static let legacySwitchesToClose: [LegacySwitch] = [
+        .automaticHrv, .automaticPpg, .automaticTemperature, .ecgNormallyOpen,
+        .automaticBloodGlucose, .stress, .automaticBloodComponent, .nightBloodOxygen,
+    ]
+
+    /// Uma amostra ao vivo só entra na fila enquanto o ciclo manual está ativo.
+    static func acceptLiveSample(manualCycleActive: Bool) -> Bool { manualCycleActive }
+
+    /// O comando de parar sai mesmo se a flag local já foi baixada: o SDK pode
+    /// ter um teste aberto que o app não marcou.
+    static func shouldSendStop(force: Bool, locallyRunning: Bool) -> Bool {
+        force || locallyRunning
+    }
+
     static func manualAllowed(lastManualAt: Date?, now: Date, foreground: Bool) -> Bool {
         guard foreground else { return false }
         guard let last = lastManualAt else { return true }
