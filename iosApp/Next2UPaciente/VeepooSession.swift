@@ -174,7 +174,8 @@ final class VeepooSession: NSObject, ObservableObject {
         }
     }
 
-    static func bundledString(_ key: String) -> String? {
+    /// Info.plist only; safe off the main actor.
+    nonisolated static func bundledString(_ key: String) -> String? {
         guard let v = Bundle.main.object(forInfoDictionaryKey: key) as? String else { return nil }
         let t = v.trimmingCharacters(in: .whitespacesAndNewlines)
         return (t.isEmpty || t.hasPrefix("$(")) ? nil : t
