@@ -24,7 +24,7 @@ import java.util.concurrent.TimeUnit
 class ProviderGrantAndroidLabTest {
     @Test fun readGrantIsScopedReadOnlyAndRevocableAcrossUids() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
-        val target = "com.aistudio.hbandhealthtech.pxq97m.storagelab"
+        val target = "br.com.next2u.saude.paciente.storagelab"
         val recipient = "$target.test"
         check(context.packageName == target)
         check(context.applicationContext.javaClass == Application::class.java)

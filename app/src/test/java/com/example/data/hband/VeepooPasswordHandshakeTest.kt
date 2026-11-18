@@ -124,6 +124,15 @@ class VeepooPasswordHandshakeTest {
                 confirmInFlight = false,
             ),
         )
+        assertFalse(
+            VeepooPasswordHandshake.shouldSkipDuplicateConnect(
+                connecting = true,
+                liveSession = false,
+                notifyUp = false,
+                confirmInFlight = false,
+                connectingStale = true,
+            ),
+        )
     }
 
     @Test

@@ -14,7 +14,7 @@ import java.security.MessageDigest;
 public final class ShareReceiverLabActivity extends Activity {
     @Override public void onCreate(Bundle saved) {
         super.onCreate(saved);
-        String target = "com.aistudio.hbandhealthtech.pxq97m.storagelab";
+        String target = "br.com.next2u.saude.paciente.storagelab";
         if (!getPackageName().equals(target + ".test") ||
                 !(Build.HARDWARE.equals("ranchu") || Build.HARDWARE.equals("goldfish")) ||
                 checkSelfPermission(android.Manifest.permission.INTERNET) != PackageManager.PERMISSION_DENIED) {

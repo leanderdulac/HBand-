@@ -62,6 +62,7 @@ internal class PatientInsightReview(
     private val debounceMillis: Long = AUTOMATIC_INSIGHT_DEBOUNCE_MS,
     private val minIntervalMillis: Long = AUTOMATIC_INSIGHT_MIN_INTERVAL_MS,
     private val now: () -> Long = System::currentTimeMillis,
+    private val consented: () -> Boolean = { true },
     private val generate: suspend (List<HBandSensorMetricEntity>) -> String,
 ) {
     private val lock = Any()
@@ -78,7 +79,7 @@ internal class PatientInsightReview(
     }
 
     fun request() = synchronized(lock) {
-        if (!enabled || current.value.isLoading) return
+        if (!enabled || !consented() || current.value.isLoading) return
         val requestedGeneration = ++generation
         lastStartedAt = now()
         current.value = current.value.copy(isLoading = true)

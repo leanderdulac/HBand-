@@ -12,7 +12,7 @@ $app = $root.SelectSingleNode('application')
 function Assert-Lab([bool]$Condition, [string]$Reason) {
     if (-not $Condition) { throw "Unsafe BLE lab APK: $Reason" }
 }
-Assert-Lab ($root.GetAttribute('package') -ceq 'com.aistudio.hbandhealthtech.pxq97m.blelab') 'wrong package'
+Assert-Lab ($root.GetAttribute('package') -ceq 'br.com.next2u.saude.paciente.blelab') 'wrong package'
 Assert-Lab (-not $root.HasAttribute('sharedUserId', $android)) 'shared UID'
 $permissions = @($root.SelectNodes('uses-permission | uses-permission-sdk-23') | ForEach-Object { $_.GetAttribute('name', $android) })
 Assert-Lab ('android.permission.INTERNET' -notin $permissions) 'INTERNET permission present'
@@ -32,7 +32,7 @@ Assert-Lab ($boot.Count -eq 1 -and $boot[0].GetAttribute('enabled', $android) -c
 $providers = @($app.SelectNodes('provider'))
 Assert-Lab (-not ($providers | Where-Object { $_.GetAttribute('name', $android) -ceq 'com.google.firebase.provider.FirebaseInitProvider' })) 'Firebase initializer present'
 $fileProvider = @($providers | Where-Object { $_.GetAttribute('name', $android) -ceq 'androidx.core.content.FileProvider' })
-Assert-Lab ($fileProvider.Count -eq 1 -and $fileProvider[0].GetAttribute('authorities', $android) -ceq 'com.aistudio.hbandhealthtech.pxq97m.blelab.fileprovider') 'shared provider authority'
+Assert-Lab ($fileProvider.Count -eq 1 -and $fileProvider[0].GetAttribute('authorities', $android) -ceq 'br.com.next2u.saude.paciente.blelab.fileprovider') 'shared provider authority'
 [ordered]@{
     result = 'PASS'; apkSha256 = (Get-FileHash -LiteralPath $Apk -Algorithm SHA256).Hash.ToLowerInvariant()
     package = $root.GetAttribute('package'); internet = $false; bluetooth = $true

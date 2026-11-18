@@ -10,7 +10,7 @@ import java.security.MessageDigest;
 
 /** Android/JDK only: the test APK must run independently of the target classpath/UID. */
 public final class ProviderProbeService extends Service {
-    private static final String TARGET = "com.aistudio.hbandhealthtech.pxq97m.storagelab";
+    private static final String TARGET = "br.com.next2u.saude.paciente.storagelab";
     private int targetUid;
     private Messenger messenger;
 

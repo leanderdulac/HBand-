@@ -86,6 +86,7 @@ fun HomeScreen(
 ) {
     val apiHealth by viewModel.apiHealth.collectAsStateWithLifecycle()
     val connectedDevice by viewModel.connectedDevice.collectAsStateWithLifecycle()
+    val incompatibleWatch by viewModel.incompatibleWatch.collectAsStateWithLifecycle()
     val scannedDevices by viewModel.scannedDevices.collectAsStateWithLifecycle()
     val isScanning by viewModel.isScanning.collectAsStateWithLifecycle()
     val scanFailure by viewModel.scanFailure.collectAsStateWithLifecycle()
@@ -110,11 +111,14 @@ fun HomeScreen(
     val userProfile = profileRead.valueOrNull()
     val profileForEditor by viewModel.profileForEditor.collectAsStateWithLifecycle()
     val profileSaveState by viewModel.profileSaveState.collectAsStateWithLifecycle()
+    val savedDeviceLabel by viewModel.savedDeviceLabel.collectAsStateWithLifecycle()
     val autoReconnectBle by viewModel.autoReconnectBle.collectAsStateWithLifecycle()
     val themeOption by viewModel.themeOption.collectAsStateWithLifecycle()
     val deviceCapabilities by viewModel.deviceCapabilities.collectAsStateWithLifecycle()
     val autoMeasureState by viewModel.autoMeasureState.collectAsStateWithLifecycle()
     val wearDetectState by viewModel.wearDetectState.collectAsStateWithLifecycle()
+    val watchClockState by viewModel.watchClockState.collectAsStateWithLifecycle()
+    val watchAutoMeasureState by viewModel.watchAutoMeasureState.collectAsStateWithLifecycle()
     val historySyncState by viewModel.historySyncState.collectAsStateWithLifecycle()
     val isHardwareConnected by viewModel.isHardwareConnected.collectAsStateWithLifecycle()
     val ecgState by viewModel.ecgState.collectAsStateWithLifecycle()
@@ -141,6 +145,8 @@ fun HomeScreen(
     val geminiInsightText by viewModel.geminiInsightText.collectAsStateWithLifecycle()
     val isGeneratingGeminiInsight by viewModel.isGeneratingGeminiInsight.collectAsStateWithLifecycle()
     val geminiInsightMeta by viewModel.geminiInsightMeta.collectAsStateWithLifecycle()
+    val aiInsightConsent by viewModel.aiInsightConsent.collectAsStateWithLifecycle()
+    var showAiInsightConsentDialog by rememberSaveable { mutableStateOf(false) }
 
     val hydrationRead by viewModel.todayHydrationMl.collectAsStateWithLifecycle()
     val todayHydrationMl = hydrationRead.valueOrNull()
@@ -174,6 +180,24 @@ fun HomeScreen(
 
     com.example.ui.components.BatteryOptimizationPrompt(hasPairedWatch = connectedDevice != null)
 
+    com.example.ui.components.AiInsightFirstConnectionPrompt(
+        featureEnabled = com.example.BuildConfig.AI_INSIGHT_ENABLED,
+        consented = aiInsightConsent.consented,
+        promptShown = aiInsightConsent.promptShown,
+        hasPairedWatch = connectedDevice != null,
+        onAuthorize = viewModel::grantAiInsightConsent,
+        onNotNow = viewModel::markAiInsightConsentPromptShown,
+    )
+    if (showAiInsightConsentDialog) {
+        com.example.ui.components.AiInsightConsentDialog(
+            onAuthorize = {
+                showAiInsightConsentDialog = false
+                viewModel.grantAiInsightConsent()
+            },
+            onNotNow = { showAiInsightConsentDialog = false },
+        )
+    }
+
     com.example.ui.components.PatientAdaptiveScaffold(
         modifier = modifier,
         selectedTab = selectedTab,
@@ -199,6 +223,7 @@ fun HomeScreen(
         ) {
             when (selectedTab) {
                 0 -> DashboardTab(
+                    autoReconnectEnabled = autoReconnectBle,
                     syncDisplayStatus = syncDisplayStatus,
                     onRetryQueueRead = viewModel::retryQueueRead,
                     pendingCount = pendingCount,
@@ -227,11 +252,19 @@ fun HomeScreen(
                     onShowNotification = { viewModel.showNotification(it) },
                     onScanClick = { selectedTab = 2 },
                     onDisconnect = { viewModel.disconnectDevice() },
+                    incompatibleDevice = incompatibleWatch,
+                    onForgetIncompatible = {
+                        viewModel.forgetIncompatibleWatch()
+                        selectedTab = 2
+                    },
                     geminiInsightText = geminiInsightText,
                     isGeneratingGeminiInsight = isGeneratingGeminiInsight,
                     onRefreshGeminiInsight = { viewModel.generateGeminiInsight() },
                     geminiInsightGeneratedAtMillis = geminiInsightMeta.generatedAtMillis,
                     geminiInsightFailed = geminiInsightMeta.failed,
+                    showAiInsight = com.example.BuildConfig.AI_INSIGHT_ENABLED,
+                    aiInsightConsented = aiInsightConsent.consented,
+                    onRequestAiInsightConsent = { showAiInsightConsentDialog = true },
                     todayHydrationMl = todayHydrationMl,
                     hydrationTargetMl = userProfile?.targetWaterMl,
                     onAddWater = { viewModel.addWaterIntake(it) },
@@ -283,7 +316,12 @@ fun HomeScreen(
                     onStopScan = { viewModel.stopBleScan() },
                     onConnectDevice = { viewModel.connectDevice(it) },
                     onConnectByMac = { mac -> viewModel.connectByMacAddress(mac) },
-                    onDisconnectDevice = { viewModel.disconnectDevice() }
+                    onDisconnectDevice = { viewModel.disconnectDevice() },
+                    incompatibleDevice = incompatibleWatch,
+                    onForgetIncompatible = {
+                        viewModel.forgetIncompatibleWatch()
+                        selectedTab = 2
+                    },
                 )
 
                 3 -> QueueInspector(
@@ -335,6 +373,9 @@ fun HomeScreen(
                     onSpo2AutoChange = { viewModel.setBandSpo2AutoDetect(it) },
                     onWearDetectChange = { viewModel.setBandWearDetect(it) },
                     onSyncHistory = { viewModel.requestHistorySync() },
+                    watchClockState = watchClockState,
+                    onSyncWatchTime = { viewModel.syncWatchTime() },
+                    watchAutoMeasureState = watchAutoMeasureState,
                     alarmState = alarmState,
                     heartWarningState = heartWarningState,
                     longSeatState = longSeatState,
@@ -352,6 +393,12 @@ fun HomeScreen(
                     ingestDiagnostics = ingestDiagnostics,
                     themeOption = themeOption,
                     onThemeOptionChange = { viewModel.setThemeOption(it) },
+                    aiInsightFeatureEnabled = com.example.BuildConfig.AI_INSIGHT_ENABLED,
+                    aiInsightConsented = aiInsightConsent.consented,
+                    onAiInsightConsentChange = { enabled ->
+                        if (enabled) viewModel.grantAiInsightConsent()
+                        else viewModel.withdrawAiInsightConsent()
+                    },
                 )
             }
         }
@@ -366,6 +413,8 @@ fun HomeScreen(
             onDismissRequest = { showProfileDialog = false },
             onSaveProfile = viewModel::saveUserProfile,
             saveState = profileSaveState,
+            savedDeviceLabel = savedDeviceLabel,
+            onSaveDeviceLabel = viewModel::saveDeviceLabel,
         )
     }
 
@@ -400,14 +449,16 @@ internal fun DashboardTab(
     onShowNotification: (String) -> Unit,
     onScanClick: () -> Unit,
     onDisconnect: () -> Unit,
+    incompatibleDevice: com.example.data.model.HBandDevice? = null,
+    onForgetIncompatible: () -> Unit = {},
     geminiInsightText: String = "",
     isGeneratingGeminiInsight: Boolean = false,
     onRefreshGeminiInsight: () -> Unit = {},
     geminiInsightGeneratedAtMillis: Long? = null,
     geminiInsightFailed: Boolean = false,
-    // AI_INSIGHT_ENABLED=true highlights the summary right after "Meu relógio"; false keeps the
-    // collapsed section near the end of the screen, exactly as before.
-    aiInsightEnabled: Boolean = BuildConfig.AI_INSIGHT_ENABLED,
+    showAiInsight: Boolean = true,
+    aiInsightConsented: Boolean = true,
+    onRequestAiInsightConsent: () -> Unit = {},
     todayHydrationMl: Int? = null,
     hydrationTargetMl: Int? = null,
     onAddWater: (Int) -> Unit = {},
@@ -450,6 +501,7 @@ internal fun DashboardTab(
     onStopFatigue: () -> Unit = {},
     onStartBreath: () -> Unit = {},
     onStopBreath: () -> Unit = {},
+    autoReconnectEnabled: Boolean = false,
 ) {
     Column(
         modifier = Modifier
@@ -458,6 +510,16 @@ internal fun DashboardTab(
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         com.example.ui.components.PatientSummaryLayout(first = {
+            com.example.ui.components.TelemetryStatusBanners(
+                pairedMac = connectedDevice?.macAddress,
+                hardwareConnected = hardwareConnected,
+                autoReconnect = autoReconnectEnabled,
+            )
+            com.example.ui.components.IncompatibleWatchCard(
+                device = incompatibleDevice,
+                onForget = onForgetIncompatible,
+            )
+
             DeviceControlCard(
                 device = connectedDevice,
                 autoIngestLive = autoIngestLive,
@@ -467,21 +529,23 @@ internal fun DashboardTab(
                 onDisconnect = onDisconnect,
             )
 
-            com.example.ui.components.LowBatteryWarningCard(
-                device = connectedDevice,
-                modifier = Modifier.fillMaxWidth()
-            )
-
-            if (aiInsightEnabled) {
+            if (showAiInsight) {
                 com.example.ui.components.AiInsightHighlightCard(
                     insightText = geminiInsightText,
                     isLoading = isGeneratingGeminiInsight,
                     onRefreshInsight = onRefreshGeminiInsight,
                     generatedAtMillis = geminiInsightGeneratedAtMillis,
                     failed = geminiInsightFailed,
+                    consented = aiInsightConsented,
+                    onRequestConsent = onRequestAiInsightConsent,
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
+
+            com.example.ui.components.LowBatteryWarningCard(
+                device = connectedDevice,
+                modifier = Modifier.fillMaxWidth()
+            )
         }, second = {
             TelemetryGauges(
                 telemetry = latestTelemetry,
@@ -603,19 +667,6 @@ internal fun DashboardTab(
             )
         }
 
-        if (!aiInsightEnabled) com.example.ui.components.PatientSection(
-            title = "Resumo com inteligência artificial",
-            forceExpanded = false,
-        ) {
-            com.example.ui.components.GeminiHealthInsightCard(
-                insightText = geminiInsightText,
-                isLoading = isGeneratingGeminiInsight,
-                onRefreshInsight = onRefreshGeminiInsight,
-                modifier = Modifier.fillMaxWidth(),
-                showInsight = false,
-            )
-        }
-
         if (BuildConfig.DEBUG) {
             com.example.ui.components.PatientSection(
                 title = "Informações para suporte",
@@ -635,6 +686,7 @@ internal fun DashboardTab(
             }
         }
 
+        com.example.ui.components.AppVersionFooter()
         Spacer(modifier = Modifier.height(24.dp))
     }
 }

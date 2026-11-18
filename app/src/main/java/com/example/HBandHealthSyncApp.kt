@@ -25,26 +25,54 @@ class HBandHealthSyncApp : Application() {
     var startupStopRequested: Boolean = false
         private set
 
-    lateinit var bleManager: HBandBleManager
-        private set
+    @Volatile
+    private var runtimeBleManager: HBandBleManager? = null
+
+    /**
+     * Same contract as the previous `lateinit` getter: throws until [startDataRuntime]
+     * installs the manager. UI/receivers must use [readyBleManagerOrNull] or
+     * [resolveRuntimeBleManager] so a cold start cannot crash-loop.
+     */
+    val bleManager: HBandBleManager
+        get() = runtimeBleManager
+            ?: throw UninitializedPropertyAccessException(
+                "lateinit property bleManager has not been initialized"
+            )
 
     override fun onCreate() {
         super.onCreate()
         bleScope.launch {
             var opened: AppDatabase? = null
-            storageStartup.initialize(
-                openStorage = { opened = withContext(Dispatchers.IO) { AppDatabase.openVerified(this@HBandHealthSyncApp) } },
-                startRuntime = { startDataRuntime(checkNotNull(opened)) },
-            )
+            try {
+                storageStartup.initialize(
+                    openStorage = { opened = withContext(Dispatchers.IO) { AppDatabase.openVerified(this@HBandHealthSyncApp) } },
+                    startRuntime = { startDataRuntime(checkNotNull(opened)) },
+                )
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                Log.e(TAG, "Inicialização do runtime interrompida.", error)
+            }
             if (storageStartup.isReady) {
-                HBandWorkScheduler.schedulePeriodicIngest(this@HBandHealthSyncApp)
-                HBandBleService.startIfPersistedSession(this@HBandHealthSyncApp)
+                runCatching { HBandWorkScheduler.schedulePeriodicIngest(this@HBandHealthSyncApp) }
+                    .onFailure { Log.e(TAG, "Falha ao agendar envio periódico.", it) }
+                runCatching { HBandBleService.startIfPersistedSession(this@HBandHealthSyncApp) }
+                    .onFailure { Log.e(TAG, "Falha ao retomar sessão BLE.", it) }
             }
         }
     }
 
+    @Volatile private var uploadNow: (() -> Unit)? = null
+
+    /** Flush the durable queue to the Core now (used by the BLE foreground service). */
+    fun requestImmediateUpload() { uploadNow?.invoke() }
+
     fun readyBleManagerOrNull(): HBandBleManager? =
-        if (storageStartup.isReady && ::bleManager.isInitialized) bleManager else null
+        runtimeBleManager?.takeIf { storageStartup.isReady }
+
+    internal fun installRuntimeBleManager(manager: HBandBleManager) {
+        runtimeBleManager = manager
+    }
 
     fun requestBleSessionStop() {
         val manager = readyBleManagerOrNull()
@@ -55,16 +83,20 @@ class HBandHealthSyncApp : Application() {
     private fun startDataRuntime(db: AppDatabase) {
         // ECG JNI (`JNIChange` → libnative-lib.so) is missing from vpprotocol AAR.
         VeepooEcgNative.loadOnce()
+        com.example.data.hband.VeepooSdkToasts.suppressFunctionNotSupported()
         RetrofitClient.initialize(this)
         val historyRepository = WearableRepository(
             queueDao = db.ingestQueueDao(),
             sensorMetricDao = db.sensorMetricDao(),
             apiService = RetrofitClient.apiService,
             ingestTransportProvider = { RetrofitClient.captureIngestTransport() },
+            backoffGate = com.example.data.ingest.IngestBackoffGate.shared(this),
+        deviceLabelProvider = { com.example.data.ingest.DeviceLabel.current(this, db.userProfileDao()) },
+        patientIdProvider = { db.userProfileDao().getUserProfile()?.patientId },
             localWriteTransaction = db.localWriteTransaction(),
             advancedMeasurementDao = db.advancedMeasurementDao(),
         )
-        bleManager = HBandBleManager(
+        installRuntimeBleManager(HBandBleManager(
             this,
             bleScope,
             initiallyDisconnectedByUser = startupStopRequested,
@@ -97,7 +129,33 @@ class HBandHealthSyncApp : Application() {
                     }
                 }
             },
-        )
+        ))
+        // Patient ID: existing installs with a saved name but PAT-HBAND-001 get their own ID
+        // now, and every later profile change reaches the watch runtime (history samples).
+        bleScope.launch(Dispatchers.IO) {
+            try {
+                com.example.data.ingest.PatientIdentity.migrate(db.userProfileDao())
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                Log.e(TAG, "Falha ao gerar a identificação do paciente; nova tentativa no próximo início.", error)
+            }
+            try {
+                db.userProfileDao().getUserProfileFlow().collect { profile ->
+                    profile?.let { bleManager.setPatientId(it.patientId) }
+                }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                Log.e(TAG, "Falha ao acompanhar o perfil salvo.", error)
+            }
+        }
+        uploadNow = {
+            bleScope.launch(Dispatchers.IO) {
+                runCatching { historyRepository.processQueueDetailed() }
+                    .onFailure { Log.e(TAG, "Falha no envio imediato pelo serviço BLE.", it) }
+            }
+        }
         val prefs = getSharedPreferences("hband_settings", MODE_PRIVATE)
         bleScope.recordLiveReadingsWithSync(
             readings = bleManager.latestTelemetry,
@@ -115,4 +173,18 @@ class HBandHealthSyncApp : Application() {
             },
         )
     }
+
+    private companion object {
+        const val TAG = "HBandHealthSyncApp"
+    }
 }
+
+/**
+ * MainViewModel and other early consumers must not read [HBandHealthSyncApp.bleManager]
+ * (the old lateinit getter). That throws [UninitializedPropertyAccessException] on
+ * every cold start until storage/runtime finish, which Android then restart-loops.
+ */
+fun resolveRuntimeBleManager(
+    application: Application,
+    fallback: () -> HBandBleManager,
+): HBandBleManager = (application as? HBandHealthSyncApp)?.readyBleManagerOrNull() ?: fallback()

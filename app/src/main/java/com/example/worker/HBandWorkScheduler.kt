@@ -17,24 +17,28 @@ object HBandWorkScheduler {
     private const val ONE_TIME_INGEST_WORK_NAME = "hband_one_time_ingest_work"
 
     fun schedulePeriodicIngest(context: Context) {
-        val constraints = Constraints.Builder()
-            .setRequiredNetworkType(NetworkType.CONNECTED)
-            .build()
+        try {
+            val constraints = Constraints.Builder()
+                .setRequiredNetworkType(NetworkType.CONNECTED)
+                .build()
 
-        val periodicWorkRequest = PeriodicWorkRequestBuilder<HBandIngestWorker>(
-            repeatInterval = 15,
-            repeatIntervalTimeUnit = TimeUnit.MINUTES
-        )
-            .addTag("hband_sync_worker")
-            .setConstraints(constraints)
-            .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
-            .build()
+            val periodicWorkRequest = PeriodicWorkRequestBuilder<HBandIngestWorker>(
+                repeatInterval = 15,
+                repeatIntervalTimeUnit = TimeUnit.MINUTES
+            )
+                .addTag("hband_sync_worker")
+                .setConstraints(constraints)
+                .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
+                .build()
 
-        WorkManager.getInstance(context).enqueueUniquePeriodicWork(
-            PERIODIC_INGEST_WORK_NAME,
-            ExistingPeriodicWorkPolicy.KEEP,
-            periodicWorkRequest
-        )
+            WorkManager.getInstance(context).enqueueUniquePeriodicWork(
+                PERIODIC_INGEST_WORK_NAME,
+                ExistingPeriodicWorkPolicy.KEEP,
+                periodicWorkRequest
+            )
+        } catch (error: Exception) {
+            android.util.Log.e("HBandWorkScheduler", "Unable to schedule periodic ingest", error)
+        }
 
         // Cloud backup has no confirmed recovery/authorization contract. Do not schedule it.
     }

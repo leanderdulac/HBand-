@@ -4,7 +4,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -15,7 +14,10 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.unit.dp
+import com.example.ui.theme.AppThemeOption
 import com.example.ui.theme.MyApplicationTheme
+import com.example.ui.theme.ResolvedAppTheme
+import com.example.ui.theme.colorSchemeFor
 import com.github.takahirom.roborazzi.captureRoboImage
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -78,6 +80,29 @@ class AiInsightHighlightCardTest {
         compose.onNodeWithTag("ai_insight_review_label").assertExists()
     }
 
+    @Test fun without_consent_hides_summary_and_asks_to_enable() {
+        var refresh = 0
+        var consent = 0
+        compose.setContent {
+            MyApplicationTheme {
+                Column(Modifier.verticalScroll(rememberScrollState()).padding(16.dp)) {
+                    AiInsightHighlightCard(
+                        "texto que não deve aparecer", false, { refresh++ },
+                        consented = false, onRequestConsent = { consent++ },
+                    )
+                }
+            }
+        }
+        compose.onNodeWithTag("ai_insight_consent_needed").assertExists()
+        compose.onNodeWithTag("gemini_insight_text").assertDoesNotExist()
+        compose.onNodeWithTag("refresh_gemini_insight_button").assertDoesNotExist()
+        compose.onNodeWithTag("ai_insight_enable_button").performClick()
+        compose.runOnIdle {
+            assertEquals(0, refresh)
+            assertEquals(1, consent)
+        }
+    }
+
     @Test fun empty_state_is_friendly_and_has_no_timestamp() {
         show()
         compose.onNodeWithTag("ai_insight_empty").assertTextContains("resumo dos últimos 7 dias aparece aqui", substring = true)
@@ -101,24 +126,23 @@ class AiInsightHighlightCardTest {
     }
 
     @Test fun text_colors_meet_wcag_aa_on_the_whole_gradient() {
-        lateinit var scheme: ColorScheme
-        compose.setContent { MyApplicationTheme { scheme = MaterialTheme.colorScheme } }
-        compose.runOnIdle {
+        for (resolved in ResolvedAppTheme.entries) {
+            val scheme = colorSchemeFor(resolved)
             val top = scheme.primaryContainer
             val bottom = lerp(scheme.primaryContainer, scheme.surface, 0.45f)
             for (background in listOf(top, bottom)) {
-                assertAa(scheme.onPrimaryContainer, background)
-                assertAa(scheme.onSurfaceVariant, background)
-                assertTrue(contrast(scheme.primary, background) >= 3.0) // icon: non-text 3:1
+                assertAa(scheme.onPrimaryContainer, background, resolved)
+                assertAa(scheme.onSurfaceVariant, background, resolved)
+                assertTrue("$resolved icon", contrast(scheme.primary, background) >= 3.0)
             }
-            assertAa(scheme.onPrimary, scheme.primary) // "Atualizar resumo" button
-            assertTrue(contrast(scheme.primary, scheme.surface) >= 3.0) // icon on its white badge
+            assertAa(scheme.onPrimary, scheme.primary, resolved)
+            assertTrue("$resolved badge", contrast(scheme.primary, scheme.surface) >= 3.0)
         }
     }
 
-    private fun assertAa(foreground: Color, background: Color) {
+    private fun assertAa(foreground: Color, background: Color, option: Any = AppThemeOption.LIGHT) {
         val ratio = contrast(foreground.compositeOver(background), background)
-        assertTrue("contrast $ratio < 4.5 for $foreground on $background", ratio >= 4.5)
+        assertTrue("$option contrast $ratio < 4.5 for $foreground on $background", ratio >= 4.5)
     }
 
     private fun contrast(a: Color, b: Color): Double {

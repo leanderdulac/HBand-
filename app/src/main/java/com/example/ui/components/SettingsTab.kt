@@ -58,9 +58,12 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import com.example.BuildConfig
 import com.example.ui.theme.AppThemeOption
 import com.example.ui.theme.LocalStatusColors
+import com.example.ui.theme.MyApplicationTheme
 import com.example.ui.theme.PillShape
 
 @Composable
@@ -90,6 +93,9 @@ fun SettingsTab(
     onSpo2AutoChange: (Boolean) -> Unit = {},
     onWearDetectChange: (Boolean) -> Unit = {},
     onSyncHistory: () -> Unit = {},
+    watchClockState: com.example.data.hband.WatchClockUiState = com.example.data.hband.WatchClockUiState(),
+    onSyncWatchTime: () -> Unit = {},
+    watchAutoMeasureState: com.example.data.hband.WatchAutoMeasureState = com.example.data.hband.WatchAutoMeasureState(),
     alarmState: com.example.data.hband.AlarmUiState = com.example.data.hband.AlarmUiState(),
     heartWarningState: com.example.data.hband.HeartWarningUiState = com.example.data.hband.HeartWarningUiState(),
     longSeatState: com.example.data.hband.LongSeatUiState = com.example.data.hband.LongSeatUiState(),
@@ -107,11 +113,15 @@ fun SettingsTab(
     ingestDiagnostics: com.example.data.ingest.IngestDiagnostics = com.example.data.ingest.IngestDiagnostics(),
     themeOption: AppThemeOption = AppThemeOption.LIGHT,
     onThemeOptionChange: (AppThemeOption) -> Unit = {},
+    aiInsightFeatureEnabled: Boolean = BuildConfig.AI_INSIGHT_ENABLED,
+    aiInsightConsented: Boolean = false,
+    onAiInsightConsentChange: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val scrollState = rememberScrollState()
     var showResetConfirmDialog by remember { mutableStateOf(false) }
     var showDevelopment by rememberSaveable { mutableStateOf(false) }
+    var showAiInsightConsentDialog by rememberSaveable { mutableStateOf(false) }
 
     Column(
         modifier = modifier
@@ -121,6 +131,8 @@ fun SettingsTab(
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         Text("Ajustes", style = MaterialTheme.typography.headlineMedium)
+        Text(appVersionLabel(), style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.testTag("settings_version_label"))
         Card(
             modifier = Modifier.fillMaxWidth().testTag("user_profile_settings_card"),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -134,6 +146,16 @@ fun SettingsTab(
                     modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag("btn_edit_profile_settings"),
                 ) { Text(if (userProfile != null) "Ver e editar meu perfil" else "Sobre meu perfil") }
             }
+        }
+
+        if (aiInsightFeatureEnabled) {
+            AiInsightSettingsCard(
+                consented = aiInsightConsented,
+                onConsentChange = { enabled ->
+                    if (enabled) showAiInsightConsentDialog = true
+                    else onAiInsightConsentChange(false)
+                },
+            )
         }
 
         BatteryOptimizationSettingsCard()
@@ -186,6 +208,11 @@ fun SettingsTab(
         }
 
         ThemeSelectorCard(themeOption = themeOption, onThemeOptionChange = onThemeOptionChange)
+
+        PatientSection(title = "Relógio", forceExpanded = watchClockState.syncing) {
+            WatchClockCard(state = watchClockState, enabled = actionsEnabled, onSyncTime = onSyncWatchTime)
+            WatchFaceCard(autoMeasure = watchAutoMeasureState)
+        }
 
         PatientSection(title = "Opções do relógio", forceExpanded = historySyncState.isRunning || findDeviceState.finding) {
             BandSdkSettingsCard(
@@ -654,6 +681,16 @@ fun SettingsTab(
         }
     }
 
+    if (showAiInsightConsentDialog) {
+        AiInsightConsentDialog(
+            onAuthorize = {
+                showAiInsightConsentDialog = false
+                onAiInsightConsentChange(true)
+            },
+            onNotNow = { showAiInsightConsentDialog = false },
+        )
+    }
+
     if (showResetConfirmDialog) {
         AlertDialog(
             onDismissRequest = { showResetConfirmDialog = false },
@@ -687,6 +724,78 @@ fun SettingsTab(
                 }
             }
         )
+    }
+}
+
+@Composable
+internal fun AiInsightSettingsCard(
+    consented: Boolean,
+    onConsentChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Card(
+        modifier = modifier.fillMaxWidth().testTag("ai_insight_settings_card"),
+        shape = RoundedCornerShape(28.dp),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 56.dp)
+                .testTag("ai_insight_settings_switch")
+                .toggleable(
+                    value = consented,
+                    role = Role.Switch,
+                    onValueChange = onConsentChange,
+                )
+                .padding(20.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = AiInsightConsentCopy.TITLE,
+                    modifier = Modifier.fillMaxWidth(),
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Text(
+                    text = if (consented) AiInsightConsentCopy.SETTINGS_ON_HINT else AiInsightConsentCopy.SETTINGS_OFF_HINT,
+                    modifier = Modifier.fillMaxWidth().testTag("ai_insight_settings_hint"),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(
+                checked = consented,
+                onCheckedChange = null,
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
+                    checkedTrackColor = MaterialTheme.colorScheme.primary,
+                ),
+            )
+        }
+    }
+}
+
+@Preview(showBackground = true, name = "Ajustes — Resumo com IA desligado")
+@Composable
+private fun AiInsightSettingsCardOffPreview() {
+    MyApplicationTheme {
+        Column(Modifier.padding(16.dp)) {
+            AiInsightSettingsCard(consented = false, onConsentChange = {})
+        }
+    }
+}
+
+@Preview(showBackground = true, name = "Ajustes — Resumo com IA autorizado")
+@Composable
+private fun AiInsightSettingsCardOnPreview() {
+    MyApplicationTheme {
+        Column(Modifier.padding(16.dp)) {
+            AiInsightSettingsCard(consented = true, onConsentChange = {})
+        }
     }
 }
 

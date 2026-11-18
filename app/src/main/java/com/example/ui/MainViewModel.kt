@@ -3,7 +3,7 @@ package com.example.ui
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.HBandHealthSyncApp
+import com.example.resolveRuntimeBleManager
 import com.example.data.hband.AlarmUiState
 import com.example.data.hband.AutoMeasureUiState
 import com.example.data.hband.DetectSessionUiState
@@ -42,7 +42,10 @@ import androidx.lifecycle.asFlow
 import androidx.work.WorkManager
 
 import com.example.ui.components.SyncLogEntry
+import com.example.data.local.AiInsightConsentStore
+import com.example.data.local.shouldGenerateAiInsight
 import com.example.ui.theme.AppThemeOption
+import com.example.util.HrAlertGate
 import com.example.util.HrNotificationHelper
 import com.example.worker.HBandWorkScheduler
 import android.content.Context
@@ -56,13 +59,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         sensorMetricDao = db.sensorMetricDao(),
         apiService = RetrofitClient.apiService,
         ingestTransportProvider = { RetrofitClient.captureIngestTransport() },
+            backoffGate = com.example.data.ingest.IngestBackoffGate.shared(application),
+        deviceLabelProvider = { com.example.data.ingest.DeviceLabel.current(application, db.userProfileDao()) },
+        patientIdProvider = { db.userProfileDao().getUserProfile()?.patientId },
         localWriteTransaction = db.localWriteTransaction(),
         advancedMeasurementDao = db.advancedMeasurementDao(),
     )
 
-    val bleManager: HBandBleManager =
-        (application as? HBandHealthSyncApp)?.bleManager
-            ?: HBandBleManager(application.applicationContext, viewModelScope)
+    val bleManager: HBandBleManager = resolveRuntimeBleManager(application) {
+        HBandBleManager(application.applicationContext, viewModelScope)
+    }
 
     val apiHealth: StateFlow<ApiHealthState> = repository.apiHealth
     val isSyncing: StateFlow<Boolean> = repository.isSyncing
@@ -83,12 +89,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     val scannedDevices: StateFlow<List<HBandDevice>> = bleManager.scannedDevices
     val connectedDevice: StateFlow<HBandDevice?> = bleManager.connectedDevice
+    val incompatibleWatch: StateFlow<HBandDevice?> = bleManager.incompatibleWatch
     val isScanning: StateFlow<Boolean> = bleManager.isScanning
     val scanFailure = bleManager.scanFailure
     val latestTelemetry: StateFlow<HBandTelemetry?> = bleManager.latestTelemetry
     val deviceCapabilities: StateFlow<DeviceCapabilities> = bleManager.capabilities
     val autoMeasureState: StateFlow<AutoMeasureUiState> = bleManager.autoMeasureState
     val wearDetectState: StateFlow<WearDetectUiState> = bleManager.wearDetectState
+    val watchClockState = bleManager.watchClockState
+
+    fun syncWatchTime() = bleManager.requestWatchTimeSync()
+    val watchAutoMeasureState = bleManager.watchAutoMeasureState
     val historySyncState: StateFlow<HistorySyncUiState> = bleManager.historySyncState
     val isHardwareConnected: StateFlow<Boolean> = bleManager.isHardwareConnected
     val ecgState: StateFlow<DetectSessionUiState> = bleManager.ecgState
@@ -208,13 +219,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _hrAlertsEnabled = MutableStateFlow(prefs.getBoolean("hr_alerts_enabled", true))
     val hrAlertsEnabled: StateFlow<Boolean> = _hrAlertsEnabled.asStateFlow()
 
-    private var lastAlertTimeMs: Long? = null
 
     private val insightPolicy = insightPolicy(com.example.BuildConfig.DEBUG, com.example.BuildConfig.AI_INSIGHT_ENABLED)
+    private val aiInsightConsentStore = AiInsightConsentStore(prefs)
+    private val _aiInsightConsent = MutableStateFlow(aiInsightConsentStore.snapshot())
+    val aiInsightConsent: StateFlow<AiInsightConsentStore.Snapshot> = _aiInsightConsent.asStateFlow()
     private val insightReview = PatientInsightReview(
         viewModelScope, insightPolicy.manualRequests, repository.allSensorMetrics, automatic = insightPolicy.automatic,
+        consented = { _aiInsightConsent.value.consented },
     ) { metrics ->
-        com.example.data.remote.GeminiHealthAnalyzer.generateSevenDayInsight(metrics)
+        if (!shouldGenerateAiInsight(insightPolicy.showInsight, _aiInsightConsent.value.consented)) {
+            return@PatientInsightReview ""
+        }
+        com.example.data.remote.GeminiHealthAnalyzer.generateSevenDayInsight(
+            metrics,
+            db.userProfileDao().getUserProfile(),
+        )
     }
     val geminiInsightText = insightReview.state.map { it.text }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
@@ -241,6 +261,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }) { profile ->
         bleManager.setPatientId(profile.patientId)
         showNotification("Perfil salvo neste celular.")
+        if (insightPolicy.manualRequests) insightReview.request()
     }
     val profileSaveState = profileSave.state
 
@@ -287,12 +308,32 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun generateGeminiInsight() = insightReview.request()
 
+    fun grantAiInsightConsent() {
+        _aiInsightConsent.value = aiInsightConsentStore.grant()
+        insightReview.request()
+        showNotification("Resumo com IA autorizado. Você pode desligar em Ajustes.")
+    }
+
+    fun withdrawAiInsightConsent() {
+        _aiInsightConsent.value = aiInsightConsentStore.withdraw()
+        insightReview.clear()
+        showNotification("Resumo com IA desligado. Nada mais é enviado para gerar o resumo.")
+    }
+
+    fun markAiInsightConsentPromptShown() {
+        _aiInsightConsent.value = aiInsightConsentStore.markPromptShown()
+    }
+
     init {
         bleManager.isAutoReconnectEnabled = _autoReconnectBle.value
         checkHealth()
 
         viewModelScope.launch {
-            profileRead.firstConfirmed()?.let { bleManager.setPatientId(it.patientId) }
+            // Follow every confirmed read: the launch migration may assign the ID after this starts.
+            profileRead.state.collect { read ->
+                (read as? LocalReadState.Ready<com.example.data.local.UserProfileEntity?>)?.value
+                    ?.let { bleManager.setPatientId(it.patientId) }
+            }
         }
 
         viewModelScope.launch {
@@ -337,22 +378,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun evaluateHeartRateThresholds(hr: Int) {
         if (!_hrAlertsEnabled.value) return
-
-        val now = android.os.SystemClock.elapsedRealtime()
-        // Local elapsed duration, independent of civil-time corrections; includes device sleep.
-        lastAlertTimeMs?.let { if (now - it < 8000) return }
-
         val upper = _upperHrThreshold.value
         val lower = _lowerHrThreshold.value
-
-        if (hr > upper) {
-            lastAlertTimeMs = now
-            HrNotificationHelper.sendHighHrNotification(getApplication(), hr, upper)
-            showNotification("Batimentos: $hr bpm. Acima do limite cadastrado de $upper bpm.", isError = true)
-        } else if (hr < lower) {
-            lastAlertTimeMs = now
-            HrNotificationHelper.sendLowHrNotification(getApplication(), hr, lower)
-            showNotification("Batimentos: $hr bpm. Abaixo do limite cadastrado de $lower bpm.", isError = true)
+        // Sem campo inicializado: o estado vive em prefs (sobrevive a reinício do app).
+        when (HrAlertGate(prefs).evaluate(hr, upper, lower)) {
+            HrAlertGate.Kind.HIGH -> {
+                HrNotificationHelper.sendHighHrNotification(getApplication(), hr, upper)
+                showNotification("Batimentos: $hr bpm. Acima do limite cadastrado de $upper bpm.", isError = true)
+            }
+            HrAlertGate.Kind.LOW -> {
+                HrNotificationHelper.sendLowHrNotification(getApplication(), hr, lower)
+                showNotification("Batimentos: $hr bpm. Abaixo do limite cadastrado de $lower bpm.", isError = true)
+            }
+            null -> Unit
         }
     }
 
@@ -421,6 +459,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun setBandHealthRemind(enabled: Boolean) = bleManager.setHealthRemindEnabled(enabled)
 
     fun saveUserProfile(token: String, profile: com.example.data.local.UserProfileEntity) = profileSave.save(token, profile)
+
+    // "Nome da pulseira" (Meu perfil): local only, sent as device_label on each ingest.
+    private val _savedDeviceLabel = MutableStateFlow(com.example.data.ingest.DeviceLabel.read(application))
+    val savedDeviceLabel: StateFlow<String?> = _savedDeviceLabel.asStateFlow()
+
+    fun saveDeviceLabel(raw: String, profileName: String) {
+        val app = getApplication<Application>()
+        com.example.data.ingest.DeviceLabel.save(app, raw, profileName)
+        _savedDeviceLabel.value = com.example.data.ingest.DeviceLabel.read(app)
+    }
 
     fun setAutoIngestLiveReadings(enabled: Boolean) {
         _autoIngestLiveReadings.value = enabled
@@ -521,8 +569,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         showNotification("Desconexão solicitada. Confira o estado do relógio na tela.")
     }
 
+    fun forgetIncompatibleWatch() {
+        bleManager.forgetDevice()
+        HBandBleService.stop(getApplication())
+    }
+
     fun triggerSpotCheck() {
         if (!profileReadReady()) return
+        if (bleManager.isVeepooSession) {
+            // Medição ao vivo só por toque (política de bateria); as leituras entram na fila
+            // pelo fluxo normal de telemetria quando o relógio responder.
+            if (bleManager.requestManualMeasurement()) {
+                showNotification("Medindo no relógio. Mantenha a pulseira no pulso por cerca de 2 minutos.")
+            }
+            return
+        }
         val telemetry = bleManager.triggerSpotCheck()
         if (telemetry == null || !IngestPayloadMapper.isIngestible(telemetry)) {
             showNotification(

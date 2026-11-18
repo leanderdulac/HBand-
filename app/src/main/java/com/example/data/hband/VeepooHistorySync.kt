@@ -103,6 +103,22 @@ class VeepooHistorySync(
         deviceId: String,
         deviceModel: String,
         onProgress: (HistorySyncUiState) -> Unit,
+    ): HistoryPull = pullHistoryInternal(caps, deviceId, deviceModel, includeSleep = true, onProgress = onProgress)
+
+    /** Leitura periódica leve: sem sono (o sono já vem na conexão). */
+    suspend fun pullHistoryWithoutSleep(
+        caps: DeviceCapabilities,
+        deviceId: String,
+        deviceModel: String,
+        onProgress: (HistorySyncUiState) -> Unit,
+    ): HistoryPull = pullHistoryInternal(caps, deviceId, deviceModel, includeSleep = false, onProgress = onProgress)
+
+    private suspend fun pullHistoryInternal(
+        caps: DeviceCapabilities,
+        deviceId: String,
+        deviceModel: String,
+        includeSleep: Boolean,
+        onProgress: (HistorySyncUiState) -> Unit,
     ): HistoryPull {
         val collected = mutableListOf<VeepooHistoryMapper.MappedSample>()
         if (cancelled || !caps.probed) {
@@ -130,7 +146,7 @@ class VeepooHistorySync(
             onProgress(state)
         }
 
-        if (!cancelled && caps.canReadSleepHistory) {
+        if (!cancelled && includeSleep && caps.canReadSleepHistory) {
             state = state.copy(phase = "sleep")
             onProgress(state)
             val sleep = retrying(times = 3, timeoutMs = SLEEP_TIMEOUT_MS) {
@@ -209,7 +225,12 @@ class VeepooHistorySync(
             val request = AutoMeasureData().apply {
                 protocolType = item.protocolType
                 funType = item.funType
-                isSwitchOpen = if (item.funType == EAutoMeasureType.PULSE_RATE || item.funType == EAutoMeasureType.BLOOD_OXYGEN) enabled else item.isSwitchOpen
+                // Só a FC segue o botão; SpO2 automático fica desligado (WatchBatteryPolicy).
+                isSwitchOpen = when (item.funType) {
+                    EAutoMeasureType.PULSE_RATE -> enabled
+                    EAutoMeasureType.BLOOD_OXYGEN -> false
+                    else -> item.isSwitchOpen
+                }
                 stepUnit = item.stepUnit
                 isSlotModify = item.isSlotModify
                 isIntervalModify = item.isIntervalModify
@@ -225,6 +246,51 @@ class VeepooHistorySync(
         }
         // Partial success does not establish the complete requested configuration or rollback.
         return if (incomplete) null else received.values.toList()
+    }
+
+    /** Passos/calorias do dia, sem ligar sensor (leitura periódica). */
+    suspend fun readSportOnce(): VeepooSportReading? =
+        retrying(times = 2, timeoutMs = SETTINGS_TIMEOUT_MS) { readSport() }
+
+    /**
+     * Escreve no relógio só os itens de medição automática que divergem da política
+     * de bateria. Retorna a lista final, ou null se nada mudou ou alguma escrita falhou.
+     */
+    suspend fun applyBatteryPolicy(
+        current: List<AutoMeasureData>,
+        heartRateUserOff: Boolean,
+    ): List<AutoMeasureData>? {
+        val result = linkedMapOf<EAutoMeasureType, AutoMeasureData>()
+        current.forEach { result[it.funType] = it }
+        var changed = false
+        for (item in current) {
+            if (cancelled) return null
+            val slot = WatchBatteryPolicy.AutoSlot(
+                type = item.funType.name,
+                open = item.isSwitchOpen,
+                intervalMin = item.measureInterval,
+                stepUnit = item.stepUnit,
+                intervalModify = item.isIntervalModify,
+            )
+            val target = WatchBatteryPolicy.desired(slot, heartRateUserOff) ?: continue
+            val request = AutoMeasureData().apply {
+                protocolType = item.protocolType
+                funType = item.funType
+                isSwitchOpen = target.open
+                stepUnit = item.stepUnit
+                isSlotModify = item.isSlotModify
+                isIntervalModify = item.isIntervalModify
+                supportStartMinute = item.supportStartMinute
+                supportEndMinute = item.supportEndMinute
+                measureInterval = target.intervalMin
+                currentStartMinute = item.currentStartMinute
+                currentEndMinute = item.currentEndMinute
+            }
+            val response = writeAutoMeasure(request) ?: return null
+            response.forEach { result[it.funType] = it }
+            changed = true
+        }
+        return if (changed) result.values.toList() else null
     }
 
     suspend fun setSpo2AutoEnabled(enabled: Boolean, existing: AllSetData?): AllSetData? {

@@ -52,6 +52,10 @@ class VeepooSportRoutingTest {
             java.lang.reflect.Modifier.isStatic(it.modifiers) && it.type == VPOperateManager::class.java
         }.apply { isAccessible = true }.set(null, null)
     }
+    private fun setField(name: String, value: Any) {
+        HBandBleManager::class.java.getDeclaredField(name).apply { isAccessible = true }.set(manager, value)
+    }
+
     @Suppress("UNCHECKED_CAST")
     private fun <T> setFlow(name: String, value: T) {
         val field = HBandBleManager::class.java.getDeclaredField(name).apply { isAccessible = true }
@@ -79,6 +83,21 @@ class VeepooSportRoutingTest {
         assertEquals(0, cache.heartRate)
         assertEquals(0, cache.bloodPressure.systolic)
         assertFalse(cache.isRealSensorData)
+    }
+
+    @Test fun sport_with_current_hr_emits_live_snapshot_for_ingest() {
+        setField("currentHeartRate", 76)
+        setField("currentSpO2", 97)
+        setField("hasReceivedRealSensorData", true)
+        read()
+        val live = manager.latestTelemetry.value
+        assertNotNull(live)
+        assertEquals(76, live!!.heartRate)
+        assertEquals(97, live.spO2)
+        assertEquals(2400, live.steps)
+        assertEquals("00:11:22:33:44:55", live.deviceId)
+        assertTrue(live.isRealSensorData)
+        assertEquals(1, sport.size)
     }
 
     @Test fun later_zero_counter_is_not_replaced_by_an_old_daily_value() {

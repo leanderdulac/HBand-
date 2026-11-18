@@ -2,7 +2,7 @@
 <!-- Probe exists only in the instrumentation APK, never in the patient APK. -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <queries>
-        <package android:name="com.aistudio.hbandhealthtech.pxq97m.storagelab" />
+        <package android:name="br.com.next2u.saude.paciente.storagelab" />
     </queries>
     <application>
         <activity android:name="com.example.util.ShareReceiverLabActivity"

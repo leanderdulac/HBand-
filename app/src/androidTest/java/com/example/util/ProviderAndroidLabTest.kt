@@ -31,7 +31,7 @@ class ProviderAndroidLabTest {
 
     @Before fun requireIsolatedEmulator() {
         context = InstrumentationRegistry.getInstrumentation().targetContext
-        check(context.packageName == "com.aistudio.hbandhealthtech.pxq97m.storagelab")
+        check(context.packageName == "br.com.next2u.saude.paciente.storagelab")
         check(context.applicationContext.javaClass == Application::class.java)
         check(Build.HARDWARE in setOf("ranchu", "goldfish"))
         check(InstrumentationRegistry.getArguments().getString("providerLab") == "synthetic-only")
