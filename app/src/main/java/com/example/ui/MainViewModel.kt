@@ -62,6 +62,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             backoffGate = com.example.data.ingest.IngestBackoffGate.shared(application),
         deviceLabelProvider = { com.example.data.ingest.DeviceLabel.current(application, db.userProfileDao()) },
         patientIdProvider = { db.userProfileDao().getUserProfile()?.patientId },
+        uploadContextProvider = { com.example.data.ingest.UploadContextReader.capture(application) },
         localWriteTransaction = db.localWriteTransaction(),
         advancedMeasurementDao = db.advancedMeasurementDao(),
     )

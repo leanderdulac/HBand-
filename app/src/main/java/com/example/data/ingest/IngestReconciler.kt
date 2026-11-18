@@ -47,8 +47,15 @@ object IngestReconciler {
      * [deviceLabel] is the current "Nome da pulseira" (already resolved, see [DeviceLabel]).
      * It is applied at send time, so readings queued before a rename carry the new name too.
      * [currentPatientId] replaces only the default patient ID (see [PatientIdentity.forSend]).
+     * [upload] is the send-time app/screen/watch-battery snapshot. Null leaves those keys off
+     * the body (older callers and a failed snapshot). It is not part of the idempotency key.
      */
-    fun prepare(item: IngestQueueEntity, deviceLabel: String? = null, currentPatientId: String? = null): PreparedReading {
+    fun prepare(
+        item: IngestQueueEntity,
+        deviceLabel: String? = null,
+        currentPatientId: String? = null,
+        upload: UploadContext? = null,
+    ): PreparedReading {
         val original = JSONObject(item.payloadJson)
         val recordedPatient = requireNotNull(string(original, "patient_id")) { INVALID_LOCAL }
         // Readings queued before the profile got its own ID (still PAT-HBAND-001) are sent
@@ -69,6 +76,7 @@ object IngestReconciler {
         normalized.put("timestamp", original.getString("timestamp"))
         normalized.put("client_reading_id", item.clientReadingId)
         DeviceLabel.normalize(deviceLabel)?.let { normalized.put("device_label", it) }
+        upload?.applyTo(normalized)
         return PreparedReading(item, patient, normalized.toString())
     }
 
