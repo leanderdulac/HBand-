@@ -184,11 +184,11 @@ struct SettingsScreen: View {
                 .font(.system(size: 17))
             Text("Para melhorar a continuidade:")
                 .font(.system(size: 17, weight: .semibold))
-            Text("1. Ajustes → Geral → Atualização em Segundo Plano → next2u SAÚDE: ligado.")
+            Text("1. Ajustes → Geral → Atualização em Segundo Plano → Next2U Paciente: ligado.")
                 .font(.system(size: 17))
             Text("2. Deixe o Bluetooth ligado.")
                 .font(.system(size: 17))
-            Text("3. Não deslize o next2u SAÚDE para fechar. Fechar o app pela lista de abertos não restaura a sessão do relógio.")
+            Text("3. Não deslize o Next2U Paciente para fechar. Fechar o app pela lista de abertos não restaura a sessão do relógio.")
                 .font(.system(size: 17))
             Button("Abrir Ajustes deste iPhone") { openAppSettings() }
                 .buttonStyle(PatientPrimaryButton())
@@ -294,7 +294,7 @@ struct SettingsScreen: View {
                     .buttonStyle(PatientPrimaryButton())
                     .accessibilityIdentifier("open_notification_settings")
                 if notifyOpenFailed {
-                    Text("Não foi possível abrir as opções. Abra as configurações deste aparelho e procure next2u SAÚDE.")
+                    Text("Não foi possível abrir as opções. Abra as configurações deste aparelho e procure Next2U Paciente.")
                         .font(.system(size: 17))
                 }
                 Text("Avisar acima de").font(.system(size: 15, weight: .semibold))

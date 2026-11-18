@@ -10,7 +10,7 @@ struct Next2uBrandLogo: View {
             .scaledToFit()
             .frame(height: height)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .accessibilityLabel("next2u SAÚDE")
+            .accessibilityLabel("Next2U Paciente")
             .accessibilityIdentifier("next2u_brand_logo")
     }
 }

@@ -1,0 +1,6 @@
+/* English locale uses the same patient-facing name. Bundle id stays br.com.next2u.saude.paciente. */
+"CFBundleDisplayName" = "Next2U Paciente";
+"CFBundleName" = "Next2U Paciente";
+"NSBluetoothAlwaysUsageDescription" = "O Next2U Paciente usa o Bluetooth para conectar o relógio e receber suas medições de saúde, inclusive quando o app está em segundo plano.";
+"NSBluetoothPeripheralUsageDescription" = "O Next2U Paciente usa o Bluetooth para conectar o relógio e receber suas medições de saúde.";
+"NSLocationWhenInUseUsageDescription" = "O Next2U Paciente não registra GPS. A permissão de localização só é pedida se este iPhone exigir para encontrar o relógio por Bluetooth.";
