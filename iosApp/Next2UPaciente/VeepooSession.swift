@@ -85,6 +85,13 @@ final class VeepooSession: NSObject, ObservableObject {
         if !watchAlias.isEmpty { return watchAlias }
         return connected?.name ?? ""
     }
+
+    /// Relógio já pareado neste iPhone (sessão atual ou endereço salvo).
+    var hasPairedWatch: Bool {
+        if connected != nil || hardwareReady { return true }
+        let saved = lastAddress?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return !saved.isEmpty
+    }
     private var lastPeripheralUUID: String? {
         get { UserDefaults.standard.string(forKey: "last_veepoo_uuid") }
         set { UserDefaults.standard.set(newValue, forKey: "last_veepoo_uuid") }
