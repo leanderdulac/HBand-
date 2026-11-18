@@ -27,6 +27,8 @@ class IngestClient(
     private val http: HttpClient,
     private val transport: IngestTransport,
     private val appVersion: String? = null,
+    /** Bundle header (`ios-<marketing>+<build>`). Used when [appVersion] has no build. */
+    private val platformVersion: String? = platformAppVersionHeader(),
 ) {
     init {
         require(transport.configurationError == null && !transport.baseUrl.isNullOrBlank()) {
@@ -55,7 +57,8 @@ class IngestClient(
             val response = http.request(baseUrl + path) {
                 this.method = method
                 header("X-API-Key", transport.apiKey)
-                if (!appVersion.isNullOrBlank()) header("X-App-Version", appVersion)
+                val version = AppVersionHeader.choose(appVersion, platformVersion)
+                if (!version.isNullOrBlank()) header(AppVersionHeader.NAME, version)
                 if (!idempotencyKey.isNullOrBlank()) header("Idempotency-Key", idempotencyKey)
                 if (body != null) {
                     setBody(TextContent(body, ContentType.Application.Json))

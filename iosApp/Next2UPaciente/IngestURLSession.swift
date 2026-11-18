@@ -83,7 +83,14 @@ final class IngestURLSession: NSObject, URLSessionDelegate, URLSessionDataDelega
             if let p = obj["patient_id"] as? String, p.isEmpty || p == "PAT-HBAND-001", !patient.isEmpty {
                 obj["patient_id"] = patient
             }
-            readings.append(obj)
+            // Send-time keys (app_state, screen_locked, watch_battery_pct). The Ktor
+            // flush stamps the same snapshot; this path builds the body itself.
+            if let data = try? JSONSerialization.data(withJSONObject: obj),
+               let text = String(data: data, encoding: .utf8) {
+                readings.append(Self.jsonObject(IngestRuntime.shared.stampUploadContext(json: text)) ?? obj)
+            } else {
+                readings.append(obj)
+            }
         }
         guard !readings.isEmpty, !patient.isEmpty else {
             lock.lock(); inflight = false; lock.unlock()

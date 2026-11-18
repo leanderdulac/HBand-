@@ -62,4 +62,41 @@ class IngestClientTest {
             assertEquals(IngestApiKey.CONFIGURATION_ERROR, error.message)
         }
     }
+
+    @Test
+    fun health_and_batch_send_ios_version_with_the_build() = runTest {
+        val seen = mutableListOf<Pair<String, String?>>()
+        val engine = MockEngine { request ->
+            seen += request.url.encodedPath to request.headers[AppVersionHeader.NAME]
+            respond("{}", HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
+        }
+        val config = IngestConfiguration.resolve("https://service.invalid/", "synthetic-key", "")
+        val client = IngestClient(
+            IngestClient.ingestHttpClient(engine),
+            config.transport(),
+            appVersion = "ios-0.1.0+21",
+        )
+        client.checkHealth()
+        client.batchIngestWearableData("""{"patient_id":"P","readings":[]}""")
+        assertEquals(listOf("/api/health", "/api/v1/wearables/batch-ingest"), seen.map { it.first })
+        assertEquals(listOf("ios-0.1.0+21", "ios-0.1.0+21"), seen.map { it.second })
+    }
+
+    @Test
+    fun ktor_path_uses_the_bundle_header_when_the_explicit_version_has_no_build() = runTest {
+        var sent: String? = null
+        val engine = MockEngine { request ->
+            sent = request.headers[AppVersionHeader.NAME]
+            respond("{}", HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
+        }
+        val config = IngestConfiguration.resolve("https://service.invalid/", "synthetic-key", "")
+        val client = IngestClient(
+            IngestClient.ingestHttpClient(engine),
+            config.transport(),
+            appVersion = "ios-0.1.0",
+            platformVersion = "ios-0.1.0+21",
+        )
+        client.ingestWearableData("""{"patient_id":"P","heart_rate":72}""")
+        assertEquals("ios-0.1.0+21", sent)
+    }
 }

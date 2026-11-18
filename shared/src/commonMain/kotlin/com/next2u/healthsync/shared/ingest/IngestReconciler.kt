@@ -91,7 +91,7 @@ object IngestReconciler {
                 "device_id" to JsonPrimitive(device),
                 "timestamp" to JsonPrimitive(original.getValue("timestamp").jsonObjectOrString()),
                 "client_reading_id" to JsonPrimitive(item.clientReadingId),
-            ),
+            ) + (IngestRuntime.uploadContext?.jsonFields() ?: emptyMap()),
         )
         return PreparedReading(item, patient, compact.encodeToString(JsonObject.serializer(), withIdentity))
     }
