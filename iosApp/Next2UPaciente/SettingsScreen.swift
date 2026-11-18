@@ -16,6 +16,8 @@ struct SettingsScreen: View {
     @State private var showProfile = false
     @State private var showContinuityHelp = false
     @State private var notifyOpenFailed = false
+    @State private var showAiConsent = false
+    @ObservedObject private var aiConsent = AiInsightConsentModel.shared
     #if DEBUG
     @State private var versionTaps = 0
     @State private var showDeveloper = false
@@ -31,6 +33,9 @@ struct SettingsScreen: View {
                         .foregroundStyle(palette.onSurface)
                         .accessibilityAddTraits(.isHeader)
                     profileCard
+                    if AiInsightFeatureFlag.enabled {
+                        aiInsightCard
+                    }
                     continuityCard
                     watchClockCard
                     reconnectCard
@@ -60,6 +65,18 @@ struct SettingsScreen: View {
                     showProfile = false
                     session.notifyProfileChanged()
                 })
+                .environment(\.patientPalette, palette)
+                .environment(\.patientColorScheme, paletteScheme)
+                .preferredColorScheme(paletteScheme)
+            }
+            .sheet(isPresented: $showAiConsent) {
+                AiInsightConsentSheet(
+                    onAuthorize: {
+                        aiConsent.grant()
+                        showAiConsent = false
+                    },
+                    onNotNow: { showAiConsent = false }
+                )
                 .environment(\.patientPalette, palette)
                 .environment(\.patientColorScheme, paletteScheme)
                 .preferredColorScheme(paletteScheme)
@@ -127,6 +144,35 @@ struct SettingsScreen: View {
         .background(palette.surface)
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .accessibilityIdentifier("user_profile_settings_card")
+    }
+
+    /// Grant opens the same disclosure as Início. Withdraw is immediate and stops Gemini.
+    private var aiInsightCard: some View {
+        Toggle(isOn: Binding(
+            get: { aiConsent.snapshot.consented },
+            set: { enabled in
+                if enabled { showAiConsent = true }
+                else { aiConsent.withdraw() }
+            }
+        )) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(AiInsightConsentCopy.title)
+                    .font(.system(size: 17, weight: .bold))
+                    .foregroundStyle(palette.onSurface)
+                Text(aiConsent.snapshot.consented
+                     ? AiInsightConsentCopy.settingsOnHint
+                     : AiInsightConsentCopy.settingsOffHint)
+                    .font(.system(size: 15))
+                    .foregroundStyle(palette.onSurfaceVariant)
+                    .accessibilityIdentifier("ai_insight_settings_hint")
+            }
+        }
+        .tint(palette.primary)
+        .padding(20)
+        .background(palette.surface)
+        .overlay(RoundedRectangle(cornerRadius: 28, style: .continuous).stroke(palette.outlineVariant, lineWidth: 1))
+        .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+        .accessibilityIdentifier("ai_insight_settings_switch")
     }
 
     /// Honest iOS continuity — written for the patient, without Android product names.
