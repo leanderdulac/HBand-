@@ -10,6 +10,11 @@
 /.idea/assetWizardSettings.xml
 .DS_Store
 /build
+/shared/build
+/iosApp/build
+iosApp/**/xcuserdata/
+iosApp/**/DerivedData/
+iosApp/Vendor/shared.framework/
 /captures
 .externalNativeBuild
 .cxx
@@ -21,3 +26,6 @@ debug.keystore
 *.jks
 *.keystore
 keystore.properties
+
+# iOS local secrets
+iosApp/Config/Secrets.local.xcconfig
