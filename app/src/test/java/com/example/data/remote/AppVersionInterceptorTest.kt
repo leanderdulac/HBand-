@@ -12,20 +12,20 @@ import org.junit.Test
 
 class AppVersionInterceptorTest {
     @Test fun header_is_android_version_name_plus_version_code() {
-        assertEquals("android-1.8.2+24", AppVersionInterceptor.header("1.8.2", 24))
-        assertEquals("android-1.8.2+24", AppVersionInterceptor.header(" 1.8.2\n", 24))
+        assertEquals("android-1.8.3+25", AppVersionInterceptor.header("1.8.3", 25))
+        assertEquals("android-1.8.3+25", AppVersionInterceptor.header(" 1.8.3\n", 25))
         assertEquals("android-0+1", AppVersionInterceptor.header(" \n\t ", 1))
         assertEquals(
             "android-${BuildConfig.VERSION_NAME}+${BuildConfig.VERSION_CODE}",
             AppVersionInterceptor.header(BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE),
         )
-        assertEquals("android-1.8.2+24", AppVersionInterceptor.header(BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE))
+        assertEquals("android-1.8.3+25", AppVersionInterceptor.header(BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE))
     }
 
     @Test fun interceptor_sets_the_header_and_leaves_the_api_key() {
         var sent: Request? = null
         val client = OkHttpClient.Builder()
-            .addInterceptor(AppVersionInterceptor("android-1.8.2+24"))
+            .addInterceptor(AppVersionInterceptor("android-1.8.3+25"))
             .addInterceptor { chain ->
                 sent = chain.request()
                 Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1)
@@ -39,7 +39,7 @@ class AppVersionInterceptorTest {
                     .header("X-App-Version", "stale")
                     .build(),
             ).execute().close()
-            assertEquals("android-1.8.2+24", sent!!.header("X-App-Version"))
+            assertEquals("android-1.8.3+25", sent!!.header("X-App-Version"))
             assertEquals("synthetic-key", sent!!.header("X-API-Key"))
             assertFalse(sent!!.header("X-App-Version")!!.contains(" "))
         } finally {

@@ -8,7 +8,7 @@ import okhttp3.Response
  * Marks every HealthTech Core request with the app build that sent it.
  *
  * Wire format: `X-App-Version: android-<versionName>+<versionCode>`
- * (for example `android-1.8.2+24`). The value is a header, not a JSON field,
+ * (for example `android-1.8.3+25`). The value is a header, not a JSON field,
  * so it does not change the ingest body schema. Health, single ingest and
  * batch ingest all go through [RetrofitClient.createClient].
  */

@@ -83,7 +83,7 @@ class IngestConfigurationTest {
             assertEquals(302, it.code)
         }
         assertEquals(listOf("synthetic-captured"), sent!!.headers.values("X-API-Key"))
-        assertEquals(listOf("android-1.8.2+24"), sent!!.headers.values("X-App-Version"))
+        assertEquals(listOf("android-1.8.3+25"), sent!!.headers.values("X-App-Version"))
         assertTrue(client.interceptors.any { it is AppVersionInterceptor })
         assertTrue(client.interceptors.none { it is okhttp3.logging.HttpLoggingInterceptor })
     }
