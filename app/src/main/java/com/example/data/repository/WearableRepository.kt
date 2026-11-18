@@ -1,6 +1,7 @@
 package com.example.data.repository
 
 import com.example.data.hband.VeepooHistoryMapper
+import com.example.data.ingest.HistoryHourlyIngest
 import com.example.data.ingest.IngestReconciler
 import com.example.data.ingest.IngestItemOutcome
 import com.example.data.ingest.PreparedReading
@@ -72,10 +73,16 @@ class WearableRepository(
     private val apiService: HealthTechApiService,
     private val localWriteTransaction: LocalWriteTransaction,
     private val advancedMeasurementDao: AdvancedMeasurementDao? = null,
-    private val maxBatchItems: Int = IngestReconciler.BATCH_MAX_ITEMS,
+    private val maxBatchItems: Int = IngestReconciler.DEFAULT_FLUSH_ITEMS,
     private val ingestTransportProvider: () -> com.example.data.remote.IngestTransport = {
         com.example.data.remote.IngestTransport(service = apiService)
     },
+    private val backoffGate: com.example.data.ingest.IngestBackoffGate =
+        com.example.data.ingest.IngestBackoffGate.Disabled,
+    /** Current "Nome da pulseira" sent as `device_label` (see DeviceLabel.resolve); null sends none. */
+    private val deviceLabelProvider: suspend () -> String? = { null },
+    /** Current patient ID from Meu perfil; replaces the default ID on queued readings. */
+    private val patientIdProvider: suspend () -> String? = { null },
 ) {
     val allQueueItems: Flow<List<IngestQueueEntity>> = queueDao.getAllItems()
     val allSensorMetrics: Flow<List<HBandSensorMetricEntity>> = sensorMetricDao.getAllMetrics()
@@ -97,7 +104,11 @@ class WearableRepository(
     private val _lastSyncResult = MutableStateFlow<String?>(null)
     val lastSyncResult: StateFlow<String?> = _lastSyncResult.asStateFlow()
 
-    /** Counters observed from readSportStep stay local; no HTTP, queue flush or copied vitals. */
+    /**
+     * Daily sport counters for local charts. Live ingest of those steps happens from
+     * the BLE snapshot emit after readSportStep when current HR is ingestible — this
+     * method does not fabricate HR to satisfy the Core contract.
+     */
     suspend fun persistSportReading(deviceId: String, reading: com.example.data.hband.VeepooSportReading): Long =
         withContext(Dispatchers.IO) {
             require(deviceId.isNotBlank()) { "Sport reading requires its observed device" }
@@ -201,15 +212,10 @@ class WearableRepository(
                 awakeMinutes = telemetry.sleepSummary.awakeMinutes,
             )
         }
-        val hourly = samples.indices
+        val hourlyGroups = samples.indices
             .filter { IngestPayloadMapper.isIngestible(samples[it]) }
-            .groupBy { index ->
-                val telemetry = samples[index]
-                val bucket = VeepooHistoryMapper.parseIsoToMillis(telemetry.timestamp) / 3_600_000L
-                telemetry.deviceId to bucket
-            }
-            .values
-            .mapNotNull { group -> group.maxByOrNull { samples[it].heartRate } }
+            .groupBy { HistoryHourlyIngest.hourKey(samples[it]) }
+        val allByHour = samples.indices.groupBy { HistoryHourlyIngest.hourKey(samples[it]) }
 
         var insertedCount = 0
         localWriteTransaction.run {
@@ -230,15 +236,33 @@ class WearableRepository(
             val admitted = fresh.toHashSet()
             // Keep the existing per-hour selection over the complete pull. An
             // already stored winner must not acquire another queue ID/receipt.
-            for (index in hourly) {
-                if (entities[index] !in admitted) continue
-                val telemetry = samples[index]
-                queueDao.insertItem(
-                    IngestQueueEntity(
-                        payloadJson = IngestPayloadMapper.telemetryToJson(telemetry, patientId),
-                        status = QueueStatus.PENDING.name,
+            // Origin BP/steps in the same hour still overlay the queued payload.
+            for ((key, ingestibleGroup) in hourlyGroups) {
+                val winnerIndex = ingestibleGroup.maxByOrNull { samples[it].heartRate } ?: continue
+                val hourSamples = allByHour[key]?.map { samples[it] } ?: listOf(samples[winnerIndex])
+                if (entities[winnerIndex] in admitted) {
+                    val telemetry = HistoryHourlyIngest.mergeHourly(samples[winnerIndex], hourSamples)
+                    queueDao.insertItem(
+                        IngestQueueEntity(
+                            payloadJson = IngestPayloadMapper.telemetryToJson(telemetry, patientId),
+                            status = QueueStatus.PENDING.name,
+                        )
                     )
-                )
+                    continue
+                }
+                val candidateIndex = ingestibleGroup
+                    .filter { entities[it] in admitted }
+                    .maxByOrNull { samples[it].heartRate }
+                    ?: continue
+                val merged = HistoryHourlyIngest.mergeHourly(samples[candidateIndex], hourSamples)
+                if (HistoryHourlyIngest.bringsMissingBpOrSteps(samples[winnerIndex], merged)) {
+                    queueDao.insertItem(
+                        IngestQueueEntity(
+                            payloadJson = IngestPayloadMapper.telemetryToJson(merged, patientId),
+                            status = QueueStatus.PENDING.name,
+                        )
+                    )
+                }
             }
         }
         try {
@@ -387,6 +411,16 @@ class WearableRepository(
                 _lastSyncResult.value = result.patientMessage()
                 return@withContext result.copy(message = result.patientMessage())
             }
+            // Automatic sends honor the shared backoff window (503/429/Retry-After).
+            // Explicit patient retries still go out right away.
+            val waitMs = backoffGate.waitRemainingMs(System.currentTimeMillis())
+            if (waitMs > 0 && !retryFailed) {
+                val result = QueueProcessResult(
+                    hadTransientFailure = true,
+                    message = "O serviço pediu para aguardar. Nova tentativa automática em ${'$'}{(waitMs + 999) / 1000} s.",
+                )
+                return@withContext result
+            }
             // Capture before changing any stored record; use this service for every chunk.
             val transport = ingestTransportProvider()
             if (transport.configurationError != null) {
@@ -423,8 +457,14 @@ class WearableRepository(
             }
 
             val prepared = mutableListOf<PreparedReading>()
+            val deviceLabel = try { deviceLabelProvider() } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) { null }
+            val currentPatientId = try { patientIdProvider() } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) { null }
             for (item in pendingList) {
-                val reading = runCatching { IngestReconciler.prepare(item) }.getOrNull()
+                val reading = runCatching { IngestReconciler.prepare(item, deviceLabel, currentPatientId) }.getOrNull()
                 val localError = when {
                     reading == null -> IngestReconciler.INVALID_LOCAL
                     !IngestPayloadMapper.isIngestibleJson(reading.json) -> IngestPayloadMapper.MISSING_HR_ERROR
@@ -448,6 +488,7 @@ class WearableRepository(
             }
             val mediaType = "application/json; charset=utf-8".toMediaTypeOrNull()
             var consecutiveNetworkErrors = 0
+            var retryAfterMs: Long? = null
             for (chunk in IngestReconciler.chunks(prepared, maxBatchItems)) {
                 if (consecutiveNetworkErrors >= 2 || authError != null) break
                 var responseCode: Int? = null
@@ -462,6 +503,9 @@ class WearableRepository(
                         IngestReconciler.flushIdempotencyKey(chunk),
                     )
                     responseCode = response.code()
+                    com.example.data.ingest.IngestBackoff.parseRetryAfter(
+                        response.headers()["Retry-After"], System.currentTimeMillis()
+                    )?.let { retryAfterMs = maxOf(retryAfterMs ?: 0L, it) }
                     response.errorBody()?.close()
                     IngestReconciler.batch(chunk, response.code(), response.body()?.use { it.string() })
                 } catch (cancelled: CancellationException) {
@@ -471,6 +515,8 @@ class WearableRepository(
                 }
                 if (decisions.any { it.outcome == IngestItemOutcome.TRANSIENT }) {
                     consecutiveNetworkErrors++
+                    // A 503/429 is the server asking for room: stop this flush now.
+                    if (responseCode == 503 || responseCode == 429) consecutiveNetworkErrors = 2
                 } else {
                     consecutiveNetworkErrors = 0
                 }
@@ -499,6 +545,11 @@ class WearableRepository(
                     if (transient) hadTransientFailure = true
                     if (denied) authError = decision.message
                 }
+            }
+            if (hadTransientFailure) {
+                backoffGate.recordTransientFailure(System.currentTimeMillis(), retryAfterMs)
+            } else if (syncedCount > 0) {
+                backoffGate.recordSuccess()
             }
             val result = QueueProcessResult(
                 syncedCount = syncedCount,

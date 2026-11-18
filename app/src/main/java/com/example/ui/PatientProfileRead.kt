@@ -14,8 +14,15 @@ internal class PatientProfileRead(scope: CoroutineScope, source: Flow<UserProfil
     fun retry() { retries.value += 1 }
 
     fun canSave(profile: UserProfileEntity): Boolean {
-        val confirmed = state.value.valueOrNull() ?: return false
-        return confirmed.id == profile.id && confirmed.patientId == profile.patientId
+        val read = state.value as? LocalReadState.Ready ?: return false
+        // Confirmed empty store: allow creating the single CURRENT_USER row.
+        // The only allowed ID change is the one-time default -> generated assignment.
+        val confirmed = read.value ?: return profile.id == UserProfileEntity().id &&
+            (profile.patientId == com.example.data.ingest.IngestPayloadMapper.DEFAULT_PATIENT_ID ||
+                com.example.data.ingest.PatientIdentity.isGenerated(profile.patientId))
+        return confirmed.id == profile.id && (confirmed.patientId == profile.patientId ||
+            (com.example.data.ingest.PatientIdentity.isDefault(confirmed.patientId) &&
+                com.example.data.ingest.PatientIdentity.isGenerated(profile.patientId)))
     }
 
     suspend fun firstConfirmed(): UserProfileEntity? =

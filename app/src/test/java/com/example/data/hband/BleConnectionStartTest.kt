@@ -41,7 +41,7 @@ class BleConnectionStartTest {
     private val device = HBandDevice(
         deviceId = "00:11:22:33:44:55",
         macAddress = "00:11:22:33:44:55",
-        name = "Galaxy Watch de teste",
+        name = "Pulseira GATT de teste",
         isConnected = false,
     )
 
@@ -82,6 +82,7 @@ class BleConnectionStartTest {
         val manager = restoreSavedWatch(device.name)
         assertEquals(device.macAddress, manager.connectedDevice.value?.macAddress)
         assertDisconnected(manager)
+        idleProcessStartGrace()
         assertNotNull(shadowOf(lastGatt()).gattCallback)
         manager.isAutoReconnectEnabled = false
         manager.disconnectDevice()
@@ -90,9 +91,10 @@ class BleConnectionStartTest {
     @Test
     @Config(shadows = [VeepooConnectBoundary::class])
     fun cold_start_with_saved_veepoo_watch_reaches_connection_setup_without_lazy_initialization_failure() {
-        VeepooConnectBoundary.requestedAddress = null
+        VeepooConnectBoundary.reset()
         val manager = restoreSavedWatch("VE30 de teste")
         assertEquals(device.macAddress, manager.connectedDevice.value?.macAddress)
+        idleProcessStartGrace()
         assertEquals(device.macAddress, VeepooConnectBoundary.requestedAddress)
         assertDisconnected(manager)
         assertFalse(org.robolectric.shadows.ShadowLog.getLogsForTag("HBandBleManager")
@@ -101,14 +103,41 @@ class BleConnectionStartTest {
         manager.disconnectDevice()
     }
 
+    @Test
+    @Config(shadows = [VeepooConnectBoundary::class])
+    fun hung_veepoo_connect_is_released_by_watchdog_and_retries() {
+        VeepooConnectBoundary.reset()
+        val manager = restoreSavedWatch("VE30 de teste")
+        idleProcessStartGrace()
+        assertEquals(1, VeepooConnectBoundary.connectCount)
+        manager.reconnectLastDevice()
+        assertEquals(1, VeepooConnectBoundary.connectCount)
+        shadowOf(Looper.getMainLooper()).idleFor(
+            Duration.ofMillis(VeepooReconnectPolicy.CONNECT_ATTEMPT_TIMEOUT_MS + 50),
+        )
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(3))
+        assertTrue(VeepooConnectBoundary.connectCount >= 2)
+        assertEquals(BleSessionPhase.RECONNECTING, manager.sessionPhase.value)
+        manager.isAutoReconnectEnabled = false
+        manager.disconnectDevice()
+    }
+
     /** Only the radio/Android-native SDK boundary is replaced; manager setup runs normally. */
     @Implements(VPOperateManager::class)
     class VeepooConnectBoundary {
-        companion object { var requestedAddress: String? = null }
+        companion object {
+            var requestedAddress: String? = null
+            var connectCount = 0
+            fun reset() {
+                requestedAddress = null
+                connectCount = 0
+            }
+        }
 
         @Implementation
         fun connectDevice(address: String, name: String, connect: IConnectResponse, notify: INotifyResponse) {
             requestedAddress = address
+            connectCount++
         }
     }
 
@@ -126,10 +155,29 @@ class BleConnectionStartTest {
         shadowOf(Looper.getMainLooper()).idle()
     }
 
+    private fun idleProcessStartGrace() {
+        shadowOf(Looper.getMainLooper()).idleFor(
+            Duration.ofMillis(VeepooReconnectPolicy.PROCESS_START_GRACE_MS + 50),
+        )
+    }
+
     private fun assertDisconnected(manager: HBandBleManager) {
         assertFalse(manager.isHardwareConnected.value)
         assertFalse(manager.connectedDevice.value?.isConnected == true)
         assertNull(manager.latestTelemetry.value)
+    }
+
+    @Test fun galaxy_watch_8_is_rejected_without_veepoo_writes_or_gatt() {
+        val manager = readyManager()
+        val watch = device.copy(name = "Galaxy Watch8")
+        assertFalse(manager.connectDevice(watch))
+        assertEquals("Galaxy Watch8", manager.incompatibleWatch.value?.name)
+        assertTrue(shadowOf(remote()).bluetoothGatts.isEmpty())
+        assertFalse(manager.hasPersistedSession())
+        manager.forgetDevice()
+        assertNull(manager.incompatibleWatch.value)
+        assertNull(app.getSharedPreferences("hband_settings", Context.MODE_PRIVATE)
+            .getString(HBandBleManager.PREF_LAST_MAC, null))
     }
 
     @Test fun bluetooth_off_cannot_create_a_connected_placeholder() {

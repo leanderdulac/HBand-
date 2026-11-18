@@ -45,6 +45,8 @@ fun PatientWatchScreen(
     onDisconnectDevice: () -> Unit,
     scanFailure: BleScanFailure? = null,
     onStopScan: (() -> Unit)? = null,
+    incompatibleDevice: HBandDevice? = null,
+    onForgetIncompatible: () -> Unit = {},
 ) {
     val context = LocalContext.current
     var permissionMessage by rememberSaveable { mutableStateOf<String?>(null) }
@@ -116,6 +118,8 @@ fun PatientWatchScreen(
         onConnectDevice = { device -> withPermissions(connectPermissions) { onConnectDevice(device) } },
         onConnectByMac = { mac -> withPermissions(connectPermissions) { onConnectByMac(mac) } },
         onDisconnectDevice = { withPermissions(connectPermissions, onDisconnectDevice) },
+        incompatibleDevice = incompatibleDevice,
+        onForgetIncompatible = onForgetIncompatible,
         onOpenPermissions = {
             try {
                 context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, "package:${context.packageName}".toUri()))
@@ -139,6 +143,8 @@ internal fun PatientWatchContent(
     onOpenPermissions: () -> Unit,
     scanFailure: BleScanFailure? = null,
     onStopScan: (() -> Unit)? = null,
+    incompatibleDevice: HBandDevice? = null,
+    onForgetIncompatible: () -> Unit = {},
 ) {
     var showSupport by rememberSaveable { mutableStateOf(false) }
     var address by rememberSaveable { mutableStateOf("") }
@@ -151,6 +157,8 @@ internal fun PatientWatchContent(
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Text("Meu relógio", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.semantics { heading() })
+        CompetingWatchAppBanner()
+        IncompatibleWatchCard(device = incompatibleDevice, onForget = onForgetIncompatible)
         PatientSummaryLayout(first = {
             Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
                 Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -212,8 +220,8 @@ internal fun PatientWatchContent(
                 Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
                     Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(device.name.ifBlank { "Relógio sem nome" }, style = MaterialTheme.typography.titleLarge)
-                        // Keep the actual identifier available to distinguish two watches with the same name.
-                        Text("Identificação: ${device.macAddress}", style = MaterialTheme.typography.bodyMedium)
+                        // Identificador técnico (MAC) só em builds de desenvolvimento.
+                        if (com.example.BuildConfig.DEBUG) Text("Identificação: ${device.macAddress}", style = MaterialTheme.typography.bodyMedium)
                         if (isCurrent) Text("Conectado", style = MaterialTheme.typography.bodyLarge)
                         else Button(
                             onClick = { onConnectDevice(device) },
@@ -228,7 +236,13 @@ internal fun PatientWatchContent(
             modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag("watch_support_button"),
         ) { Text(if (showSupport) "Fechar ajuda de conexão" else "Ajuda para conectar") }
         if (showSupport) {
-            Text("Confira se o relógio está carregado e perto deste aparelho. Se houver mais de um, confirme a identificação antes de conectar.", style = MaterialTheme.typography.bodyLarge)
+            Text(
+                if (com.example.BuildConfig.DEBUG) "Confira se o relógio está carregado e perto deste aparelho. Se houver mais de um, confirme a identificação antes de conectar."
+                else "Confira se o relógio está carregado, no pulso e perto deste aparelho, e toque em Buscar meu relógio.",
+                style = MaterialTheme.typography.bodyLarge,
+            )
+            // Conexão por endereço MAC: ferramenta de suporte, só em builds de desenvolvimento.
+            if (com.example.BuildConfig.DEBUG) {
             Text("Conexão por código", style = MaterialTheme.typography.titleMedium)
             Text("Use esta opção se o suporte informou o endereço do seu relógio.", style = MaterialTheme.typography.bodyLarge)
             OutlinedTextField(
@@ -259,6 +273,7 @@ internal fun PatientWatchContent(
                 enabled = isValidWatchAddress(address),
                 modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag("connect_mac_button"),
             ) { Text("Conectar com este código") }
+            }
         }
         Spacer(Modifier.height(16.dp))
     }

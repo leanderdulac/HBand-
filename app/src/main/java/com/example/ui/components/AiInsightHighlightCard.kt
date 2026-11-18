@@ -43,7 +43,9 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import com.example.ui.theme.MyApplicationTheme
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -72,6 +74,8 @@ internal fun AiInsightHighlightCard(
     modifier: Modifier = Modifier,
     generatedAtMillis: Long? = null,
     failed: Boolean = false,
+    consented: Boolean = true,
+    onRequestConsent: () -> Unit = {},
 ) {
     val colors = MaterialTheme.colorScheme
     val background = Brush.verticalGradient(
@@ -109,12 +113,25 @@ internal fun AiInsightHighlightCard(
                         modifier = Modifier.semantics { heading() },
                     )
                     Text(
-                        insightGeneratedLabel(generatedAtMillis) ?: "Últimos 7 dias",
+                        if (consented) insightGeneratedLabel(generatedAtMillis) ?: "Últimos 7 dias" else "Opcional",
                         style = MaterialTheme.typography.bodyMedium,
                         color = colors.onSurfaceVariant,
                         modifier = Modifier.testTag("ai_insight_generated_at"),
                     )
                 }
+            }
+            if (!consented) {
+                Text(
+                    AiInsightConsentCopy.DISABLED_BODY,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = colors.onPrimaryContainer,
+                    modifier = Modifier.testTag("ai_insight_consent_needed"),
+                )
+                Button(
+                    onClick = onRequestConsent,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag("ai_insight_enable_button"),
+                ) { Text(AiInsightConsentCopy.ENABLE_BUTTON) }
+                return@Column
             }
             when {
                 isLoading -> Column(
@@ -159,6 +176,38 @@ internal fun AiInsightHighlightCard(
                 Spacer(Modifier.width(8.dp))
                 Text("Atualizar resumo")
             }
+        }
+    }
+}
+
+@Preview(showBackground = true, name = "Resumo com IA — sem consentimento")
+@Composable
+private fun AiInsightHighlightCardDisabledPreview() {
+    MyApplicationTheme {
+        Column(Modifier.padding(16.dp)) {
+            AiInsightHighlightCard(
+                insightText = "",
+                isLoading = false,
+                onRefreshInsight = {},
+                consented = false,
+                onRequestConsent = {},
+            )
+        }
+    }
+}
+
+@Preview(showBackground = true, name = "Resumo com IA — autorizado")
+@Composable
+private fun AiInsightHighlightCardEnabledPreview() {
+    MyApplicationTheme {
+        Column(Modifier.padding(16.dp)) {
+            AiInsightHighlightCard(
+                insightText = "Nos últimos 7 dias, sua frequência cardíaca média foi de 72 BPM, dentro da faixa esperada.",
+                isLoading = false,
+                onRefreshInsight = {},
+                generatedAtMillis = 1_790_553_600_000L,
+                consented = true,
+            )
         }
     }
 }

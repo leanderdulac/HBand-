@@ -50,13 +50,16 @@ class HBandBleService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // startForegroundService() requires startForeground() even when we stop immediately.
+        ensureForeground()
         if (intent?.action == ACTION_STOP) {
             (application as? HBandHealthSyncApp)?.requestBleSessionStop()
+            HBandReconnectWatchdog.cancel(this)
             stopSelfSafely()
             return START_NOT_STICKY
         }
         if (bleManager() == null) { stopSelfSafely(); return START_NOT_STICKY }
-        ensureForeground()
+        HBandReconnectWatchdog.schedule(this)
         when (intent?.action) {
             ACTION_RECONNECT -> bleManager()?.reconnectLastDevice()
             else -> {
@@ -80,24 +83,21 @@ class HBandBleService : Service() {
     private fun observeBleState() {
         val manager = bleManager() ?: return
         observeJob?.cancel()
+        var wasConnected = false
         observeJob = serviceScope.launch {
-            combine(manager.connectedDevice, manager.isHardwareConnected) { device, hardware ->
-                device to hardware
-            }.collect { (device, hardware) ->
-                val connected = device?.isConnected == true && hardware
-                val text = when {
-                    connected -> getString(
-                        R.string.ble_session_connected,
-                        device?.name ?: getString(R.string.ble_session_device_fallback)
-                    )
-                    manager.isAutoReconnectEnabled && !device?.macAddress.isNullOrBlank() ->
-                        getString(
-                            R.string.ble_session_reconnecting,
-                            device?.name ?: getString(R.string.ble_session_device_fallback)
-                        )
-                    else -> getString(R.string.ble_session_disconnected)
+            combine(manager.connectedDevice, manager.isHardwareConnected, manager.sessionPhase) { device, hardware, phase ->
+                Triple(device, hardware, phase)
+            }.collect { (device, hardware, phase) ->
+                val connected = phase == BleSessionPhase.CONNECTED ||
+                    (device?.isConnected == true && hardware)
+                if (connected && !wasConnected) {
+                    // Link (re)established: push anything queued while the watch was away.
+                    (application as? HBandHealthSyncApp)?.requestImmediateUpload()
                 }
-                val notification = buildNotification(text, connected)
+                wasConnected = connected
+                val name = device?.name ?: getString(R.string.ble_session_device_fallback)
+                val text = textFor(phase, name)
+                val notification = buildNotification(text, connected, phase)
                 val notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
                 notificationManager.notify(NOTIFICATION_ID, notification)
 
@@ -123,14 +123,19 @@ class HBandBleService : Service() {
     }
 
     private fun startInForeground(notification: Notification) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(
-                NOTIFICATION_ID,
-                notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
-            )
-        } else {
-            startForeground(NOTIFICATION_ID, notification)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(
+                    NOTIFICATION_ID,
+                    notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+                )
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+        } catch (error: Exception) {
+            android.util.Log.e("HBandBleService", "startForeground failed", error)
+            stopSelf()
         }
     }
 
@@ -149,7 +154,27 @@ class HBandBleService : Service() {
         }
     }
 
-    private fun buildNotification(content: String, connected: Boolean): Notification {
+    private fun titleFor(phase: BleSessionPhase, connected: Boolean): String = when {
+        connected || phase == BleSessionPhase.CONNECTED -> getString(R.string.app_name)
+        phase == BleSessionPhase.RECONNECTING -> getString(R.string.ble_session_reconnecting_title)
+        phase == BleSessionPhase.NOT_FOUND -> getString(R.string.ble_session_not_found)
+        phase == BleSessionPhase.DISCONNECTED -> getString(R.string.ble_session_disconnected)
+        else -> getString(R.string.ble_session_connecting)
+    }
+
+    private fun textFor(phase: BleSessionPhase, name: String): String = when (phase) {
+        BleSessionPhase.CONNECTED -> getString(R.string.ble_session_connected, name)
+        BleSessionPhase.RECONNECTING -> getString(R.string.ble_session_reconnecting, name)
+        BleSessionPhase.NOT_FOUND -> getString(R.string.ble_session_not_found_text)
+        BleSessionPhase.DISCONNECTED -> getString(R.string.ble_session_disconnected)
+        BleSessionPhase.CONNECTING -> getString(R.string.ble_session_connecting)
+    }
+
+    private fun buildNotification(
+        content: String,
+        connected: Boolean,
+        phase: BleSessionPhase = if (connected) BleSessionPhase.CONNECTED else BleSessionPhase.CONNECTING,
+    ): Notification {
         val launchIntent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
@@ -168,10 +193,7 @@ class HBandBleService : Service() {
         )
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.stat_sys_data_bluetooth)
-            .setContentTitle(
-                if (connected) getString(R.string.app_name)
-                else getString(R.string.ble_session_connecting)
-            )
+            .setContentTitle(titleFor(phase, connected))
             .setContentText(content)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
@@ -196,10 +218,14 @@ class HBandBleService : Service() {
         fun start(context: Context) {
             if ((context.applicationContext as? HBandHealthSyncApp)?.readyBleManagerOrNull() == null) return
             val intent = Intent(context, HBandBleService::class.java)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
-            } else {
-                context.startService(intent)
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(intent)
+                } else {
+                    context.startService(intent)
+                }
+            } catch (error: Exception) {
+                android.util.Log.e("HBandBleService", "Unable to start BLE foreground service", error)
             }
         }
 
@@ -209,6 +235,17 @@ class HBandBleService : Service() {
             val manager = app.readyBleManagerOrNull() ?: return
             if (manager.hasPersistedSession() && manager.isAutoReconnectEnabled) {
                 start(context)
+            }
+        }
+
+        fun reconnect(context: Context) {
+            if ((context.applicationContext as? HBandHealthSyncApp)?.readyBleManagerOrNull() == null) return
+            val intent = Intent(context, HBandBleService::class.java).apply { action = ACTION_RECONNECT }
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(intent)
+                else context.startService(intent)
+            } catch (error: Exception) {
+                android.util.Log.e("HBandBleService", "Unable to request BLE reconnect", error)
             }
         }
 

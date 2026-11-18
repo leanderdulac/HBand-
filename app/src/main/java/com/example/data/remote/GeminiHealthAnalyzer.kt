@@ -3,6 +3,7 @@ package com.example.data.remote
 import android.util.Log
 import com.example.BuildConfig
 import com.example.data.local.HBandSensorMetricEntity
+import com.example.data.local.UserProfileEntity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -11,7 +12,6 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
-import java.util.Calendar
 import java.util.concurrent.TimeUnit
 
 object GeminiHealthAnalyzer {
@@ -38,48 +38,20 @@ object GeminiHealthAnalyzer {
         .writeTimeout(30, TimeUnit.SECONDS)
         .build()
 
-    suspend fun generateSevenDayInsight(metrics: List<HBandSensorMetricEntity>): String = withContext(Dispatchers.IO) {
-        val clinicalMetrics = clinicalInsightRecords(metrics)
-        if (clinicalMetrics.isEmpty()) {
-            return@withContext "Os registros disponíveis não contêm medições clínicas para esta análise. Contadores de atividade permanecem no histórico local."
-        }
-
-        val sevenDaysAgoMs = System.currentTimeMillis() - (7 * 24 * 60 * 60 * 1000L)
-        val recentMetrics = clinicalMetrics.filter { it.timestampMillis >= sevenDaysAgoMs }.ifEmpty { clinicalMetrics }
-
-        val recordCount = recentMetrics.size
-        val avgHr = recentMetrics.map { it.heartRate }.average().toInt()
-        val minHr = recentMetrics.minOf { it.heartRate }
-        val maxHr = recentMetrics.maxOf { it.heartRate }
-        val avgHrv = recentMetrics.map { it.hrvScore }.average().toInt()
-        val avgSys = recentMetrics.map { it.systolicBp }.average().toInt()
-        val avgDia = recentMetrics.map { it.diastolicBp }.average().toInt()
-        val totalSteps = recentMetrics.maxOfOrNull { it.steps } ?: 0
-        val totalCalories = recentMetrics.maxOfOrNull { it.calories }?.toInt() ?: 0
-        val maxSleepMins = recentMetrics.maxOfOrNull { it.deepSleepMinutes + it.lightSleepMinutes } ?: 0
-        val activeMins = (recentMetrics.count { it.heartRate >= 75 || it.steps > 0 } * 3.5).toInt()
+    suspend fun generateSevenDayInsight(
+        metrics: List<HBandSensorMetricEntity>,
+        profile: UserProfileEntity? = null,
+        nowMillis: Long = System.currentTimeMillis(),
+    ): String = withContext(Dispatchers.IO) {
+        val promptText = buildInsightPrompt(metrics, profile, nowMillis)
+            ?: return@withContext EMPTY_CLINICAL_INSIGHT
+        val fallback = fallbackFrom(metrics, nowMillis)
 
         // Check rate limit cooldown
         if (System.currentTimeMillis() - lastRateLimitMs < RATE_LIMIT_COOLDOWN_MS) {
             Log.d(TAG, "In rate-limit cooldown. Using rule-based insight.")
-            return@withContext generateFallbackInsight(avgHr, avgHrv, totalSteps, activeMins)
+            return@withContext fallback
         }
-
-        val promptText = """
-            Você é um assistente pessoal de saúde com IA analisando a telemetria dos sensores de um dispositivo vestível de um usuário nos últimos 7 dias a partir do banco de dados local. Responda ESTRITAMENTE em Português do Brasil (PT-BR).
-            
-            Resumo dos Dados dos Últimos 7 Dias:
-            - Amostras Registradas: $recordCount métricas
-            - Frequência Cardíaca Média: $avgHr BPM (Mín: $minHr, Máx: $maxHr)
-            - Pontuação Média de VFC (HRV): $avgHrv / 100
-            - Pressão Arterial Média: $avgSys/$avgDia mmHg
-            - Pico de Passos Diários: $totalSteps passos
-            - Movimento Ativo: ~$activeMins minutos
-            - Calorias Diárias Estimadas: $totalCalories kcal
-            - Sono Registrado: ${maxSleepMins / 60}h ${maxSleepMins % 60}m
-            
-            Forneça um resumo de saúde conciso de 2 a 3 frases e uma recomendação prática. Foque no equilíbrio cardiovascular, na recuperação/VFC e no nível de atividade. Seja encorajador, objetivo e profissional. NÃO use títulos em markdown nem listas com marcadores. Escreva totalmente em português do Brasil.
-        """.trimIndent()
 
         val custom = customApiKey
         val apiKey = if (!custom.isNullOrBlank()) {
@@ -94,7 +66,7 @@ object GeminiHealthAnalyzer {
 
         if (apiKey.isEmpty() || apiKey == "MY_GEMINI_API_KEY" || apiKey == "YOUR_GEMINI_API_KEY") {
             Log.d(TAG, "Gemini API key is unconfigured or default placeholder. Using rule-based daily insight.")
-            return@withContext generateFallbackInsight(avgHr, avgHrv, totalSteps, activeMins)
+            return@withContext fallback
         }
 
         try {
@@ -144,14 +116,6 @@ object GeminiHealthAnalyzer {
             Log.w(TAG, "Gemini API Exception: ${e.localizedMessage}")
         }
 
-        return@withContext generateFallbackInsight(avgHr, avgHrv, totalSteps, activeMins)
-    }
-
-    private fun generateFallbackInsight(avgHr: Int, avgHrv: Int, steps: Int, activeMins: Int): String {
-        val hrvStatus = if (avgHrv >= 65) "excelente recuperação do sistema nervoso autônomo" else "capacidade moderada de recuperação"
-        val hrStatus = if (avgHr in 60..80) "faixa cardiovascular de repouso estável" else "esforço fisiológico elevado"
-        val actStatus = if (steps >= 8000 || activeMins >= 30) "ótimos níveis de atividade física" else "movimento diário constante"
-
-        return "Nos últimos 7 dias, sua frequência cardíaca média foi de $avgHr BPM, refletindo uma $hrStatus, com pontuação de VFC de $avgHrv ($hrvStatus). Você registrou ~$activeMins minutos ativos e $steps passos máximos, mantendo $actStatus nos seus registros de telemetria."
+        return@withContext fallback
     }
 }

@@ -11,7 +11,7 @@ https://github.com/HBandSDK/Android_Ble_SDK/blob/master/LICENSE
 
 | File | Purpose |
 |---|---|
-| `vpprotocol-2.3.80.15.aar` | Core Veepoo protocol SDK (`VPOperateManager`, listeners, data models) |
+| `vpprotocol-2.3.92.15.aar` | Core Veepoo protocol SDK (`VPOperateManager`, listeners, data models) |
 | `vpbluetooth-1.20.aar` | BLE transport layer (`com.inuker.bluetooth.library`) required by vpprotocol |
 | `abpartool-release.aar` | Blood-pressure/algorithm parameter tool required by vpprotocol |
 | `JL_Watch_V1.13.1_11214-release.aar` | Jieli chip support, required internally by `VPOperateManager` |

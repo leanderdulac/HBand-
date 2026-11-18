@@ -30,7 +30,7 @@ class StorageAndroidLabTest {
 
     @Before fun requireIsolatedEmulator() {
         context = InstrumentationRegistry.getInstrumentation().targetContext
-        check(context.packageName == "com.aistudio.hbandhealthtech.pxq97m.storagelab") {
+        check(context.packageName == "br.com.next2u.saude.paciente.storagelab") {
             "Storage tests require the separate storageLab package"
         }
         check(Build.HARDWARE in setOf("ranchu", "goldfish")) { "Synthetic emulator only" }

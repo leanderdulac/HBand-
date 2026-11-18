@@ -11,16 +11,20 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.data.local.StorageStartupState
 import com.example.ui.HomeScreen
 import com.example.ui.MainViewModel
-import com.example.ui.theme.MyApplicationTheme
-import androidx.compose.runtime.getValue
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.example.ui.components.StorageStartupScreen
-import com.example.ui.components.RequestPermissionsWhenStorageReady
 import com.example.ui.components.BleLabFrame
+import com.example.ui.components.RequestPermissionsWhenStorageReady
+import com.example.ui.components.StorageStartupScreen
+import com.example.ui.theme.AppThemeOption
+import com.example.ui.theme.MyApplicationTheme
 
 class MainActivity : ComponentActivity() {
 
@@ -48,13 +52,12 @@ class MainActivity : ComponentActivity() {
                     isError = true,
                 )
             }) { checkAndRequestBlePermissions() }
-            val themeOption by mainViewModel.themeOption.collectAsStateWithLifecycle()
-            MyApplicationTheme(themeOption = themeOption) {
-                Surface(modifier = Modifier.fillMaxSize()) {
-                    BleLabFrame(enabled = BuildConfig.BLE_LAB) {
-                        StorageStartupScreen(state) { HomeScreen(viewModel = mainViewModel) }
-                    }
-                }
+            PatientStartupApp(
+                state = state,
+                openingTheme = remember { AppThemeOption.storedIn(this@MainActivity) },
+                bleLab = BuildConfig.BLE_LAB,
+            ) {
+                ReadyPatientApp(viewModel = mainViewModel)
             }
         }
     }
@@ -96,3 +99,36 @@ class MainActivity : ComponentActivity() {
 
 internal fun allRequestedPermissionsGranted(permissions: Map<String, Boolean>): Boolean =
     permissions.isNotEmpty() && permissions.entries.all { it.value }
+
+/** Operational UI (and therefore MainViewModel) is composed only after storage runtime is READY. */
+@Composable
+internal fun PatientStartupApp(
+    state: StorageStartupState,
+    openingTheme: AppThemeOption,
+    bleLab: Boolean,
+    readyContent: @Composable () -> Unit,
+) {
+    if (state == StorageStartupState.READY) {
+        readyContent()
+        return
+    }
+    MyApplicationTheme(themeOption = openingTheme) {
+        Surface(modifier = Modifier.fillMaxSize()) {
+            BleLabFrame(enabled = bleLab) {
+                StorageStartupScreen(state) {}
+            }
+        }
+    }
+}
+
+@Composable
+private fun ReadyPatientApp(viewModel: MainViewModel) {
+    val themeOption by viewModel.themeOption.collectAsStateWithLifecycle()
+    MyApplicationTheme(themeOption = themeOption) {
+        Surface(modifier = Modifier.fillMaxSize()) {
+            BleLabFrame(enabled = BuildConfig.BLE_LAB) {
+                HomeScreen(viewModel = viewModel)
+            }
+        }
+    }
+}
