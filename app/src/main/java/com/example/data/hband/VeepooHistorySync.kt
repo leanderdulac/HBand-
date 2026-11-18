@@ -10,6 +10,8 @@ import com.veepoo.protocol.listener.data.IAllSetDataListener
 import com.veepoo.protocol.listener.data.IAutoMeasureSettingDataListener
 import com.veepoo.protocol.listener.data.IBatteryDataListener
 import com.veepoo.protocol.listener.data.ICheckWearDataListener
+import com.veepoo.protocol.listener.data.ICustomProtocolStateListener
+import com.veepoo.protocol.listener.data.ICustomSettingDataListener
 import com.veepoo.protocol.listener.data.IHRVOriginDataListener
 import com.veepoo.protocol.listener.data.IOriginData3Listener
 import com.veepoo.protocol.listener.data.IOriginDataListener
@@ -30,6 +32,10 @@ import com.veepoo.protocol.model.datas.Spo2hOriginData
 import com.veepoo.protocol.model.enums.EAllSetType
 import com.veepoo.protocol.model.enums.EAutoMeasureType
 import com.veepoo.protocol.model.enums.ECheckWear
+import com.veepoo.protocol.model.enums.EFunctionStatus
+import com.veepoo.protocol.model.settings.AutoDetectStateSetting
+import com.veepoo.protocol.model.settings.CustomSetting
+import com.veepoo.protocol.model.settings.CustomSettingData
 import com.veepoo.protocol.model.settings.AllSetSetting
 import com.veepoo.protocol.model.settings.CheckWearSetting
 import com.veepoo.protocol.model.settings.ReadOriginSetting
@@ -215,6 +221,7 @@ class VeepooHistorySync(
             val pulse = AutoMeasureData().apply {
                 funType = EAutoMeasureType.PULSE_RATE
                 isSwitchOpen = enabled
+                if (enabled) measureInterval = WatchBatteryPolicy.HR_AUTO_INTERVAL_MIN
             }
             return writeAutoMeasure(pulse)
         }
@@ -236,7 +243,20 @@ class VeepooHistorySync(
                 isIntervalModify = item.isIntervalModify
                 supportStartMinute = item.supportStartMinute
                 supportEndMinute = item.supportEndMinute
-                measureInterval = item.measureInterval
+                measureInterval = if (item.funType == EAutoMeasureType.PULSE_RATE && enabled) {
+                    WatchBatteryPolicy.intervalFor(
+                        WatchBatteryPolicy.AutoSlot(
+                            type = item.funType.name,
+                            open = true,
+                            intervalMin = item.measureInterval,
+                            stepUnit = item.stepUnit,
+                            intervalModify = item.isIntervalModify,
+                        ),
+                        WatchBatteryPolicy.HR_AUTO_INTERVAL_MIN,
+                    )
+                } else {
+                    item.measureInterval
+                }
                 currentStartMinute = item.currentStartMinute
                 currentEndMinute = item.currentEndMinute
             }
@@ -291,6 +311,66 @@ class VeepooHistorySync(
             changed = true
         }
         return if (changed) result.values.toList() else null
+    }
+
+    /**
+     * Fecha no relógio os interruptores contínuos que um app antigo pode ter
+     * deixado abertos. Não mexe em FC/PA automáticas. Retorna true se escreveu.
+     */
+    suspend fun closeContinuousCustomSwitches(data: CustomSettingData?): Boolean {
+        if (data == null || cancelled) return false
+        val setting = CustomSetting(data)
+        var changed = false
+        fun close(field: String, status: EFunctionStatus?, apply: (EFunctionStatus) -> Unit) {
+            if (!WatchBatteryPolicy.customSwitchShouldClose(field, status?.name)) return
+            apply(EFunctionStatus.SUPPORT_CLOSE)
+            changed = true
+        }
+        close("HRV", setting.isOpenAutoHRV, setting::setIsOpenAutoHRV)
+        close("PPG", setting.isOpenPPG, setting::setIsOpenPPG)
+        close("BODY_TEMPERATURE", setting.isOpenAutoTemperatureDetect, setting::setIsOpenAutoTemperatureDetect)
+        close("ECG_ALWAYS", setting.ecgAlwaysOpen, setting::setEcgAlwaysOpen)
+        close("BLOOD_GLUCOSE", setting.isOpenBloodGlucoseDetect, setting::setIsOpenBloodGlucoseDetect)
+        close("STRESS", setting.stressDetect, setting::setStressDetect)
+        close("BLOOD_COMPONENT", setting.isOpenBloodComponentDetect, setting::setIsOpenBloodComponentDetect)
+        if (!changed) return false
+        val wrote = awaitResult(SETTINGS_TIMEOUT_MS) { done, _ ->
+            vpManager.changeCustomSetting(
+                ackLogger(),
+                ICustomSettingDataListener { done(true) },
+                setting,
+            )
+        }
+        return wrote == true
+    }
+
+    /** SpO₂ de 24 h (protocolo S22). Só escreve se a leitura disser que está aberto. */
+    suspend fun ensureAllDaySpo2Off(): Boolean {
+        if (cancelled) return false
+        val state = awaitResult<com.veepoo.protocol.model.datas.AutoDetectStateData>(4_000L) { done, fail ->
+            vpManager.readAutoDetectStateFromS22(
+                ackLogger(),
+                object : ICustomProtocolStateListener {
+                    override fun onS22AutoDetectStateChangeListener(data: com.veepoo.protocol.model.datas.AutoDetectStateData?) {
+                        if (data == null) fail("empty") else done(data)
+                    }
+                },
+            )
+        } ?: return false
+        if (!WatchBatteryPolicy.allDaySpo2ShouldClose(state.spo2h24Hour?.name)) return false
+        val setting = AutoDetectStateSetting().apply { spo2h24Hour = EFunctionStatus.SUPPORT_CLOSE }
+        val wrote = awaitResult<com.veepoo.protocol.model.datas.AutoDetectStateData>(SETTINGS_TIMEOUT_MS) { done, fail ->
+            vpManager.setAutoDetectStateToS22(
+                ackLogger(),
+                object : ICustomProtocolStateListener {
+                    override fun onS22AutoDetectStateChangeListener(data: com.veepoo.protocol.model.datas.AutoDetectStateData?) {
+                        if (data == null) fail("empty") else done(data)
+                    }
+                },
+                setting,
+            )
+        }
+        return wrote != null
     }
 
     suspend fun setSpo2AutoEnabled(enabled: Boolean, existing: AllSetData?): AllSetData? {
