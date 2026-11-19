@@ -48,6 +48,7 @@ object RetrofitClient {
 
     internal fun createClient(key: String): OkHttpClient = OkHttpClient.Builder()
         .addInterceptor(BleLabNetworkInterceptor())
+        .addInterceptor(AppVersionInterceptor())
         .addInterceptor { chain ->
             val request = chain.request().newBuilder().removeHeader("X-API-Key")
             if (key.isNotEmpty()) request.header("X-API-Key", key)

@@ -41,6 +41,7 @@ class HBandHealthSyncApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        com.example.data.ingest.AppVisibility.install(this)
         bleScope.launch {
             var opened: AppDatabase? = null
             try {
@@ -93,6 +94,7 @@ class HBandHealthSyncApp : Application() {
             backoffGate = com.example.data.ingest.IngestBackoffGate.shared(this),
         deviceLabelProvider = { com.example.data.ingest.DeviceLabel.current(this, db.userProfileDao()) },
         patientIdProvider = { db.userProfileDao().getUserProfile()?.patientId },
+        uploadContextProvider = { com.example.data.ingest.UploadContextReader.capture(this) },
             localWriteTransaction = db.localWriteTransaction(),
             advancedMeasurementDao = db.advancedMeasurementDao(),
         )

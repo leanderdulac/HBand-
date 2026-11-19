@@ -139,8 +139,8 @@ private suspend fun shareCsvFile(
 
         val shareIntent = Intent(Intent.ACTION_SEND).apply {
             type = "text/csv"
-            putExtra(Intent.EXTRA_SUBJECT, "next2u SAÚDE — arquivo de registros")
-            putExtra(Intent.EXTRA_TEXT, "Arquivo CSV com os registros salvos no aplicativo next2u SAÚDE.")
+            putExtra(Intent.EXTRA_SUBJECT, "Next2U Paciente — arquivo de registros")
+            putExtra(Intent.EXTRA_TEXT, "Arquivo CSV com os registros salvos no aplicativo Next2U Paciente.")
             putExtra(Intent.EXTRA_STREAM, uri)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }

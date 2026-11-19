@@ -38,6 +38,10 @@ class KeepAliveTelemetryTest {
         GattBoundary.cycleEntered = CompletableDeferred()
         GattBoundary.reads.set(0)
         manager = HBandBleManager(RuntimeEnvironment.getApplication(), scope)
+        HBandBleManager::class.java.getDeclaredField("keepAliveDelayMs").apply {
+            isAccessible = true
+            setLong(manager, 20L)
+        }
         gatt = Shadow.newInstanceOf(BluetoothGatt::class.java)
         setField("currentGatt", gatt)
         setFlow("_connectedDevice", device)

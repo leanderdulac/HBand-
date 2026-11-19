@@ -25,6 +25,11 @@ object WatchBatteryPolicy {
     const val MANUAL_MIN_GAP_MS: Long = 60_000L
     /** RSSI só informativo no caminho GATT genérico (antes: 4 s). */
     const val RSSI_POLL_MS: Long = 5 * 60_000L
+    /**
+     * Leitura de bateria no GATT cru. 5 s mantinha o rádio acordado o dia inteiro
+     * e coincidia com o intervalo em que o firmware manda um pacote de FC ao vivo.
+     */
+    const val GATT_KEEPALIVE_MS: Long = 5 * 60_000L
     /** O ciclo PPG nunca se reagenda sozinho. */
     const val AUTOMATIC_LIVE_LOOP: Boolean = false
     /** Temperatura não fica em detecção contínua; só no teste manual. */
@@ -38,6 +43,41 @@ object WatchBatteryPolicy {
         "BLOOD_OXYGEN", "HRV", "STRESS", "BODY_TEMPERATURE",
         "BLOOD_GLUCOSE", "BLOOD_COMPOSITION", "LORENZ",
     )
+
+    /**
+     * Campos de `CustomSetting` (EFunctionStatus) que um app antigo pode ter
+     * deixado SUPPORT_OPEN. Ficam gravados no relógio. FC e PA automáticas não
+     * entram: o intervalo delas é o protocolo de medição automática (30/60 min).
+     * Fechar PPG também desliga o sono preciso nesse firmware.
+     */
+    val CONTINUOUS_CUSTOM_SWITCHES: Set<String> = setOf(
+        "HRV", "PPG", "BODY_TEMPERATURE", "ECG_ALWAYS",
+        "BLOOD_GLUCOSE", "STRESS", "BLOOD_COMPONENT",
+    )
+
+    const val OPCODE_REALTIME_HR: Byte = 0x04
+    const val OPCODE_REALTIME_PPG: Byte = 0x15.toByte()
+    const val OPCODE_REALTIME_SPO2: Byte = 0x20
+    const val OPCODE_REALTIME_BP: Byte = 0x05
+
+    /** Segundo byte 0x01 liga o teste; 0x00 desliga. Na conexão só sai o desliga. */
+    fun realtimeCommand(opcode: Byte, start: Boolean): ByteArray =
+        byteArrayOf(opcode, if (start) 0x01 else 0x00)
+
+    fun connectStopCommands(): List<ByteArray> = listOf(
+        realtimeCommand(OPCODE_REALTIME_PPG, start = false),
+        realtimeCommand(OPCODE_REALTIME_SPO2, start = false),
+        realtimeCommand(OPCODE_REALTIME_BP, start = false),
+        // FC por último: se o rádio só guardar a última escrita, este é o fluxo de 5 s.
+        realtimeCommand(OPCODE_REALTIME_HR, start = false),
+    )
+
+    fun acceptLiveSample(manualCycleActive: Boolean): Boolean = manualCycleActive
+
+    fun customSwitchShouldClose(field: String, statusName: String?): Boolean =
+        field in CONTINUOUS_CUSTOM_SWITCHES && statusName == "SUPPORT_OPEN"
+
+    fun allDaySpo2ShouldClose(statusName: String?): Boolean = statusName == "SUPPORT_OPEN"
 
     data class AutoSlot(
         val type: String,
@@ -54,10 +94,12 @@ object WatchBatteryPolicy {
      */
     fun desired(slot: AutoSlot, heartRateUserOff: Boolean): AutoSlot? {
         val target = when (slot.type) {
-            "PULSE_RATE" -> if (heartRateUserOff) {
-                slot.copy(open = false)
-            } else {
-                slot.copy(open = true, intervalMin = intervalFor(slot, HR_AUTO_INTERVAL_MIN))
+            "PULSE_RATE" -> when {
+                heartRateUserOff -> slot.copy(open = false)
+                // Intervalo travado e mais curto que 30 min: desliga. Deixar ligado
+                // mantém o sensor no ritmo que um app antigo gravou.
+                !slot.intervalModify && slot.intervalMin < HR_AUTO_INTERVAL_MIN -> slot.copy(open = false)
+                else -> slot.copy(open = true, intervalMin = intervalFor(slot, HR_AUTO_INTERVAL_MIN))
             }
             "BLOOD_PRESSURE" -> if (slot.intervalModify) {
                 slot.copy(open = true, intervalMin = intervalFor(slot, BP_AUTO_INTERVAL_MIN))

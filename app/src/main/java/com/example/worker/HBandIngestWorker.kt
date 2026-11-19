@@ -26,6 +26,7 @@ class HBandIngestWorker(
             backoffGate = com.example.data.ingest.IngestBackoffGate.shared(applicationContext),
         deviceLabelProvider = { com.example.data.ingest.DeviceLabel.current(applicationContext, database.userProfileDao()) },
         patientIdProvider = { database.userProfileDao().getUserProfile()?.patientId },
+        uploadContextProvider = { com.example.data.ingest.UploadContextReader.capture(applicationContext) },
             localWriteTransaction = database.localWriteTransaction(),
         )
 

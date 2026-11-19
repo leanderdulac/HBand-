@@ -64,4 +64,49 @@ class WatchBatteryPolicyTest {
         assertEquals(60_000L, WatchBatteryPolicy.reconnectDelayMs(60_000L, 3))
         assertEquals(300_000L, WatchBatteryPolicy.reconnectDelayMs(60_000L, 8))
     }
+
+    @Test fun lockedShortHeartRateIntervalIsTurnedOff() {
+        val locked = WatchBatteryPolicy.desired(
+            slot("PULSE_RATE", open = true, interval = 5, modify = false),
+            heartRateUserOff = false,
+        )!!
+        assertFalse(locked.open)
+        assertNull(
+            WatchBatteryPolicy.desired(
+                slot("PULSE_RATE", open = false, interval = 5, modify = false),
+                false,
+            ),
+        )
+        assertNull(
+            WatchBatteryPolicy.desired(
+                slot("PULSE_RATE", open = true, interval = 60, modify = false),
+                false,
+            ),
+        )
+    }
+
+    @Test fun connectCommandsStopRealtimeSensors() {
+        val commands = WatchBatteryPolicy.connectStopCommands()
+        assertEquals(4, commands.size)
+        assertTrue(commands.all { it.size >= 2 && it[1] == 0.toByte() })
+        assertFalse(commands.any { it[1] == 1.toByte() })
+        assertTrue(WatchBatteryPolicy.GATT_KEEPALIVE_MS >= 60_000L)
+        assertTrue(WatchBatteryPolicy.GATT_KEEPALIVE_MS != 5_000L)
+    }
+
+    @Test fun liveSampleOnlyDuringManualCycle() {
+        assertFalse(WatchBatteryPolicy.acceptLiveSample(manualCycleActive = false))
+        assertTrue(WatchBatteryPolicy.acceptLiveSample(manualCycleActive = true))
+    }
+
+    @Test fun continuousCustomSwitchesCloseOnlyWhenOpen() {
+        assertTrue(WatchBatteryPolicy.customSwitchShouldClose("PPG", "SUPPORT_OPEN"))
+        assertTrue(WatchBatteryPolicy.customSwitchShouldClose("BODY_TEMPERATURE", "SUPPORT_OPEN"))
+        assertTrue(WatchBatteryPolicy.customSwitchShouldClose("ECG_ALWAYS", "SUPPORT_OPEN"))
+        assertFalse(WatchBatteryPolicy.customSwitchShouldClose("PPG", "SUPPORT_CLOSE"))
+        assertFalse(WatchBatteryPolicy.customSwitchShouldClose("PPG", "UNSUPPORT"))
+        assertFalse(WatchBatteryPolicy.customSwitchShouldClose("AUTO_HEART", "SUPPORT_OPEN"))
+        assertTrue(WatchBatteryPolicy.allDaySpo2ShouldClose("SUPPORT_OPEN"))
+        assertFalse(WatchBatteryPolicy.allDaySpo2ShouldClose("SUPPORT_CLOSE"))
+    }
 }
