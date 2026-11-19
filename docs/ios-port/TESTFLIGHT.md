@@ -30,8 +30,10 @@ Xcode criar o perfil e o certificado iOS Distribution do Team
 iOS Distribution found` sem essa flag). Envie pelo Organizer
 (Distribute App → App Store Connect → Upload) ou Transporter.
 
-Versão: `CFBundleShortVersionString` = `0.1.0`, `CFBundleVersion` = `17`
-(build 17: passos + pressão ao vivo). Incremente o build a cada envio.
+Versão: `CFBundleShortVersionString` = `0.1.0`, `CFBundleVersion` = `22`
+(build 22: consentimento do Resumo com IA). Incremente o build a cada envio.
+Outro PR pode estar usando o build 21 (telemetria); se os dois entrarem juntos,
+renumerar no merge.
 
 ## Assinatura Release
 
@@ -87,10 +89,12 @@ externo / App Store pública:
    (senha padrão 0000). Sem o relógio, Relógio/Início não mostram medições
    ao vivo. Fechar o H Band oficial ao testar. Bluetooth e Atualização em
    Segundo Plano ligados. Não force-quit.
-4. **Chave Gemini:** hoje vai no build (`NEXT2U_GEMINI_API_KEY` /
-   `Secrets.local.xcconfig`). **Mover para o servidor antes da App Store
-   pública.** Placeholder no xcconfig commitado (`YOUR_GEMINI_API_KEY`)
-   cai no fallback por regras, igual ao Android.
+4. **Chave Gemini:** o xcconfig commitado deixa `NEXT2U_GEMINI_API_KEY` vazio
+   (Debug e Release). Um archive público sem `Secrets.local.xcconfig` não
+   embute chave. Piloto/TestFlight colocam a chave real só nesse arquivo
+   gitignored. **Não commitar.** Mover para o servidor antes da App Store
+   pública. Chave vazia ou placeholder cai no resumo por regras locais, e
+   mesmo com chave nada é enviado sem o consentimento do paciente.
 5. Conta interna TestFlight + testers Next2U. Ad Hoc só se alguém não
    puder usar TestFlight (UDID).
 

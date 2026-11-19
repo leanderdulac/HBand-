@@ -14,6 +14,7 @@
 		A10000000000000100000003 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000100000003 /* Theme.swift */; };
 		A10000000000000100000004 /* SigningPlaceholders.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000100000004 /* SigningPlaceholders.swift */; };
 		A10000000000000100000005 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000100000005 /* Assets.xcassets */; };
+		A10000000000000100000028 /* InfoPlist.strings in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000100000028 /* InfoPlist.strings */; };
 		A10000000000000100000006 /* VeepooSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000100000008 /* VeepooSession.swift */; };
 		A10000000000000100000007 /* WatchScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000100000009 /* WatchScreen.swift */; };
 		A10000000000000100000008 /* VeepooBleSDK.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A2000000000000010000000A /* VeepooBleSDK.framework */; };
@@ -32,6 +33,8 @@
 		A10000000000000100000023 /* BleWake.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000100000023 /* BleWake.swift */; };
 		A10000000000000100000024 /* IngestURLSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000100000024 /* IngestURLSession.swift */; };
 		A10000000000000100000025 /* MeasurementCyclePolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000100000025 /* MeasurementCyclePolicy.swift */; };
+		A10000000000000100000026 /* AiInsightConsent.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000100000026 /* AiInsightConsent.swift */; };
+		A10000000000000100000027 /* AiInsightConsentUI.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000100000027 /* AiInsightConsentUI.swift */; };
 		A10000000000000100000021 /* VeepooHistoryIngest.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000100000021 /* VeepooHistoryIngest.swift */; };
 		A10000000000000100000022 /* DeveloperScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000100000022 /* DeveloperScreen.swift */; };
 		A10000000000000100000019 /* SettingsScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000100000019 /* SettingsScreen.swift */; };
@@ -68,6 +71,9 @@
 		A20000000000000100000004 /* SigningPlaceholders.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SigningPlaceholders.swift; sourceTree = "<group>"; };
 		A20000000000000100000005 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A20000000000000100000006 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		A20000000000000100000029 /* pt-BR */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "pt-BR"; path = "pt-BR.lproj/InfoPlist.strings"; sourceTree = "<group>"; };
+		A2000000000000010000002A /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/InfoPlist.strings; sourceTree = "<group>"; };
+		A2000000000000010000002B /* Base */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = Base; path = Base.lproj/InfoPlist.strings; sourceTree = "<group>"; };
 		A20000000000000100000007 /* Next2UPaciente.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Next2UPaciente.xcconfig; sourceTree = "<group>"; };
 		A20000000000000100000008 /* VeepooSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VeepooSession.swift; sourceTree = "<group>"; };
 		A20000000000000100000009 /* WatchScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchScreen.swift; sourceTree = "<group>"; };
@@ -86,6 +92,8 @@
 		A20000000000000100000023 /* BleWake.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BleWake.swift; sourceTree = "<group>"; };
 		A20000000000000100000024 /* IngestURLSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IngestURLSession.swift; sourceTree = "<group>"; };
 		A20000000000000100000025 /* MeasurementCyclePolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeasurementCyclePolicy.swift; sourceTree = "<group>"; };
+		A20000000000000100000026 /* AiInsightConsent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AiInsightConsent.swift; sourceTree = "<group>"; };
+		A20000000000000100000027 /* AiInsightConsentUI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AiInsightConsentUI.swift; sourceTree = "<group>"; };
 		A20000000000000100000021 /* VeepooHistoryIngest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VeepooHistoryIngest.swift; sourceTree = "<group>"; };
 		A20000000000000100000022 /* DeveloperScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeveloperScreen.swift; sourceTree = "<group>"; };
 		A20000000000000100000019 /* SettingsScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsScreen.swift; sourceTree = "<group>"; };
@@ -148,11 +156,14 @@
 				A20000000000000100000023 /* BleWake.swift */,
 				A20000000000000100000024 /* IngestURLSession.swift */,
 				A20000000000000100000025 /* MeasurementCyclePolicy.swift */,
+				A20000000000000100000026 /* AiInsightConsent.swift */,
+				A20000000000000100000027 /* AiInsightConsentUI.swift */,
 				A20000000000000100000021 /* VeepooHistoryIngest.swift */,
 				A20000000000000100000022 /* DeveloperScreen.swift */,
 				A20000000000000100000019 /* SettingsScreen.swift */,
 				A20000000000000100000005 /* Assets.xcassets */,
 				A20000000000000100000006 /* Info.plist */,
+				A20000000000000100000028 /* InfoPlist.strings */,
 				A20000000000000100000020 /* PrivacyInfo.xcprivacy */,
 				C3DDEC20A79A1E7E1675E67D /* N2UBleRestore.m */,
 				5439AC7D5D09965F788A0827 /* PatientIdentity.swift */,
@@ -177,6 +188,19 @@
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
+
+/* Begin PBXVariantGroup section */
+		A20000000000000100000028 /* InfoPlist.strings */ = {
+			isa = PBXVariantGroup;
+			children = (
+				A20000000000000100000029 /* pt-BR */,
+				A2000000000000010000002A /* en */,
+				A2000000000000010000002B /* Base */,
+			);
+			name = InfoPlist.strings;
+			sourceTree = "<group>";
+		};
+/* End PBXVariantGroup section */
 
 /* Begin PBXNativeTarget section */
 		A60000000000000100000001 /* Next2UPaciente */ = {
@@ -238,6 +262,7 @@
 			files = (
 				A10000000000000100000005 /* Assets.xcassets in Resources */,
 				A10000000000000100000020 /* PrivacyInfo.xcprivacy in Resources */,
+				A10000000000000100000028 /* InfoPlist.strings in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -266,6 +291,8 @@
 				A10000000000000100000023 /* BleWake.swift in Sources */,
 				A10000000000000100000024 /* IngestURLSession.swift in Sources */,
 				A10000000000000100000025 /* MeasurementCyclePolicy.swift in Sources */,
+				A10000000000000100000026 /* AiInsightConsent.swift in Sources */,
+				A10000000000000100000027 /* AiInsightConsentUI.swift in Sources */,
 				A10000000000000100000021 /* VeepooHistoryIngest.swift in Sources */,
 				A10000000000000100000022 /* DeveloperScreen.swift in Sources */,
 				A10000000000000100000019 /* SettingsScreen.swift in Sources */,

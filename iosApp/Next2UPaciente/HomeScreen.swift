@@ -3,12 +3,15 @@ import shared
 
 struct HomeScreen: View {
     @Environment(\.patientPalette) private var palette
+    @Environment(\.patientColorScheme) private var paletteScheme
     @ObservedObject var session: VeepooSession
     var onShowHistory: () -> Void
     var onShowProfile: () -> Void
     var onConnectWatch: () -> Void
 
     @StateObject private var insight = GeminiInsightController()
+    @ObservedObject private var aiConsent = AiInsightConsentModel.shared
+    @State private var consentPrompt: AiInsightConsentPrompt?
 
     private var profileName: String {
         _ = session.profileRevision
@@ -23,7 +26,11 @@ struct HomeScreen: View {
                     HomeWelcomeHeader(fullName: profileName, onEditProfile: onShowProfile)
                     watchStatusCard
                     if insight.highlightEnabled {
-                        AiInsightHighlightCard(controller: insight)
+                        AiInsightHighlightCard(
+                            controller: insight,
+                            consented: aiConsent.snapshot.consented,
+                            onRequestConsent: { consentPrompt = .manual }
+                        )
                     }
                     ForEach(homeMetrics) { metric in
                         HomeHealthCard(metric: metric)
@@ -42,11 +49,49 @@ struct HomeScreen: View {
             .background(palette.background.ignoresSafeArea())
             .navigationBarTitleDisplayMode(.inline)
             .patientChrome()
-            .onAppear { insight.appear() }
+            .onAppear {
+                insight.appear()
+                maybeShowConsentPrompt()
+            }
             .onChange(of: session.profileRevision) { _ in
                 insight.profileDidChange()
             }
+            .onChange(of: session.hardwareReady) { _ in
+                maybeShowConsentPrompt()
+            }
+            .onChange(of: session.watchAlias) { _ in
+                maybeShowConsentPrompt()
+            }
+            .sheet(item: $consentPrompt) { prompt in
+                AiInsightConsentSheet(
+                    onAuthorize: {
+                        aiConsent.grant()
+                        consentPrompt = nil
+                    },
+                    onNotNow: {
+                        if prompt == .firstConnection {
+                            aiConsent.markPromptShown()
+                        }
+                        consentPrompt = nil
+                    }
+                )
+                .environment(\.patientPalette, palette)
+                .environment(\.patientColorScheme, paletteScheme)
+                .preferredColorScheme(paletteScheme)
+            }
         }
+    }
+
+    private func maybeShowConsentPrompt() {
+        guard consentPrompt == nil else { return }
+        let snap = aiConsent.snapshot
+        guard AiInsightConsentPolicy.shouldPrompt(
+            featureEnabled: insight.highlightEnabled,
+            consented: snap.consented,
+            promptShown: snap.promptShown,
+            hasPairedWatch: session.hasPairedWatch
+        ) else { return }
+        consentPrompt = .firstConnection
     }
 
     private var watchStatusCard: some View {
@@ -302,6 +347,8 @@ struct SavedDayValues: View {
 struct AiInsightHighlightCard: View {
     @Environment(\.patientPalette) private var palette
     @ObservedObject var controller: GeminiInsightController
+    var consented: Bool = false
+    var onRequestConsent: () -> Void = {}
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -324,23 +371,33 @@ struct AiInsightHighlightCard: View {
                 }
                 Spacer()
             }
-            insightBody
-            Text(GeminiInsight.shared.reviewLabel())
-                .font(.system(size: 13))
-                .foregroundStyle(palette.onSurfaceVariant)
-                .accessibilityIdentifier("ai_insight_review_label")
-            Button {
-                controller.refresh(force: true)
-            } label: {
-                HStack {
-                    Image(systemName: "arrow.clockwise")
-                    Text(GeminiInsight.shared.refreshLabel())
+            if consented {
+                insightBody
+                Text(GeminiInsight.shared.reviewLabel())
+                    .font(.system(size: 13))
+                    .foregroundStyle(palette.onSurfaceVariant)
+                    .accessibilityIdentifier("ai_insight_review_label")
+                Button {
+                    controller.refresh(force: true)
+                } label: {
+                    HStack {
+                        Image(systemName: "arrow.clockwise")
+                        Text(GeminiInsight.shared.refreshLabel())
+                    }
                 }
+                .buttonStyle(PatientPrimaryButton())
+                .disabled(controller.isLoading)
+                .opacity(controller.isLoading ? 0.6 : 1)
+                .accessibilityIdentifier("refresh_gemini_insight_button")
+            } else {
+                Text(AiInsightConsentCopy.disabledBody)
+                    .font(.system(size: 17))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("ai_insight_consent_needed")
+                Button(AiInsightConsentCopy.enableButton, action: onRequestConsent)
+                    .buttonStyle(PatientPrimaryButton())
+                    .accessibilityIdentifier("ai_insight_enable_button")
             }
-            .buttonStyle(PatientPrimaryButton())
-            .disabled(controller.isLoading)
-            .opacity(controller.isLoading ? 0.6 : 1)
-            .accessibilityIdentifier("refresh_gemini_insight_button")
         }
         .foregroundStyle(palette.onPrimaryContainer)
         .padding(20)
@@ -386,6 +443,7 @@ struct AiInsightHighlightCard: View {
     }
 
     private var generatedLabel: String {
+        guard consented else { return AiInsightConsentCopy.optionalLabel }
         guard let date = controller.generatedAt else { return GeminiInsight.shared.sevenDaysLabel() }
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "pt-BR")
@@ -440,6 +498,13 @@ struct InsightShimmerLines: View {
     }
 }
 
+/// Releases NotificationCenter tokens when the insight controller goes away,
+/// without touching main-actor state from `deinit`.
+private final class ConsentObserverBox {
+    var tokens: [NSObjectProtocol] = []
+    deinit { tokens.forEach { NotificationCenter.default.removeObserver($0) } }
+}
+
 @MainActor
 final class GeminiInsightController: ObservableObject {
     @Published var text = ""
@@ -449,44 +514,80 @@ final class GeminiInsightController: ObservableObject {
 
     private var lastRateLimit: Date?
     private var lastStarted: Date?
+    private var generation: Task<Void, Never>?
+    private let consentObservers = ConsentObserverBox()
     private let cooldown: TimeInterval = 60
     private let minInterval: TimeInterval = 15 * 60
 
-    var highlightEnabled: Bool {
-        GeminiInsight.shared.isHighlightEnabled(
-            flag: VeepooSession.bundledString("Next2UAiInsightEnabled") ?? "YES"
+    var highlightEnabled: Bool { AiInsightFeatureFlag.enabled }
+
+    private var consentAllowsNetwork: Bool {
+        AiInsightConsentPolicy.shouldGenerate(
+            featureEnabled: highlightEnabled,
+            consented: AiInsightConsentStore.shared.isConsented()
         )
     }
 
+    init() {
+        let center = NotificationCenter.default
+        consentObservers.tokens.append(center.addObserver(
+            forName: AiInsightConsentNotice.granted, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.refresh(force: true) }
+        })
+        consentObservers.tokens.append(center.addObserver(
+            forName: AiInsightConsentNotice.withdrawn, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.generation?.cancel()
+                self?.clearCachedSummary()
+            }
+        })
+    }
+
     func appear() {
-        guard highlightEnabled, text.isEmpty, !isLoading else { return }
+        guard consentAllowsNetwork, text.isEmpty, !isLoading else { return }
         refresh(force: true)
     }
 
     func profileDidChange() {
-        guard highlightEnabled else { return }
+        guard consentAllowsNetwork else { return }
         refresh(force: true)
     }
 
     func refresh(force: Bool) {
+        guard consentAllowsNetwork else {
+            generation?.cancel()
+            clearCachedSummary()
+            return
+        }
         guard !isLoading else { return }
         if !force, let lastStarted, Date().timeIntervalSince(lastStarted) < minInterval { return }
         isLoading = true
         failed = false
         lastStarted = Date()
         let now = PatientReadings.nowMillis
-        Task { await generate(nowMillis: now) }
+        generation = Task { await generate(nowMillis: now) }
     }
 
     private func generate(nowMillis: Int64) async {
-        let fallback = GeminiInsight.shared.fallbackFromStore(nowMillis: nowMillis)
-        let prompt = GeminiInsight.shared.buildPromptFromStore(nowMillis: nowMillis)
-        guard let prompt else {
-            finish(text: fallback, failed: false)
+        // Hard stop: no prompt is built and no URLSession request starts without consent.
+        guard consentAllowsNetwork, !Task.isCancelled else {
+            clearCachedSummary()
             return
         }
+        let fallback = GeminiInsight.shared.fallbackFromStore(nowMillis: nowMillis)
         let key = VeepooSession.bundledString("Next2UGeminiApiKey") ?? ""
-        if GeminiInsight.shared.isPlaceholderKey(key: key) {
+        guard let url = AiInsightNetworkGate.requestURL(
+            featureEnabled: highlightEnabled,
+            consented: AiInsightConsentStore.shared.isConsented(),
+            apiKey: key,
+            urlForKey: { GeminiInsight.shared.generateUrl(apiKey: $0) }
+        ) else {
+            guard consentAllowsNetwork else {
+                clearCachedSummary()
+                return
+            }
             finish(text: fallback, failed: false)
             return
         }
@@ -494,8 +595,16 @@ final class GeminiInsightController: ObservableObject {
             finish(text: fallback, failed: false)
             return
         }
+        let prompt = GeminiInsight.shared.buildPromptFromStore(nowMillis: nowMillis)
+        guard let prompt else {
+            finish(text: fallback, failed: false)
+            return
+        }
+        guard consentAllowsNetwork, !Task.isCancelled else {
+            clearCachedSummary()
+            return
+        }
         do {
-            let url = URL(string: GeminiInsight.shared.generateUrl(apiKey: key))!
             var request = URLRequest(url: url)
             request.httpMethod = "POST"
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -504,6 +613,10 @@ final class GeminiInsightController: ObservableObject {
                 "contents": [["parts": [["text": prompt]]]],
             ])
             let (data, response) = try await URLSession.shared.data(for: request)
+            guard consentAllowsNetwork, !Task.isCancelled else {
+                clearCachedSummary()
+                return
+            }
             let code = (response as? HTTPURLResponse)?.statusCode ?? 0
             if code == 429 { lastRateLimit = Date() }
             if (200...299).contains(code), let parsed = Self.parseText(data), !parsed.isEmpty {
@@ -512,15 +625,30 @@ final class GeminiInsightController: ObservableObject {
             }
             finish(text: fallback, failed: false)
         } catch {
+            if error is CancellationError || Task.isCancelled || !consentAllowsNetwork {
+                clearCachedSummary()
+                return
+            }
             finish(text: fallback, failed: true)
         }
     }
 
     private func finish(text: String, failed: Bool) {
+        guard consentAllowsNetwork, !Task.isCancelled else {
+            clearCachedSummary()
+            return
+        }
         self.text = text
         self.failed = failed
         self.generatedAt = Date()
         self.isLoading = false
+    }
+
+    private func clearCachedSummary() {
+        text = ""
+        failed = false
+        generatedAt = nil
+        isLoading = false
     }
 
     private static func parseText(_ data: Data) -> String? {

@@ -96,8 +96,10 @@ Ver `docs/ios-port/BACKGROUND-BLE.md`. Resumo no aparelho:
 
 1. Rebuild `shared.framework` (`./iosApp/Scripts/embed-shared.sh`) — este PR adiciona `GeminiInsight` no KMP.
 2. Em `iosApp/Config/Secrets.local.xcconfig` (não commitar) coloque a chave real:
-   `NEXT2U_GEMINI_API_KEY = …`. O xcconfig commitado usa o placeholder Android
-   `YOUR_GEMINI_API_KEY` e `NEXT2U_AI_INSIGHT_ENABLED = YES` para o cartão aparecer.
+   `NEXT2U_GEMINI_API_KEY = …`. O xcconfig commitado deixa a chave vazia
+   (`NEXT2U_AI_INSIGHT_ENABLED = YES` só mostra o cartão). Sem essa linha no
+   arquivo local, o binário Release não leva chave. O resumo só sai depois
+   que o paciente autoriza em «Resumo com IA».
 3. Início → **Meu perfil** abre o formulário (não Ajustes). Campos: Nome completo,
    Idade em anos, Gênero, Altura em centímetros, Peso em quilos, metas, contato,
    Observações; `Identificação do paciente` só leitura. Sem data de nascimento,

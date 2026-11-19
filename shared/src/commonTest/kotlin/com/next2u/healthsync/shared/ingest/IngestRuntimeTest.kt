@@ -1,5 +1,6 @@
 package com.next2u.healthsync.shared.ingest
 
+import com.next2u.healthsync.shared.model.QueuedReading
 import com.next2u.healthsync.shared.store.PatientStore
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
@@ -7,6 +8,11 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -20,6 +26,8 @@ class IngestRuntimeTest {
         PatientStore.resetForTests()
         IngestRuntime.useStore(MemoryQueueStore())
         IngestRuntime.useEngine(null)
+        IngestRuntime.setAppVersion(null)
+        IngestRuntime.clearUploadContext()
         IngestRuntime.configure("https://service.invalid/", "synthetic-key", "")
     }
 
@@ -251,5 +259,48 @@ class IngestRuntimeTest {
         assertTrue(laterSameHr.queued, "histórico não usa a janela de 30s das leituras ao vivo")
         assertEquals(2, IngestRuntime.pendingCount())
         assertTrue(laterSameHr.clientReadingId!!.contains("1700000300000"))
+    }
+
+    @Test
+    fun send_time_context_and_version_header_go_out_without_rewriting_the_queue() = runTest {
+        val recorded = IngestRuntime.recordLive(
+            deviceId = "C4:E3:42:AA:30:A4", deviceModel = "VE30", heartRate = 70, spo2 = 0,
+            systolic = 0, diastolic = 0, temperatureCelsius = 0f, steps = 0, calories = 0f,
+            distanceMeters = 0f, hrvScore = 0, patientId = "PAT-1",
+        )
+        assertTrue(recorded.queued)
+        val storedBefore = IngestRuntime.items().single().payloadJson
+        val queued = QueuedReading(recorded.clientReadingId!!, storedBefore)
+        val plainKey = IngestReconciler.flushIdempotencyKey(listOf(IngestReconciler.prepare(queued)))
+
+        IngestRuntime.setAppVersion("ios-0.1.0+21")
+        IngestRuntime.setUploadContext("background", true, -1)
+        val stampedKey = IngestReconciler.flushIdempotencyKey(listOf(IngestReconciler.prepare(queued)))
+        assertEquals(plainKey, stampedKey)
+
+        var version = ""
+        var body = ""
+        IngestRuntime.useEngine(MockEngine { request ->
+            version = request.headers[AppVersionHeader.NAME].orEmpty()
+            body = (request.body as io.ktor.http.content.TextContent).text
+            respond("""{"detail":"x"}""", HttpStatusCode.ServiceUnavailable)
+        })
+        IngestRuntime.flush()
+        assertEquals("ios-0.1.0+21", version)
+        val reading = Json.parseToJsonElement(body).jsonObject["readings"]!!.jsonArray[0].jsonObject
+        assertEquals("background", reading["app_state"]!!.jsonPrimitive.content)
+        assertEquals("true", reading["screen_locked"]!!.jsonPrimitive.content)
+        assertTrue(reading["watch_battery_pct"] is JsonNull)
+        assertFalse(IngestRuntime.items().single().payloadJson.contains("app_state"))
+
+        IngestRuntime.setUploadContext("foreground", false, 55)
+        val withBattery = Json.parseToJsonElement(
+            IngestRuntime.stampUploadContext(storedBefore),
+        ).jsonObject
+        assertEquals("foreground", withBattery["app_state"]!!.jsonPrimitive.content)
+        assertEquals("false", withBattery["screen_locked"]!!.jsonPrimitive.content)
+        assertEquals("55", withBattery["watch_battery_pct"]!!.jsonPrimitive.content)
+        IngestRuntime.setUploadContext("nope", false, 10)
+        assertFalse(IngestRuntime.stampUploadContext(storedBefore).contains("app_state"))
     }
 }

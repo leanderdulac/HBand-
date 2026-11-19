@@ -85,6 +85,13 @@ final class VeepooSession: NSObject, ObservableObject {
         if !watchAlias.isEmpty { return watchAlias }
         return connected?.name ?? ""
     }
+
+    /// Relógio já pareado neste iPhone (sessão atual ou endereço salvo).
+    var hasPairedWatch: Bool {
+        if connected != nil || hardwareReady { return true }
+        let saved = lastAddress?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return !saved.isEmpty
+    }
     private var lastPeripheralUUID: String? {
         get { UserDefaults.standard.string(forKey: "last_veepoo_uuid") }
         set { UserDefaults.standard.set(newValue, forKey: "last_veepoo_uuid") }
@@ -108,9 +115,8 @@ final class VeepooSession: NSObject, ObservableObject {
     private var sensorBusy: Bool { heartRunning || spo2Running || bloodRunning }
     private var consecutiveEmptyCycles = 0
     private var nextCycleAt = Date.distantPast
-    /// Background: FC contínua mantém notificações GATT chegando, e cada uma acorda o app
-    /// (bluetooth-central). Sem isso, a pausa de 5 min entre ciclos deixava o app sem tráfego
-    /// BLE, o iOS suspendia e o watchdog nunca iniciava o próximo ciclo (campo 29/10).
+    /// Segundo plano: o app só lê o histórico gravado. Um teste ao vivo (FC/SpO₂/PA)
+    /// é parado ao ir para o fundo — deixá-lo ligado era o que descarregava o relógio.
     private var backgroundStreaming = false
     private var lastRecordAt = Date.distantPast
     private var lastFlushAt = Date.distantPast
@@ -167,7 +173,8 @@ final class VeepooSession: NSObject, ObservableObject {
         }
     }
 
-    static func bundledString(_ key: String) -> String? {
+    /// Info.plist only; safe off the main actor.
+    nonisolated static func bundledString(_ key: String) -> String? {
         guard let v = Bundle.main.object(forInfoDictionaryKey: key) as? String else { return nil }
         let t = v.trimmingCharacters(in: .whitespacesAndNewlines)
         return (t.isEmpty || t.hasPrefix("$(")) ? nil : t
@@ -368,10 +375,17 @@ final class VeepooSession: NSObject, ObservableObject {
 
     /// Deixa no relógio a medição automática econômica (FC 30 min, PA 60 min, resto desligado).
     private func applyBatterySafeAutoMonitor() {
-        guard hardwareReady, let pm = manager.peripheralManage else { return }
+        guard hardwareReady, let pm = manager.peripheralManage else {
+            startHistoryReadAfterPolicy()
+            return
+        }
         pm.veepooSDKReadAutoMonitSwitchInfo { [weak self] models in
             Task { @MainActor in
-                guard let self, self.hardwareReady, let models else { return }
+                guard let self, self.hardwareReady else { return }
+                guard let models else {
+                    self.closeLegacyContinuousSwitches()
+                    return
+                }
                 var changes: [VPAutoMonitTestModel] = []
                 for model in models {
                     let slot = WatchBatteryPolicy.Slot(
@@ -391,13 +405,44 @@ final class VeepooSession: NSObject, ObservableObject {
         }
     }
 
+    /// Interruptores antigos (PPG contínuo, SpO₂ noturno, temperatura, ECG sempre
+    /// ligado, etc.) ficam na memória do relógio. Um app anterior pode tê-los
+    /// deixado abertos; cada conexão os fecha, um comando por vez.
+    private func closeLegacyContinuousSwitches() {
+        writeLegacySwitches(WatchBatteryPolicy.legacySwitchesToClose)
+    }
+
+    private func writeLegacySwitches(_ kinds: [WatchBatteryPolicy.LegacySwitch]) {
+        guard let kind = kinds.first else {
+            readWatchAutoMeasure()
+            startHistoryReadAfterPolicy()
+            return
+        }
+        guard hardwareReady, let pm = manager.peripheralManage,
+              let type = VPSettingBaseFunctionSwitchType(rawValue: kind.rawValue),
+              let close = VPSettingFunctionState(rawValue: 2) else {
+            writeLegacySwitches(Array(kinds.dropFirst()))
+            return
+        }
+        let rest = Array(kinds.dropFirst())
+        pm.veepooSDKSettingBaseFunctionType(type, settingState: close) { [weak self] state in
+            Task { @MainActor in
+                NSLog("[Next2U] Interruptor contínuo %d fechado: estado %d", kind.rawValue, state.rawValue)
+                self?.writeLegacySwitches(rest)
+            }
+        }
+    }
+
     /// Uma escrita por vez: o firmware descarta comandos sobrepostos.
     private func writeAutoMonitSequentially(_ models: [VPAutoMonitTestModel]) {
         guard let model = models.first else {
-            readWatchAutoMeasure()
+            closeLegacyContinuousSwitches()
             return
         }
-        guard hardwareReady, let pm = manager.peripheralManage else { return }
+        guard hardwareReady, let pm = manager.peripheralManage else {
+            closeLegacyContinuousSwitches()
+            return
+        }
         let rest = Array(models.dropFirst())
         pm.veepooSDKSetAutoMonitSwitch(with: model) { [weak self] success, _ in
             Task { @MainActor in
@@ -459,6 +504,7 @@ final class VeepooSession: NSObject, ObservableObject {
         }
         IngestRuntime.shared.setDeviceLabel(raw: deviceLabel)
         IngestRuntime.shared.setAppVersion(raw: Self.appVersionString)
+        publishUploadContext()
         IngestRuntime.shared.configure(
             baseUrl: ingestUrl,
             overrideKey: key.isEmpty ? nil : key,
@@ -470,13 +516,33 @@ final class VeepooSession: NSObject, ObservableObject {
     }
 
     private static var loggedIngestConfig = false
-    /// "1.2.3+45" (CFBundleShortVersionString+CFBundleVersion) → header X-App-Version.
+    /// "ios-<marketing>+<build>" (CFBundleShortVersionString+CFBundleVersion).
+    /// Both the Ktor client and the background URLSession send this as X-App-Version.
+    /// An unexpanded xcconfig placeholder is not a version.
     static let appVersionString: String = {
         let info = Bundle.main.infoDictionary
-        let short = info?["CFBundleShortVersionString"] as? String ?? "0"
-        let build = info?["CFBundleVersion"] as? String ?? "0"
-        return "ios-\(short)+\(build)"
+        func expanded(_ key: String, fallback: String) -> String {
+            let raw = (info?[key] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if raw.isEmpty || raw.hasPrefix("$(") { return fallback }
+            return raw
+        }
+        return "ios-\(expanded("CFBundleShortVersionString", fallback: "0.1.0"))+\(expanded("CFBundleVersion", fallback: "0"))"
     }()
+
+    /// Send-time snapshot. `screen_locked` is the inverse of protected-data
+    /// availability (no location). Battery is the last SDK percent, or -1 when
+    /// the SDK has not reported one (the shared client sends JSON null).
+    func publishUploadContext() {
+        let state = UIApplication.shared.applicationState == .background ? "background" : "foreground"
+        let locked = !UIApplication.shared.isProtectedDataAvailable
+        let percent = batteryPercent ?? -1
+        IngestRuntime.shared.setUploadContext(
+            appState: state,
+            screenLocked: locked,
+            watchBatteryPct: Int32(percent)
+        )
+    }
+
     /// Nome da pulseira escolhido pelo paciente em Meu perfil (vazio = segue o nome do perfil).
     static let wristbandNameKey = "wristband_name"
     /// Último `device_label` efetivo (cache para envios antes de o perfil abrir).
@@ -605,11 +671,9 @@ final class VeepooSession: NSObject, ObservableObject {
         guard hardwareReady else { return }
         backgroundStreaming = true
         // Não manter um teste óptico ligado em segundo plano: os timers congelam e o PPG
-        // ficava ligado até acabar a bateria. Medição manual em curso é encerrada aqui.
-        if sensorBusy {
-            stopSensors()
-            finishCycle(reason: "segundo plano")
-        }
+        // ficava ligado até acabar a bateria. O comando de parar sai mesmo sem flag local.
+        stopSensors(force: true)
+        finishCycle(reason: "segundo plano")
     }
 
     /// Restore / BGTask / GATT notify can relaunch into `.background` without
@@ -954,10 +1018,31 @@ final class VeepooSession: NSObject, ObservableObject {
         lastSampleAt = Date()
         bleConnectionLabel = "Relógio pronto"
         sessionMessage = "Relógio pronto. Lendo os dados gravados no relógio."
-        note("Handshake. Lê histórico; sem teste ao vivo automático (build 19).")
+        note("Handshake. Para sensores ao vivo, ajusta a medição automática e lê o histórico.")
         // Link (re)established, e.g. after state restoration: push what queued meanwhile.
         flushQueueOnly()
+        // Um teste que o SDK ou um app antigo deixou aberto não depende das flags locais.
+        stopSensors(force: true)
         readBattery()
+        // A política tem de ser escrita mesmo se a leitura do histórico não terminar.
+        // O histórico começa depois, no fim de `writeLegacySwitches` → não há segundo
+        // início aqui: `applyBatterySafeAutoMonitor` dispara a leitura ao concluir.
+        pendingHistoryReadAfterPolicy = true
+        applyBatterySafeAutoMonitor()
+        // Se a leitura dos interruptores não responder, o histórico não pode ficar preso.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 25) { [weak self] in
+            self?.startHistoryReadAfterPolicy()
+        }
+    }
+
+    /// Liga a leitura completa do relógio só depois de a política de bateria ter
+    /// sido enviada (ou de ela falhar), para o firmware não descartar os ajustes.
+    private var pendingHistoryReadAfterPolicy = false
+
+    private func startHistoryReadAfterPolicy() {
+        guard pendingHistoryReadAfterPolicy else { return }
+        pendingHistoryReadAfterPolicy = false
+        guard hardwareReady else { return }
         manager.peripheralManage.veepooSdkStartReadDeviceAllData { [weak self] state, _, _, _ in
             BleMain.run {
                 guard let self else { return }
@@ -1149,7 +1234,7 @@ final class VeepooSession: NSObject, ObservableObject {
                     self.note("Relógio fora do pulso.")
                 }
                 if state.rawValue >= 2, self.heartRunning {
-                    self.heartRunning = false // o relógio já encerrou este teste
+                    // stopHeart envia o comando enquanto a flag ainda é true.
                     self.stopHeart()
                     let reason = state.rawValue == 2 ? "fora do pulso" : state.rawValue == 3 ? "relógio ocupado" : "FC encerrada pelo relógio"
                     if state.rawValue == 2 || state.rawValue == 3 {
@@ -1174,7 +1259,6 @@ final class VeepooSession: NSObject, ObservableObject {
                 guard self.spo2Running else { return }
                 // 2 fora do pulso, 3 ocupado, 4 encerrado, 5 sem SpO₂: o teste já acabou.
                 if state.rawValue >= 2 {
-                    self.spo2Running = false
                     self.continueAfterOxygen(reason: "SpO₂ encerrado pelo relógio (\(state.rawValue))")
                     return
                 }
@@ -1203,8 +1287,7 @@ final class VeepooSession: NSObject, ObservableObject {
     }
 
     /// Pressão ao vivo: um teste de ~50–55 s, nunca em paralelo com FC/SpO₂.
-    /// Em segundo plano só entra por `measureBloodOnce` (oportunidade BGTask),
-    /// para não interromper a FC contínua que mantém o notify GATT.
+    /// Só entra pelo ciclo manual (`measureNow`). `measureBloodOnce` não tem chamador.
     private func startBlood() {
         guard hardwareReady, !bloodUnsupported else {
             resumeBloodWaiter()
@@ -1289,25 +1372,30 @@ final class VeepooSession: NSObject, ObservableObject {
         waiter?.resume()
     }
 
-    private func stopHeart() {
-        if heartRunning {
+    private func stopHeart(force: Bool = false) {
+        if WatchBatteryPolicy.shouldSendStop(force: force, locallyRunning: heartRunning) {
             manager.peripheralManage.veepooSDKTestHeartStart(false, testResult: nil)
         }
         heartRunning = false
     }
 
-    private func stopOxygen() {
-        if spo2Running {
+    private func stopOxygen(force: Bool = false) {
+        if WatchBatteryPolicy.shouldSendStop(force: force, locallyRunning: spo2Running) {
             manager.peripheralManage.veepooSDKTestOxygenStart(false, testResult: nil)
         }
         spo2Running = false
     }
 
-    private func stopBlood() {
-        if bloodRunning {
+    private func stopBlood(force: Bool = false) {
+        if WatchBatteryPolicy.shouldSendStop(force: force, locallyRunning: bloodRunning) {
             manager.peripheralManage.veepooSDKTestBloodStart(false, testMode: 0, testResult: nil)
         }
         bloodRunning = false
+    }
+
+    private func stopTemperature(force: Bool = false) {
+        if !force { return }
+        manager.peripheralManage.veepooSDK_temperatureTestStart(false, result: nil)
     }
 
     /// Interrompe a PA em curso e libera quem estava à espera, sem fechar o ciclo.
@@ -1318,10 +1406,15 @@ final class VeepooSession: NSObject, ObservableObject {
         note("Pressão interrompida (\(reason)).")
     }
 
-    private func stopSensors() {
-        stopHeart()
-        stopOxygen()
-        abortBlood(reason: "sensores parados")
+    private func stopSensors(force: Bool = false) {
+        stopHeart(force: force)
+        stopOxygen(force: force)
+        if force {
+            stopBlood(force: true)
+        } else {
+            abortBlood(reason: "sensores parados")
+        }
+        stopTemperature(force: force)
     }
 
     private func pullTodayStepsIfDue(now: Date = Date(), force: Bool = false) {
@@ -1430,6 +1523,7 @@ final class VeepooSession: NSObject, ObservableObject {
                 self.isFlushing = false
                 self.endIngestTask(task)
             }
+            self.publishUploadContext()
             guard let flush = try? await IngestRuntime.shared.flush() else { return }
             applyFlush(flush)
         }
@@ -1478,6 +1572,7 @@ final class VeepooSession: NSObject, ObservableObject {
         guard PatientStore.shared.status == .ready else { return false }
         BleWakeLock.shared.ping()
         configureIngest()
+        publishUploadContext()
         let task = beginIngestTask()
         defer { endIngestTask(task) }
         do {
@@ -1545,6 +1640,7 @@ final class VeepooSession: NSObject, ObservableObject {
     }
 
     private func scheduleBackgroundUpload() {
+        publishUploadContext()
         let override = ingestKey.trimmingCharacters(in: .whitespacesAndNewlines)
         let apiKey = override.isEmpty ? (Self.bundledString("Next2UIngestApiKey") ?? "") : override
         let patientId = PatientStore.shared.status == .ready
@@ -1610,7 +1706,7 @@ final class VeepooSession: NSObject, ObservableObject {
     }
 
     private func recordAndFlush() {
-        // FC contínua em segundo plano: no máximo uma leitura por minuto na fila.
+        // No máximo uma leitura por minuto na fila quando o app está em segundo plano.
         if backgroundStreaming, Date().timeIntervalSince(lastRecordAt) < Self.minUploadInterval { return }
         lastRecordAt = Date()
         guard PatientStore.shared.status == .ready else {
@@ -1817,8 +1913,8 @@ final class VeepooSession: NSObject, ObservableObject {
     }
 
     func onDidDisconnect(_ peripheral: CBPeripheral, reason: String) {
-        // Para os testes no relógio enquanto as flags ainda estão true.
-        stopSensors()
+        // Para os testes no relógio mesmo se a flag local já foi baixada.
+        stopSensors(force: true)
         resumeBloodWaiter()
         deferredFlush?.cancel()
         deferredFlush = nil

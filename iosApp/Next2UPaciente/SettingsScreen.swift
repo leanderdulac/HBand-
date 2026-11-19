@@ -16,6 +16,8 @@ struct SettingsScreen: View {
     @State private var showProfile = false
     @State private var showContinuityHelp = false
     @State private var notifyOpenFailed = false
+    @State private var showAiConsent = false
+    @ObservedObject private var aiConsent = AiInsightConsentModel.shared
     #if DEBUG
     @State private var versionTaps = 0
     @State private var showDeveloper = false
@@ -31,6 +33,9 @@ struct SettingsScreen: View {
                         .foregroundStyle(palette.onSurface)
                         .accessibilityAddTraits(.isHeader)
                     profileCard
+                    if AiInsightFeatureFlag.enabled {
+                        aiInsightCard
+                    }
                     continuityCard
                     watchClockCard
                     reconnectCard
@@ -60,6 +65,18 @@ struct SettingsScreen: View {
                     showProfile = false
                     session.notifyProfileChanged()
                 })
+                .environment(\.patientPalette, palette)
+                .environment(\.patientColorScheme, paletteScheme)
+                .preferredColorScheme(paletteScheme)
+            }
+            .sheet(isPresented: $showAiConsent) {
+                AiInsightConsentSheet(
+                    onAuthorize: {
+                        aiConsent.grant()
+                        showAiConsent = false
+                    },
+                    onNotNow: { showAiConsent = false }
+                )
                 .environment(\.patientPalette, palette)
                 .environment(\.patientColorScheme, paletteScheme)
                 .preferredColorScheme(paletteScheme)
@@ -129,6 +146,35 @@ struct SettingsScreen: View {
         .accessibilityIdentifier("user_profile_settings_card")
     }
 
+    /// Grant opens the same disclosure as Início. Withdraw is immediate and stops Gemini.
+    private var aiInsightCard: some View {
+        Toggle(isOn: Binding(
+            get: { aiConsent.snapshot.consented },
+            set: { enabled in
+                if enabled { showAiConsent = true }
+                else { aiConsent.withdraw() }
+            }
+        )) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(AiInsightConsentCopy.title)
+                    .font(.system(size: 17, weight: .bold))
+                    .foregroundStyle(palette.onSurface)
+                Text(aiConsent.snapshot.consented
+                     ? AiInsightConsentCopy.settingsOnHint
+                     : AiInsightConsentCopy.settingsOffHint)
+                    .font(.system(size: 15))
+                    .foregroundStyle(palette.onSurfaceVariant)
+                    .accessibilityIdentifier("ai_insight_settings_hint")
+            }
+        }
+        .tint(palette.primary)
+        .padding(20)
+        .background(palette.surface)
+        .overlay(RoundedRectangle(cornerRadius: 28, style: .continuous).stroke(palette.outlineVariant, lineWidth: 1))
+        .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+        .accessibilityIdentifier("ai_insight_settings_switch")
+    }
+
     /// Honest iOS continuity — written for the patient, without Android product names.
     private var continuityCard: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -138,11 +184,11 @@ struct SettingsScreen: View {
                 .font(.system(size: 17))
             Text("Para melhorar a continuidade:")
                 .font(.system(size: 17, weight: .semibold))
-            Text("1. Ajustes → Geral → Atualização em Segundo Plano → next2u SAÚDE: ligado.")
+            Text("1. Ajustes → Geral → Atualização em Segundo Plano → Next2U Paciente: ligado.")
                 .font(.system(size: 17))
             Text("2. Deixe o Bluetooth ligado.")
                 .font(.system(size: 17))
-            Text("3. Não deslize o next2u SAÚDE para fechar. Fechar o app pela lista de abertos não restaura a sessão do relógio.")
+            Text("3. Não deslize o Next2U Paciente para fechar. Fechar o app pela lista de abertos não restaura a sessão do relógio.")
                 .font(.system(size: 17))
             Button("Abrir Ajustes deste iPhone") { openAppSettings() }
                 .buttonStyle(PatientPrimaryButton())
@@ -248,7 +294,7 @@ struct SettingsScreen: View {
                     .buttonStyle(PatientPrimaryButton())
                     .accessibilityIdentifier("open_notification_settings")
                 if notifyOpenFailed {
-                    Text("Não foi possível abrir as opções. Abra as configurações deste aparelho e procure next2u SAÚDE.")
+                    Text("Não foi possível abrir as opções. Abra as configurações deste aparelho e procure Next2U Paciente.")
                         .font(.system(size: 17))
                 }
                 Text("Avisar acima de").font(.system(size: 15, weight: .semibold))
