@@ -63,7 +63,7 @@ internal fun PatientNotificationSettings() {
             modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag("open_notification_settings"),
         ) { Text("Opções de notificação deste aparelho") }
         if (couldNotOpen) Text(
-            "Não foi possível abrir as opções. Abra as configurações deste aparelho e procure next2u SAÚDE.",
+            "Não foi possível abrir as opções. Abra as configurações deste aparelho e procure Next2U Paciente.",
             style = MaterialTheme.typography.bodyLarge,
         )
     }

@@ -24,7 +24,7 @@ data class ShareProgressData(val bitmap: Bitmap, val file: File, val uri: Uri, v
 
 internal data class WeeklyShareSummary(val period: String, val lines: List<Pair<String, String>>) {
     val text: String get() = buildString {
-        appendLine("next2u SAÚDE — registros neste celular")
+        appendLine("Next2U Paciente — registros neste celular")
         appendLine(period)
         lines.forEach { (label, value) -> appendLine("$label: $value") }
         append("Registros podem estar incompletos. Origem e recebimento pela equipe não verificados neste cartão.")

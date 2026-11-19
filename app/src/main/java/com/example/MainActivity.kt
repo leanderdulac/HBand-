@@ -39,6 +39,16 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onStart() {
+        super.onStart()
+        mainViewModel.bleManager.onHostForegrounded()
+    }
+
+    override fun onStop() {
+        mainViewModel.bleManager.onHostBackgrounded()
+        super.onStop()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()

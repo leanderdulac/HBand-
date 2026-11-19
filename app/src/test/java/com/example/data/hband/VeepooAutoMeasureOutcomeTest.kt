@@ -41,11 +41,15 @@ class VeepooAutoMeasureOutcomeTest {
         val before = original()
         client.setAutoMeasureEnabled(listOf(before), true)
         assertFalse(before.isSwitchOpen)
-        assertNotSame(before, Sdk.sent.single())
-        assertTrue(Sdk.sent.single().isSwitchOpen)
-        assertEquals(30, Sdk.sent.single().measureInterval)
-        assertEquals(120, Sdk.sent.single().currentStartMinute)
-        assertEquals(1080, Sdk.sent.single().currentEndMinute)
+        assertNotSame(before, Sdk.sent.first())
+        assertTrue(Sdk.sent.first().isSwitchOpen)
+        assertEquals(30, Sdk.sent.first().measureInterval)
+        assertEquals(120, Sdk.sent.first().currentStartMinute)
+        assertEquals(1080, Sdk.sent.first().currentEndMinute)
+        val short = original().apply { measureInterval = 5 }
+        client.setAutoMeasureEnabled(listOf(short), true)
+        assertEquals(30, Sdk.sent.last().measureInterval)
+        assertEquals(5, short.measureInterval)
     }
     @Test fun partial_failure_does_not_claim_the_whole_request_was_confirmed() = runTest {
         Sdk.write = { data, listener ->

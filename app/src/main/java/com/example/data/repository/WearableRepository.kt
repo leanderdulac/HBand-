@@ -8,6 +8,7 @@ import com.example.data.ingest.PreparedReading
 import com.example.data.ingest.IngestHttpKind
 import com.example.data.ingest.IngestPayloadMapper
 import com.example.data.ingest.QueueAuthorization
+import com.example.data.ingest.UploadContext
 import com.example.data.local.AdvancedMeasurementDao
 import com.example.data.local.AdvancedMeasurementEntity
 import com.example.data.local.HBandSensorMetricDao
@@ -83,6 +84,11 @@ class WearableRepository(
     private val deviceLabelProvider: suspend () -> String? = { null },
     /** Current patient ID from Meu perfil; replaces the default ID on queued readings. */
     private val patientIdProvider: suspend () -> String? = { null },
+    /**
+     * Send-time `app_state` / `screen_locked` / `watch_battery_pct`. Null omits the keys
+     * (the upload still goes out). See [UploadContext].
+     */
+    private val uploadContextProvider: suspend () -> UploadContext? = { null },
 ) {
     val allQueueItems: Flow<List<IngestQueueEntity>> = queueDao.getAllItems()
     val allSensorMetrics: Flow<List<HBandSensorMetricEntity>> = sensorMetricDao.getAllMetrics()
@@ -463,8 +469,11 @@ class WearableRepository(
             val currentPatientId = try { patientIdProvider() } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) { null }
+            val upload = try { uploadContextProvider() } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) { null }
             for (item in pendingList) {
-                val reading = runCatching { IngestReconciler.prepare(item, deviceLabel, currentPatientId) }.getOrNull()
+                val reading = runCatching { IngestReconciler.prepare(item, deviceLabel, currentPatientId, upload) }.getOrNull()
                 val localError = when {
                     reading == null -> IngestReconciler.INVALID_LOCAL
                     !IngestPayloadMapper.isIngestibleJson(reading.json) -> IngestPayloadMapper.MISSING_HR_ERROR

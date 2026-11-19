@@ -191,7 +191,7 @@ private fun ShareProgressContent(
                         OutlinedButton(
                             onClick = {
                                 val message = try {
-                                    copyHealthText(context, "Registros next2u SAÚDE", shareData.summaryText)
+                                    copyHealthText(context, "Registros Next2U Paciente", shareData.summaryText)
                                     "Texto dos registros copiado."
                                 } catch (_: Exception) {
                                     "Não foi possível copiar o texto. Tente novamente."
