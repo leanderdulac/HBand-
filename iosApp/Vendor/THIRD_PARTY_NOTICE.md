@@ -26,3 +26,17 @@ Capacidades P1 (ECG, glicose, composição) podem divergir — confirmar no
 VE30 físico antes de declarar paridade.
 
 Não alterar o binário. Atualizar copiando de novo o drop oficial.
+
+`MJExtension` (3.0.15.1) is vendored from the official Veepoo iOS demo
+(`iOS_sdk_source/Demo/VeepooBleSDKDemo/Pods/MJExtension` in
+[HBandSDK/iOS_Ble_SDK](https://github.com/HBandSDK/iOS_Ble_SDK)), which is
+the same tree as `VeepooBleSDK.framework`. Licensed under MIT
+(`Vendor/MJExtension/LICENSE`).
+
+The SDK's `DBStoreManager` serializes ECG and sleep models with
+`mj_keyValues`, `mj_keyValuesWithIgnoredKeys:` and related `mj_*`
+selectors. Those are categories on `NSObject` from MJExtension. The
+app already passed `-ObjC`, but MJExtension was not in the target, so
+those selectors crashed with SIGABRT (`unrecognized selector`) on
+iOS build 23. Linking this drop restores the official demo linkage.
+
