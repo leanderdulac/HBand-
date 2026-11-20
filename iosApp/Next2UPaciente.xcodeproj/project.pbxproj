@@ -43,6 +43,16 @@
 		A10000000000000100000101 /* ABParTool.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = A20000000000000100000101 /* ABParTool.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		A10000000000000100000102 /* ZipZap.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = A20000000000000100000102 /* ZipZap.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		A10000000000000100000103 /* GRDFUSDK.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = A20000000000000100000103 /* GRDFUSDK.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		B100000000000100000012 /* MJExtensionConst.m in Sources */ = {isa = PBXBuildFile; fileRef = B200000000000100000012 /* MJExtensionConst.m */; };
+		B100000000000100000013 /* MJFoundation.m in Sources */ = {isa = PBXBuildFile; fileRef = B200000000000100000013 /* MJFoundation.m */; };
+		B100000000000100000014 /* MJProperty.m in Sources */ = {isa = PBXBuildFile; fileRef = B200000000000100000014 /* MJProperty.m */; };
+		B100000000000100000015 /* MJPropertyKey.m in Sources */ = {isa = PBXBuildFile; fileRef = B200000000000100000015 /* MJPropertyKey.m */; };
+		B100000000000100000016 /* MJPropertyType.m in Sources */ = {isa = PBXBuildFile; fileRef = B200000000000100000016 /* MJPropertyType.m */; };
+		B100000000000100000017 /* NSObject+MJClass.m in Sources */ = {isa = PBXBuildFile; fileRef = B200000000000100000017 /* NSObject+MJClass.m */; };
+		B100000000000100000018 /* NSObject+MJCoding.m in Sources */ = {isa = PBXBuildFile; fileRef = B200000000000100000018 /* NSObject+MJCoding.m */; };
+		B100000000000100000019 /* NSObject+MJKeyValue.m in Sources */ = {isa = PBXBuildFile; fileRef = B200000000000100000019 /* NSObject+MJKeyValue.m */; };
+		B100000000000100000020 /* NSObject+MJProperty.m in Sources */ = {isa = PBXBuildFile; fileRef = B200000000000100000020 /* NSObject+MJProperty.m */; };
+		B100000000000100000021 /* NSString+MJExtension.m in Sources */ = {isa = PBXBuildFile; fileRef = B200000000000100000021 /* NSString+MJExtension.m */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -104,6 +114,27 @@
 		A20000000000000100000103 /* GRDFUSDK.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = GRDFUSDK.framework; path = Vendor/GRDFUSDK.framework; sourceTree = "<group>"; };
 		A30000000000000100000001 /* Next2U Paciente.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Next2U Paciente.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		C3DDEC20A79A1E7E1675E67D /* N2UBleRestore.m */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.objc; path = N2UBleRestore.m; sourceTree = "<group>"; };
+		B200000000000100000001 /* MJExtension.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "MJExtension.h"; sourceTree = "<group>"; };
+		B200000000000100000002 /* MJExtensionConst.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "MJExtensionConst.h"; sourceTree = "<group>"; };
+		B200000000000100000003 /* MJFoundation.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "MJFoundation.h"; sourceTree = "<group>"; };
+		B200000000000100000004 /* MJProperty.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "MJProperty.h"; sourceTree = "<group>"; };
+		B200000000000100000005 /* MJPropertyKey.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "MJPropertyKey.h"; sourceTree = "<group>"; };
+		B200000000000100000006 /* MJPropertyType.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "MJPropertyType.h"; sourceTree = "<group>"; };
+		B200000000000100000007 /* NSObject+MJClass.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "NSObject+MJClass.h"; sourceTree = "<group>"; };
+		B200000000000100000008 /* NSObject+MJCoding.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "NSObject+MJCoding.h"; sourceTree = "<group>"; };
+		B200000000000100000009 /* NSObject+MJKeyValue.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "NSObject+MJKeyValue.h"; sourceTree = "<group>"; };
+		B200000000000100000010 /* NSObject+MJProperty.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "NSObject+MJProperty.h"; sourceTree = "<group>"; };
+		B200000000000100000011 /* NSString+MJExtension.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "NSString+MJExtension.h"; sourceTree = "<group>"; };
+		B200000000000100000012 /* MJExtensionConst.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = "MJExtensionConst.m"; sourceTree = "<group>"; };
+		B200000000000100000013 /* MJFoundation.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = "MJFoundation.m"; sourceTree = "<group>"; };
+		B200000000000100000014 /* MJProperty.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = "MJProperty.m"; sourceTree = "<group>"; };
+		B200000000000100000015 /* MJPropertyKey.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = "MJPropertyKey.m"; sourceTree = "<group>"; };
+		B200000000000100000016 /* MJPropertyType.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = "MJPropertyType.m"; sourceTree = "<group>"; };
+		B200000000000100000017 /* NSObject+MJClass.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = "NSObject+MJClass.m"; sourceTree = "<group>"; };
+		B200000000000100000018 /* NSObject+MJCoding.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = "NSObject+MJCoding.m"; sourceTree = "<group>"; };
+		B200000000000100000019 /* NSObject+MJKeyValue.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = "NSObject+MJKeyValue.m"; sourceTree = "<group>"; };
+		B200000000000100000020 /* NSObject+MJProperty.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = "NSObject+MJProperty.m"; sourceTree = "<group>"; };
+		B200000000000100000021 /* NSString+MJExtension.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = "NSString+MJExtension.m"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -131,6 +162,7 @@
 				A20000000000000100000101 /* ABParTool.framework */,
 				A20000000000000100000102 /* ZipZap.framework */,
 				A20000000000000100000103 /* GRDFUSDK.framework */,
+				B500000000000100000001 /* MJExtension */,
 				A50000000000000100000004 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -185,6 +217,35 @@
 				A30000000000000100000001 /* Next2U Paciente.app */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		B500000000000100000001 /* MJExtension */ = {
+			isa = PBXGroup;
+			children = (
+				B200000000000100000001 /* MJExtension.h */,
+				B200000000000100000002 /* MJExtensionConst.h */,
+				B200000000000100000003 /* MJFoundation.h */,
+				B200000000000100000004 /* MJProperty.h */,
+				B200000000000100000005 /* MJPropertyKey.h */,
+				B200000000000100000006 /* MJPropertyType.h */,
+				B200000000000100000007 /* NSObject+MJClass.h */,
+				B200000000000100000008 /* NSObject+MJCoding.h */,
+				B200000000000100000009 /* NSObject+MJKeyValue.h */,
+				B200000000000100000010 /* NSObject+MJProperty.h */,
+				B200000000000100000011 /* NSString+MJExtension.h */,
+				B200000000000100000012 /* MJExtensionConst.m */,
+				B200000000000100000013 /* MJFoundation.m */,
+				B200000000000100000014 /* MJProperty.m */,
+				B200000000000100000015 /* MJPropertyKey.m */,
+				B200000000000100000016 /* MJPropertyType.m */,
+				B200000000000100000017 /* NSObject+MJClass.m */,
+				B200000000000100000018 /* NSObject+MJCoding.m */,
+				B200000000000100000019 /* NSObject+MJKeyValue.m */,
+				B200000000000100000020 /* NSObject+MJProperty.m */,
+				B200000000000100000021 /* NSString+MJExtension.m */,
+			);
+			name = MJExtension;
+			path = Vendor/MJExtension/MJExtension;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -298,6 +359,16 @@
 				A10000000000000100000019 /* SettingsScreen.swift in Sources */,
 				958B6FEED8292AFC5901CCAC /* N2UBleRestore.m in Sources */,
 				4AEA9B3B71AF7B215896DB39 /* PatientIdentity.swift in Sources */,
+				B100000000000100000012 /* MJExtensionConst.m in Sources */,
+				B100000000000100000013 /* MJFoundation.m in Sources */,
+				B100000000000100000014 /* MJProperty.m in Sources */,
+				B100000000000100000015 /* MJPropertyKey.m in Sources */,
+				B100000000000100000016 /* MJPropertyType.m in Sources */,
+				B100000000000100000017 /* NSObject+MJClass.m in Sources */,
+				B100000000000100000018 /* NSObject+MJCoding.m in Sources */,
+				B100000000000100000019 /* NSObject+MJKeyValue.m in Sources */,
+				B100000000000100000020 /* NSObject+MJProperty.m in Sources */,
+				B100000000000100000021 /* NSString+MJExtension.m in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

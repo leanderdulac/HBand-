@@ -34,3 +34,4 @@ SDK Veepoo vendored: **2.2.110.15** (`iosApp/Vendor/`). Android:
 Passos TestFlight e Ad Hoc: `docs/ios-port/PLAN.md` §5.4.
 
 O `VeepooBleSDK.framework` **já** está em `iosApp/Vendor/` (2.2.110.15).
+O `MJExtension` 3.0.15.1 (demo oficial Veepoo) também está em `iosApp/Vendor/MJExtension/` — o SDK usa `mj_keyValues` / `mj_keyValuesWithIgnoredKeys:` para gravar ECG e sono. Sem essa lib o app aborta (build 23).

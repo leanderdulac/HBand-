@@ -216,7 +216,7 @@ struct AiInsightConsentTests {
         let includeIndex = lines.firstIndex { $0.contains("#include? \"Secrets.local.xcconfig\"") } ?? -1
         expect(keyIndex >= 0 && includeIndex > keyIndex, "Secrets.local.xcconfig pode preencher a chave depois")
         expect(!config.contains("AIza"), "sem chave real no xcconfig")
-        expect(config.contains("CURRENT_PROJECT_VERSION = 23"), "build 23")
+        expect(config.contains("CURRENT_PROJECT_VERSION = 24"), "build 24")
         expect(!config.contains("YOUR_GEMINI_API_KEY"), "placeholder não entra no Release")
 
         let plist = try String(contentsOfFile: "iosApp/Next2UPaciente/Info.plist", encoding: .utf8)
