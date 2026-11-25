@@ -5,9 +5,9 @@ import android.content.SharedPreferences
 import android.os.Build
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
+import android.util.Base64
 import java.security.KeyStore
 import java.security.SecureRandom
-import java.util.Base64
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
@@ -142,8 +142,8 @@ internal class LocalAesGcmCipher(private val key: SecretKey) : DatabaseKeyCipher
         return cipher.doFinal(b64d(wrapped))
     }
 
-    private fun b64(bytes: ByteArray): String = Base64.getEncoder().encodeToString(bytes)
-    private fun b64d(text: String): ByteArray = Base64.getDecoder().decode(text)
+    private fun b64(bytes: ByteArray): String = Base64.encodeToString(bytes, Base64.NO_WRAP)
+    private fun b64d(text: String): ByteArray = Base64.decode(text, Base64.NO_WRAP)
 
     private companion object {
         const val TRANSFORMATION = "AES/GCM/NoPadding"
@@ -183,6 +183,6 @@ private object KeystoreCredentialCipher : DatabaseKeyCipher {
         return generator.generateKey()
     }
 
-    private fun b64(bytes: ByteArray): String = Base64.getEncoder().encodeToString(bytes)
-    private fun b64d(text: String): ByteArray = Base64.getDecoder().decode(text)
+    private fun b64(bytes: ByteArray): String = Base64.encodeToString(bytes, Base64.NO_WRAP)
+    private fun b64d(text: String): ByteArray = Base64.decode(text, Base64.NO_WRAP)
 }
