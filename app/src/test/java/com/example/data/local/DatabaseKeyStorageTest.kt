@@ -216,6 +216,31 @@ class DatabaseKeyStorageTest {
         assertTrue(prefs.all.isEmpty())
     }
 
+    @Test fun plaintext_sqlite_header_can_receive_a_key_without_changing_bytes() {
+        val original = "SQLite format 3\u0000synthetic-record".toByteArray()
+        file.writeBytes(original)
+        File(file.path + "-wal").writeBytes("wal-bytes".toByteArray())
+        val key = storage().getOrCreateForPlaintextMigration(observedPrefs(), file)
+        assertArrayEquals(ByteArray(32) { 42 }, key)
+        assertArrayEquals(original, file.readBytes())
+        assertEquals("wal-bytes", File(file.path + "-wal").readText())
+        assertEquals(1, generates)
+        assertEquals(1, wraps)
+        val again = storage().getOrCreateForPlaintextMigration(observedPrefs(), file)
+        assertArrayEquals(key, again)
+        assertEquals(1, generates)
+        assertEquals(1, wraps)
+        assertEquals(1, unwraps)
+    }
+
+    @Test fun opaque_file_is_not_a_plaintext_migration_source() {
+        file.writeBytes(ByteArray(32) { 7 })
+        blocked { storage().getOrCreateForPlaintextMigration(observedPrefs(), file) }
+        assertTrue(prefs.all.isEmpty())
+        assertArrayEquals(ByteArray(32) { 7 }, file.readBytes())
+        assertEquals(0, generates + wraps + commits)
+    }
+
     @Test fun wrapping_failure_returns_no_key_or_metadata() {
         val brokenCipher = object : DatabaseKeyCipher {
             override fun wrap(raw: ByteArray): Pair<String, String> = error("private-keystore-details")

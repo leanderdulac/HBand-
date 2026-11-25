@@ -1,6 +1,7 @@
 package com.example.data.remote
 
 import android.content.Context
+import com.example.data.local.CredentialStore
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.map
 import okhttp3.OkHttpClient
@@ -24,18 +25,27 @@ object RetrofitClient {
         val prefs = context.getSharedPreferences("hband_settings", Context.MODE_PRIVATE)
         configuration.value = IngestConfiguration.resolve(
             prefs.getString("custom_api_base_url", null) ?: DEFAULT_BASE_URL,
-            prefs.getString("custom_api_key", null), builtInKey(),
+            CredentialStore.forContext(context).readCoreKeyOverride(),
+            builtInKey(),
         )
     }
 
     @Synchronized
     fun updateConfig(context: Context, newBaseUrl: String, newApiKey: String) {
-        val next = IngestConfiguration.resolve(newBaseUrl, newApiKey, builtInKey())
+        val trimmedKey = newApiKey.trim()
+        val next = IngestConfiguration.resolve(newBaseUrl, trimmedKey, builtInKey())
         require(next.status.origin != "Indisponível") { IngestConfiguration.INVALID_URL }
-        val persisted = context.getSharedPreferences("hband_settings", Context.MODE_PRIVATE).edit()
+        val store = CredentialStore.forContext(context)
+        val previous = store.readCoreKeyOverride()
+        check(store.writeCoreKeyOverride(trimmedKey)) { "Não foi possível salvar a configuração do serviço." }
+        val urlSaved = context.getSharedPreferences("hband_settings", Context.MODE_PRIVATE).edit()
             .putString("custom_api_base_url", newBaseUrl.trim())
-            .putString("custom_api_key", newApiKey.trim()).commit()
-        check(persisted) { "Não foi possível salvar a configuração do serviço." }
+            .commit()
+        if (!urlSaved) {
+            val rolledBack = if (previous == null) store.clearOverride() else store.writeCoreKeyOverride(previous)
+            check(rolledBack)
+            error("Não foi possível salvar a configuração do serviço.")
+        }
         configuration.value = next
     }
 

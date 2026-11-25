@@ -12,6 +12,10 @@ internal actual object PlatformQueueStore {
         file.writeText(json)
     }
 
+    actual fun deletePlaintext(): Boolean = runCatching {
+        !file.exists() || file.delete()
+    }.getOrDefault(false)
+
     fun overrideForTests(contents: String) {
         file.writeText(contents)
     }

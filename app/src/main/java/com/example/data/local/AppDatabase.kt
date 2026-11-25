@@ -54,6 +54,7 @@ abstract class AppDatabase : RoomDatabase() {
             val database = INSTANCE ?: buildDatabase(context.applicationContext)
             try {
                 verifyOpen(database)
+                PlaintextDatabaseMigration.discardRetiredPlaintext(context.getDatabasePath(DATABASE_NAME))
                 INSTANCE = database
                 database
             } catch (error: Throwable) {
@@ -78,7 +79,20 @@ abstract class AppDatabase : RoomDatabase() {
             // Test runtimes may skip the native load; production factories must still
             // refuse storage instead of silently selecting Room's plaintext helper.
             check(SqlCipherNative.isLoaded) { "Armazenamento criptografado indisponível." }
-            SqliteFileInspector.requireEncryptedInput(context.getDatabasePath(DATABASE_NAME))
+            val databaseFile = context.getDatabasePath(DATABASE_NAME)
+            if (SqliteFileInspector.looksLikeUnencryptedSqlite(databaseFile)) {
+                val migrationKey = SqlCipherPassphrase.getPassphraseForPlaintextMigration(context)
+                try {
+                    PlaintextDatabaseMigration.migrateIfPlaintext(
+                        databaseFile,
+                        migrationKey,
+                        SqlCipherPlaintextExporter,
+                    )
+                } finally {
+                    migrationKey.fill(0)
+                }
+            }
+            SqliteFileInspector.requireEncryptedInput(databaseFile)
 
             val passphrase = SqlCipherPassphrase.getPassphrase(context)
             return schemaPreservingBuilder(context)

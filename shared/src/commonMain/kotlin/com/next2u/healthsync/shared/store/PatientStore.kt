@@ -29,6 +29,12 @@ object PatientStore {
     private var _status: StoreStatus = StoreStatus.OPENING
     private var _detail: String = ""
 
+    /** Test hook. Production reads the legacy plaintext queue file. */
+    internal var legacyQueueReader: () -> String = { FileQueueStore.loadJson() }
+
+    /** Test hook. Production deletes that file only after its items are in the snapshot. */
+    internal var legacyQueueDeleter: () -> Boolean = { com.next2u.healthsync.shared.ingest.PlatformQueueStore.deletePlaintext() }
+
     val status: StoreStatus get() = _status
     val detail: String get() = _detail
     val isReady: Boolean get() = _status == StoreStatus.READY
@@ -42,6 +48,8 @@ object PatientStore {
 
     fun resetForTests(next: SnapshotCodec = MemorySnapshotCodec()) {
         useCodec(next)
+        legacyQueueReader = { FileQueueStore.loadJson() }
+        legacyQueueDeleter = { com.next2u.healthsync.shared.ingest.PlatformQueueStore.deletePlaintext() }
         IngestRuntime.useStore(com.next2u.healthsync.shared.ingest.MemoryQueueStore())
     }
 
@@ -64,6 +72,7 @@ object PatientStore {
             return fail(UNKNOWN_SCHEMA, "schema=${decoded.schemaVersion}")
         }
         snapshot = decoded
+        absorbLegacyQueue()
         _status = StoreStatus.READY
         _detail = ""
         return StoreStatus.READY
@@ -174,27 +183,53 @@ object PatientStore {
     }
 
     private fun createFresh(): StoreStatus {
-        val imported = importLegacyQueue()
+        val legacy = readLegacyQueue()
         snapshot = PatientSnapshot(
             schemaVersion = SCHEMA_VERSION,
-            queue = imported,
+            queue = legacy.items,
             profile = UserProfile(),
         )
-        return if (writeSnapshot()) {
-            _status = StoreStatus.READY
-            _detail = ""
-            StoreStatus.READY
-        } else {
-            fail(WRITE_FAILED)
+        if (!writeSnapshot()) return fail(WRITE_FAILED)
+        if (legacy.readable) legacyQueueDeleter()
+        _status = StoreStatus.READY
+        _detail = ""
+        return StoreStatus.READY
+    }
+
+    private data class LegacyQueue(val items: List<StoredQueueItem>, val readable: Boolean)
+
+    private fun readLegacyQueue(): LegacyQueue {
+        val raw = try {
+            legacyQueueReader()
+        } catch (_: Exception) {
+            return LegacyQueue(emptyList(), false)
+        }
+        if (raw.isBlank() || raw.trim() == "[]") return LegacyQueue(emptyList(), true)
+        return try {
+            LegacyQueue(json.decodeFromString<List<StoredQueueItem>>(raw), true)
+        } catch (_: Exception) {
+            LegacyQueue(emptyList(), false)
         }
     }
 
-    private fun importLegacyQueue(): List<StoredQueueItem> = try {
-        val raw = FileQueueStore.loadJson()
-        if (raw.isBlank() || raw == "[]") emptyList()
-        else json.decodeFromString<List<StoredQueueItem>>(raw)
-    } catch (_: Exception) {
-        emptyList()
+    /**
+     * Pulls unsent readings that still sit in the legacy plaintext queue into the
+     * encrypted snapshot, then deletes that file. Unreadable plaintext is kept.
+     */
+    private fun absorbLegacyQueue() {
+        val legacy = readLegacyQueue()
+        if (!legacy.readable) return
+        val have = snapshot.queue.map { it.clientReadingId }.toSet()
+        val extra = legacy.items.filter { it.clientReadingId !in have }
+        if (extra.isNotEmpty()) {
+            val previous = snapshot
+            snapshot = snapshot.copy(queue = snapshot.queue + extra)
+            if (!writeSnapshot()) {
+                snapshot = previous
+                return
+            }
+        }
+        legacyQueueDeleter()
     }
 
     private fun commit(previous: PatientSnapshot): Boolean {
