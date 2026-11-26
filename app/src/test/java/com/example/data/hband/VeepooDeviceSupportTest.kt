@@ -75,5 +75,18 @@ class VeepooDeviceSupportTest {
     fun card_copy_is_the_approved_portuguese() {
         assertEquals("Este relógio não é compatível. Use o VE30.", VeepooDeviceSupport.INCOMPATIBLE_CARD_TEXT)
         assertEquals("Esquecer relógio", VeepooDeviceSupport.FORGET_WATCH_LABEL)
+        assertEquals(
+            "A lista mostra só relógios compatíveis com este aplicativo.",
+            VeepooDeviceSupport.COMPATIBLE_ONLY_HINT,
+        )
+        assertFalse(VeepooDeviceSupport.COMPATIBLE_ONLY_HINT.contains("UUID"))
+        assertFalse(VeepooDeviceSupport.COMPATIBLE_ONLY_HINT.contains("f8"))
+    }
+
+    @Test
+    fun hyphenated_veepoo_names_stay_supported() {
+        for (name in listOf("VE-30", "H-Band", "h_band", "VEEPOO")) {
+            assertEquals(name, VeepooDeviceSupport.Kind.SUPPORTED_VEEPOO, VeepooDeviceSupport.classify(name))
+        }
     }
 }

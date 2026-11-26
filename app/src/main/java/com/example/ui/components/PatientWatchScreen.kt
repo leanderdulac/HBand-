@@ -33,6 +33,7 @@ import androidx.core.content.ContextCompat
 import androidx.core.net.toUri
 import com.example.data.model.HBandDevice
 import com.example.data.hband.BleScanFailure
+import com.example.data.hband.VeepooDeviceSupport
 
 @Composable
 fun PatientWatchScreen(
@@ -199,6 +200,10 @@ internal fun PatientWatchContent(
                 }
             }
         }, second = {
+            Text(
+                VeepooDeviceSupport.COMPATIBLE_ONLY_HINT,
+                style = MaterialTheme.typography.bodyLarge,
+            )
             Text("Relógios encontrados", style = MaterialTheme.typography.titleLarge,
                 modifier = Modifier.testTag("watch_results_heading").semantics {
                     heading()

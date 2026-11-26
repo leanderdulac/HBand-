@@ -33,6 +33,7 @@
 		A10000000000000100000023 /* BleWake.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000100000023 /* BleWake.swift */; };
 		A10000000000000100000024 /* IngestURLSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000100000024 /* IngestURLSession.swift */; };
 		A10000000000000100000025 /* MeasurementCyclePolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000100000025 /* MeasurementCyclePolicy.swift */; };
+		A1000000000000010000002C /* WatchScanFilter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000010000002C /* WatchScanFilter.swift */; };
 		A10000000000000100000026 /* AiInsightConsent.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000100000026 /* AiInsightConsent.swift */; };
 		A10000000000000100000027 /* AiInsightConsentUI.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000100000027 /* AiInsightConsentUI.swift */; };
 		A10000000000000100000021 /* VeepooHistoryIngest.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000100000021 /* VeepooHistoryIngest.swift */; };
@@ -102,6 +103,7 @@
 		A20000000000000100000023 /* BleWake.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BleWake.swift; sourceTree = "<group>"; };
 		A20000000000000100000024 /* IngestURLSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IngestURLSession.swift; sourceTree = "<group>"; };
 		A20000000000000100000025 /* MeasurementCyclePolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeasurementCyclePolicy.swift; sourceTree = "<group>"; };
+		A2000000000000010000002C /* WatchScanFilter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchScanFilter.swift; sourceTree = "<group>"; };
 		A20000000000000100000026 /* AiInsightConsent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AiInsightConsent.swift; sourceTree = "<group>"; };
 		A20000000000000100000027 /* AiInsightConsentUI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AiInsightConsentUI.swift; sourceTree = "<group>"; };
 		A20000000000000100000021 /* VeepooHistoryIngest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VeepooHistoryIngest.swift; sourceTree = "<group>"; };
@@ -188,6 +190,7 @@
 				A20000000000000100000023 /* BleWake.swift */,
 				A20000000000000100000024 /* IngestURLSession.swift */,
 				A20000000000000100000025 /* MeasurementCyclePolicy.swift */,
+				A2000000000000010000002C /* WatchScanFilter.swift */,
 				A20000000000000100000026 /* AiInsightConsent.swift */,
 				A20000000000000100000027 /* AiInsightConsentUI.swift */,
 				A20000000000000100000021 /* VeepooHistoryIngest.swift */,
@@ -352,6 +355,7 @@
 				A10000000000000100000023 /* BleWake.swift in Sources */,
 				A10000000000000100000024 /* IngestURLSession.swift in Sources */,
 				A10000000000000100000025 /* MeasurementCyclePolicy.swift in Sources */,
+				A1000000000000010000002C /* WatchScanFilter.swift in Sources */,
 				A10000000000000100000026 /* AiInsightConsent.swift in Sources */,
 				A10000000000000100000027 /* AiInsightConsentUI.swift in Sources */,
 				A10000000000000100000021 /* VeepooHistoryIngest.swift in Sources */,

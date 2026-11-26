@@ -114,6 +114,10 @@ struct WatchScreen: View {
 
     private var deviceList: some View {
         VStack(alignment: .leading, spacing: 8) {
+            Text(WatchScanFilter.patientHint)
+                .font(.system(size: 15))
+                .foregroundStyle(palette.onSurfaceVariant)
+                .fixedSize(horizontal: false, vertical: true)
             ForEach(session.devices) { watch in
                 Button {
                     session.connect(watch)
