@@ -137,17 +137,24 @@ final class VeepooSession: NSObject, ObservableObject {
     /// One auto-connect to the last known watch per user scan.
     private var autoConnectAttemptedThisScan = false
 
-    /// Services VE30/HBand-class bands commonly expose. Used only to ask iOS
-    /// for peripherals already connected at the OS (H Band official / Settings).
-    private static let veepooServiceUUIDs: [CBUUID] = [
+    /// Services the Veepoo SDK itself scans for, plus the Nordic UART.
+    /// A peripheral already connected on one of these is a compatible watch
+    /// even when the patient renamed it. 180A/180D are intentionally absent:
+    /// almost every headphone and phone exposes them.
+    private static let trustedConnectedServiceUUIDs: [CBUUID] = [
+        CBUUID(string: "FEE7"),
+        CBUUID(string: "FFFF"),
+        CBUUID(string: "0001"),
+        CBUUID(string: "6E400001-B5A3-F393-E0A9-E50E24DCCA9E"),
+    ]
+
+    /// Other services VE30-class bands expose. Listed only when the name also
+    /// matches, so a connected serial dongle does not fill the patient list.
+    private static let namedOnlyConnectedServiceUUIDs: [CBUUID] = [
         CBUUID(string: "FFF0"),
         CBUUID(string: "FFF6"),
         CBUUID(string: "FFE0"),
-        CBUUID(string: "FEE7"),
         CBUUID(string: "5554"),
-        CBUUID(string: "180A"),
-        CBUUID(string: "180D"),
-        CBUUID(string: "6E400001-B5A3-F393-E0A9-E50E24DCCA9E"),
     ]
 
     private func beginSessionAttempt(_ origin: String) -> Bool {
@@ -738,8 +745,10 @@ final class VeepooSession: NSObject, ObservableObject {
         }
         // Relógios já ligados ao iOS (H Band oficial, Ajustes, restore) não anunciam.
         seedKnownAndConnectedWatches()
-        // Scan amplo, como no Android (`startScan(null)`): sem UUID de serviço.
-        // O scan do SDK sozinho aplica rrisLimit -85 e ignora periféricos já ligados.
+        // Scan amplo, como no Android (`startScan(null)`): sem UUID de serviço,
+        // para um VE30 fraco ou só com nome ainda chegar. A lista do paciente é
+        // filtrada em onDidDiscover. O scan do SDK sozinho aplica rrisLimit -85
+        // e ignora periféricos já ligados.
         // One scan only: a second `scanForPeripherals` from the SDK would replace this one.
         manager.centralManager.scanForPeripherals(
             withServices: nil,
@@ -759,21 +768,57 @@ final class VeepooSession: NSObject, ObservableObject {
     private func seedKnownAndConnectedWatches() {
         if let uuid = lastPeripheralUUID.flatMap(UUID.init(uuidString:)) {
             for peripheral in manager.centralManager.retrievePeripherals(withIdentifiers: [uuid]) {
-                offerRetrieved(peripheral)
+                offerRetrieved(peripheral, alreadyConnectedOnVeepooService: true)
             }
         }
-        for peripheral in manager.centralManager.retrieveConnectedPeripherals(withServices: Self.veepooServiceUUIDs) {
-            offerRetrieved(peripheral)
+        for peripheral in manager.centralManager.retrieveConnectedPeripherals(withServices: Self.trustedConnectedServiceUUIDs) {
+            offerRetrieved(peripheral, alreadyConnectedOnVeepooService: true)
+        }
+        for peripheral in manager.centralManager.retrieveConnectedPeripherals(withServices: Self.namedOnlyConnectedServiceUUIDs) {
+            offerRetrieved(peripheral, alreadyConnectedOnVeepooService: false)
         }
     }
 
-    private func offerRetrieved(_ peripheral: CBPeripheral) {
+    private func savedWatchAddresses() -> [String] {
+        [lastAddress].compactMap { $0 }
+    }
+
+    private func savedPeripheralUuids() -> [String] {
+        [lastPeripheralUUID].compactMap { $0 }
+    }
+
+    private func advertisedServiceUuids(_ advertisementData: [String: Any]) -> [String] {
+        var ids: [String] = []
+        let keys = [
+            CBAdvertisementDataServiceUUIDsKey,
+            CBAdvertisementDataOverflowServiceUUIDsKey,
+        ]
+        for key in keys {
+            if let list = advertisementData[key] as? [CBUUID] {
+                ids.append(contentsOf: list.map(\.uuidString))
+            }
+        }
+        if let serviceData = advertisementData[CBAdvertisementDataServiceDataKey] as? [CBUUID: Data] {
+            ids.append(contentsOf: serviceData.keys.map(\.uuidString))
+        }
+        return ids
+    }
+
+    private func offerRetrieved(_ peripheral: CBPeripheral, alreadyConnectedOnVeepooService: Bool) {
+        let uuid = peripheral.identifier.uuidString
+        guard WatchScanFilter.shouldList(
+            name: peripheral.name,
+            knownAddresses: savedWatchAddresses(),
+            uuid: uuid,
+            knownUuids: savedPeripheralUuids(),
+            alreadyConnectedOnVeepooService: alreadyConnectedOnVeepooService
+        ) else { return }
         guard let model = VPPeripheralModel(peripher: peripheral) else { return }
         upsertScanned(
             model: model,
             fallbackName: peripheral.name ?? lastName,
             rssi: 0,
-            uuid: peripheral.identifier.uuidString,
+            uuid: uuid,
             isOsConnected: peripheral.state == .connected || peripheral.state == .connecting
         )
     }
@@ -787,17 +832,23 @@ final class VeepooSession: NSObject, ObservableObject {
         let localName = advertisementData[CBAdvertisementDataLocalNameKey] as? String
         let manufacturer = advertisementData[CBAdvertisementDataManufacturerDataKey] as? Data
         let uuid = peripheral.identifier.uuidString
-        let isKnown = uuid == lastPeripheralUUID
-        let named = !((localName ?? peripheral.name ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         let osConnected = peripheral.state == .connected || peripheral.state == .connecting
-        // Keep unnamed random beacons off the patient list; keep anything named, known, or connected.
-        guard isKnown || named || manufacturer != nil || osConnected else { return }
         let advertised: VPPeripheralModel? = VPPeripheralModel(
             peripher: peripheral,
             advertisementData: advertisementData,
             rssi: rssi
         )
         guard let model = advertised ?? VPPeripheralModel(peripher: peripheral) else { return }
+        let mac = (model.deviceAddress ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard WatchScanFilter.shouldList(
+            name: localName ?? peripheral.name ?? model.deviceName,
+            serviceUuids: advertisedServiceUuids(advertisementData),
+            manufacturerData: manufacturer,
+            address: mac,
+            knownAddresses: savedWatchAddresses(),
+            uuid: uuid,
+            knownUuids: savedPeripheralUuids()
+        ) else { return }
         let rssiValue = rssi.intValue == 127 ? 0 : rssi.intValue
         upsertScanned(
             model: model,
@@ -820,7 +871,7 @@ final class VeepooSession: NSObject, ObservableObject {
         guard !ident.isEmpty else { return }
         let resolvedName = [model.deviceName, fallbackName, lastName]
             .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .first { !$0.isEmpty } ?? "Relógio"
+            .first { !$0.isEmpty } ?? WatchScanFilter.unnamedWatchLabel
         let watch = ScannedWatch(
             name: resolvedName,
             address: mac.isEmpty ? ident : mac,

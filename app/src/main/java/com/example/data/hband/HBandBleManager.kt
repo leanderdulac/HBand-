@@ -144,6 +144,8 @@ class HBandBleManager(
     val sessionMessage: StateFlow<String?> = _sessionMessage.asStateFlow()
 
     private val advertisedServices = ConcurrentHashMap<String, Set<UUID>>()
+    /** MACs whose advertisement carried the Veepoo manufacturer ID (f8f8 / f8f9). */
+    private val veepooManufacturerMacs = ConcurrentHashMap.newKeySet<String>()
     private val _incompatibleWatch = MutableStateFlow<HBandDevice?>(null)
     val incompatibleWatch: StateFlow<HBandDevice?> = _incompatibleWatch.asStateFlow()
     private val veepooWriteBackoff = VeepooWriteBackoff()
@@ -500,12 +502,26 @@ class HBandBleManager(
                 val bonded = adapter.bondedDevices ?: emptySet()
                 val bondedList = mutableListOf<HBandDevice>()
 
+                val known = knownWatchAddresses()
                 for (dev in bonded) {
-                    val name = dev.name ?: "Dispositivo Pareado"
                     val address = dev.address ?: continue
+                    val rawName = bluetoothDeviceNameOrFallback(dev, "")
+                    if (!VeepooDeviceSupport.shouldListForPatient(
+                            name = rawName,
+                            serviceUuids = advertisedServices[address].orEmpty(),
+                            hasVeepooManufacturer = veepooManufacturerMacs.contains(address),
+                            address = address,
+                            knownAddresses = known,
+                        )
+                    ) continue
+                    val savedName = if (matchesKnownWatch(address)) {
+                        prefs.getString(PREF_LAST_NAME, null).orEmpty()
+                    } else {
+                        ""
+                    }
                     val hDev = HBandDevice(
                         deviceId = address,
-                        name = name,
+                        name = VeepooDeviceSupport.patientDisplayName(rawName.ifBlank { savedName }),
                         macAddress = address,
                         rssi = -60,
                         isConnected = false,
@@ -585,6 +601,9 @@ class HBandBleManager(
         val scanner = adapter.bluetoothLeScanner ?: throw BleScanUnavailableException(BleScanFailure.SCANNER_UNAVAILABLE)
         activeScanner = scanner
         val settings = ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY).build()
+        // Wide scan on purpose: a hardware ScanFilter would drop a VE30 that only
+        // puts its name in the advertisement. The patient list is filtered in
+        // acceptScanResults with the same Veepoo signals the SDK expects.
         scanner.startScan(null, settings, callback)
     }
 
@@ -596,21 +615,34 @@ class HBandBleManager(
     }
 
     private fun acceptScanResults(results: List<ScanResult>) {
+        val known = knownWatchAddresses()
         for (result in results) {
             val device = result.device ?: continue
             val address = device.address ?: continue
             val rawName = bluetoothDeviceNameOrFallback(device, result.scanRecord?.deviceName ?: "")
-            val displayName = if (rawName.isNotBlank()) rawName else "Dispositivo BLE ($address)"
             val scannedUuids = buildSet {
                 result.scanRecord?.serviceUuids?.forEach { add(it.uuid) }
                 result.scanRecord?.serviceData?.keys?.forEach { add(it.uuid) }
             }
-            if (scannedUuids.isNotEmpty()) advertisedServices[address] = scannedUuids
+            if (scannedUuids.isNotEmpty()) {
+                advertisedServices[address] = advertisedServices[address].orEmpty() + scannedUuids
+            }
+            if (hasVeepooManufacturer(result)) veepooManufacturerMacs.add(address)
+            val previous = discoveredMap[address]
+            val effectiveName = rawName.trim().ifBlank { previous?.name.orEmpty() }
+            if (!VeepooDeviceSupport.shouldListForPatient(
+                    name = effectiveName,
+                    serviceUuids = advertisedServices[address].orEmpty(),
+                    hasVeepooManufacturer = veepooManufacturerMacs.contains(address),
+                    address = address,
+                    knownAddresses = known,
+                )
+            ) continue
             val isCurrent = _connectedDevice.value?.macAddress.equals(address, ignoreCase = true) &&
                 _connectedDevice.value?.isConnected == true
             discoveredMap[address] = HBandDevice(
                 deviceId = address,
-                name = displayName,
+                name = VeepooDeviceSupport.patientDisplayName(effectiveName),
                 macAddress = address,
                 rssi = result.rssi,
                 isConnected = isCurrent,
@@ -621,6 +653,28 @@ class HBandBleManager(
         }
         _scannedDevices.value = discoveredMap.values.toList()
     }
+
+    private fun knownWatchAddresses(): Set<String> = buildSet {
+        prefs.getString(PREF_LAST_MAC, null)?.let { add(it) }
+        _connectedDevice.value?.macAddress?.let { add(it) }
+    }
+
+    private fun matchesKnownWatch(address: String): Boolean =
+        VeepooDeviceSupport.matchesKnownAddress(address, knownWatchAddresses())
+
+    private fun hasVeepooManufacturer(result: ScanResult): Boolean {
+        val sparse = result.scanRecord?.manufacturerSpecificData ?: return false
+        for (index in 0 until sparse.size()) {
+            val payload = sparse.valueAt(index)
+            if (VeepooDeviceSupport.isVeepooManufacturer(sparse.keyAt(index), payload?.size ?: 0)) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private fun hasVeepooManufacturer(mac: String?): Boolean =
+        mac != null && veepooManufacturerMacs.contains(mac)
 
     @SuppressLint("MissingPermission")
     fun connectDevice(device: HBandDevice): Boolean {
@@ -642,7 +696,7 @@ class HBandBleManager(
         }
         userRequestedDisconnect = false
         val advertised = advertisedServices[device.macAddress].orEmpty()
-        return when (VeepooDeviceSupport.classify(device.name, advertised)) {
+        return when (VeepooDeviceSupport.classify(device.name, advertised, hasVeepooManufacturer(device.macAddress))) {
             VeepooDeviceSupport.Kind.UNSUPPORTED -> {
                 markIncompatible(device, persist = false)
                 false
@@ -1603,8 +1657,11 @@ class HBandBleManager(
     private fun persistLastDevice(device: HBandDevice) {
         val mac = device.macAddress.trim()
         if (!BluetoothAdapter.checkBluetoothAddress(mac)) return
-        if (VeepooDeviceSupport.classify(device.name, advertisedServices[mac].orEmpty()) ==
-            VeepooDeviceSupport.Kind.UNSUPPORTED
+        if (VeepooDeviceSupport.classify(
+                device.name,
+                advertisedServices[mac].orEmpty(),
+                hasVeepooManufacturer(mac),
+            ) == VeepooDeviceSupport.Kind.UNSUPPORTED
         ) return
         prefs.edit()
             .putString(PREF_LAST_MAC, mac)
@@ -2005,7 +2062,7 @@ class HBandBleManager(
                 val discovered = gatt.services.map { it.uuid }.toSet()
                 if (discovered.isNotEmpty()) advertisedServices[gatt.device.address] = discovered
                 val name = bluetoothDeviceNameOrFallback(gatt.device, _connectedDevice.value?.name.orEmpty())
-                when (VeepooDeviceSupport.classify(name, discovered)) {
+                when (VeepooDeviceSupport.classify(name, discovered, hasVeepooManufacturer(gatt.device.address))) {
                     VeepooDeviceSupport.Kind.UNSUPPORTED -> {
                         markIncompatible(
                             (_connectedDevice.value ?: HBandDevice()).copy(
@@ -2262,6 +2319,7 @@ class HBandBleManager(
         if (!VeepooDeviceSupport.maySendVeepooCommand(
                 _connectedDevice.value?.name,
                 advertisedServices[mac].orEmpty(),
+                hasVeepooManufacturer(mac),
             )
         ) return
         if (discoveredWriteCharacteristics.isEmpty()) return
