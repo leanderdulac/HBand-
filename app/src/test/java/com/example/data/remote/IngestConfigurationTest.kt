@@ -3,6 +3,7 @@ package com.example.data.remote
 import android.app.Application
 import android.content.Context
 import com.example.data.ingest.IngestApiKey
+import com.example.data.local.CredentialStore
 import com.example.data.ingest.IngestDiagnostics
 import com.example.data.ingest.QueueAuthorization
 import com.example.data.local.IngestQueueEntity
@@ -25,6 +26,7 @@ class IngestConfigurationTest {
     private val context get() = RuntimeEnvironment.getApplication()
     @Before fun resetSyntheticPreferences() {
         context.getSharedPreferences("hband_settings", Context.MODE_PRIVATE).edit().clear().commit()
+        context.getSharedPreferences(CredentialStore.PREFS, Context.MODE_PRIVATE).edit().clear().commit()
         RetrofitClient.initialize(context)
     }
     private val noNetwork = object : HealthTechApiService {
@@ -90,6 +92,10 @@ class IngestConfigurationTest {
 
     @Test fun settings_reload_clear_and_invalid_update_preserve_expected_configuration() = runBlocking {
         RetrofitClient.updateConfig(context, "https://approved.invalid/", "synthetic-key")
+        val dumped = context.getSharedPreferences("hband_settings", Context.MODE_PRIVATE).all.toString() +
+            context.getSharedPreferences(CredentialStore.PREFS, Context.MODE_PRIVATE).all.toString()
+        assertFalse(dumped.contains("synthetic-key"))
+        assertFalse(context.getSharedPreferences("hband_settings", Context.MODE_PRIVATE).contains("custom_api_key"))
         val expected = RetrofitClient.configurationState.first()
         RetrofitClient.initialize(context)
         assertEquals(expected, RetrofitClient.configurationState.first())

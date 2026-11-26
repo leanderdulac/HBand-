@@ -11,7 +11,31 @@ enum PatientCrypto {
     static let fileName = "next2u-healthsync-snapshot.bin"
 
     static func install() {
+        protectContainers()
         IosSecureHooks.shared.install(loader: Loader(), saver: Saver())
+    }
+
+    /// Data Protection class requested for health files. Background upload still
+    /// works after the first unlock of the device.
+    static func protectContainers() {
+        let manager = FileManager.default
+        guard let docs = manager.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
+        let extras = [
+            docs,
+            docs.appendingPathComponent(fileName),
+            docs.appendingPathComponent("next2u-healthsync-queue.json"),
+            docs.appendingPathComponent(fileName).appendingPathExtension("r8migrating"),
+        ]
+        for url in extras where manager.fileExists(atPath: url.path) {
+            try? manager.setAttributes(
+                [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication],
+                ofItemAtPath: url.path
+            )
+        }
+        try? manager.setAttributes(
+            [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication],
+            ofItemAtPath: docs.path
+        )
     }
 
     final class Loader: PlaintextLoader {
@@ -37,6 +61,14 @@ enum PatientCrypto {
             return PlaintextRead(missing: true, failed: false, plaintext: "", detail: "")
         }
         guard let key = loadKey() else {
+            // No Keychain item yet: a legacy JSON file can be encrypted now.
+            // Anything else is left byte-for-byte (likely ciphertext without its key).
+            if let data = try? Data(contentsOf: url),
+               let text = String(data: data, encoding: .utf8),
+               SnapshotAtRest.shared.shouldMigratePlaintext(utf8: text),
+               migratePlaintext(text, url: url) {
+                return PlaintextRead(missing: false, failed: false, plaintext: text, detail: "")
+            }
             return PlaintextRead(
                 missing: false,
                 failed: true,
@@ -44,14 +76,9 @@ enum PatientCrypto {
                 detail: "Chave do Keychain ausente. O arquivo cifrado não foi tocado."
             )
         }
+        let data: Data
         do {
-            let data = try Data(contentsOf: url)
-            let box = try AES.GCM.SealedBox(combined: data)
-            let plain = try AES.GCM.open(box, using: key)
-            guard let text = String(data: plain, encoding: .utf8) else {
-                return PlaintextRead(missing: false, failed: true, plaintext: "", detail: "UTF-8 inválido.")
-            }
-            return PlaintextRead(missing: false, failed: false, plaintext: text, detail: "")
+            data = try Data(contentsOf: url)
         } catch {
             return PlaintextRead(
                 missing: false,
@@ -60,6 +87,58 @@ enum PatientCrypto {
                 detail: error.localizedDescription
             )
         }
+        if let text = decrypt(data, key: key) {
+            protect(url)
+            return PlaintextRead(missing: false, failed: false, plaintext: text, detail: "")
+        }
+        // Legacy plaintext JSON (queue, profile, readings). Re-encrypt in place
+        // only after a round-trip matches; otherwise the original file stays.
+        if let text = String(data: data, encoding: .utf8),
+           SnapshotAtRest.shared.shouldMigratePlaintext(utf8: text),
+           migratePlaintext(text, url: url) {
+            return PlaintextRead(missing: false, failed: false, plaintext: text, detail: "")
+        }
+        return PlaintextRead(
+            missing: false,
+            failed: true,
+            plaintext: "",
+            detail: "Arquivo ilegível. O conteúdo original não foi substituído."
+        )
+    }
+
+    private static func decrypt(_ data: Data, key: SymmetricKey) -> String? {
+        guard let box = try? AES.GCM.SealedBox(combined: data),
+              let plain = try? AES.GCM.open(box, using: key),
+              let text = String(data: plain, encoding: .utf8) else { return nil }
+        return text
+    }
+
+    private static func migratePlaintext(_ text: String, url: URL) -> Bool {
+        let temp = url.appendingPathExtension("r8migrating")
+        do {
+            let key = try loadOrCreateKey()
+            let sealed = try AES.GCM.seal(Data(text.utf8), using: key)
+            guard let combined = sealed.combined else { return false }
+            try? FileManager.default.removeItem(at: temp)
+            try combined.write(to: temp, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+            guard decrypt(try Data(contentsOf: temp), key: key) == text else {
+                try? FileManager.default.removeItem(at: temp)
+                return false
+            }
+            _ = try FileManager.default.replaceItemAt(url, withItemAt: temp)
+            protect(url)
+            return true
+        } catch {
+            try? FileManager.default.removeItem(at: temp)
+            return false
+        }
+    }
+
+    private static func protect(_ url: URL) {
+        try? FileManager.default.setAttributes(
+            [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication],
+            ofItemAtPath: url.path
+        )
     }
 
     static func writeSnapshot(_ plaintext: String) -> Bool {

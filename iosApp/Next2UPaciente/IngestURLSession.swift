@@ -16,6 +16,7 @@ final class IngestURLSession: NSObject, URLSessionDelegate, URLSessionDataDelega
     private var session: URLSession!
     private var eventsCompletion: (() -> Void)?
     private var buffers: [Int: Data] = [:]
+    private var uploadFiles: [Int: URL] = [:]
     private var inflight = false
     private let lock = NSLock()
 
@@ -112,7 +113,7 @@ final class IngestURLSession: NSObject, URLSessionDelegate, URLSessionDataDelega
         let file = FileManager.default.temporaryDirectory
             .appendingPathComponent("n2u-ingest-\(UUID().uuidString).json")
         do {
-            try data.write(to: file, options: .atomic)
+            try data.write(to: file, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
         } catch {
             lock.lock(); inflight = false; lock.unlock()
             return
@@ -130,6 +131,9 @@ final class IngestURLSession: NSObject, URLSessionDelegate, URLSessionDataDelega
 
         let task = session.uploadTask(with: request, fromFile: file)
         task.taskDescription = pending.map(\.clientReadingId).joined(separator: ",")
+        lock.lock()
+        uploadFiles[task.taskIdentifier] = file
+        lock.unlock()
         task.resume()
     }
 
@@ -141,7 +145,13 @@ final class IngestURLSession: NSObject, URLSessionDelegate, URLSessionDataDelega
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         let id = task.taskIdentifier
         let body = buffers.removeValue(forKey: id)
-        lock.lock(); inflight = false; lock.unlock()
+        lock.lock()
+        inflight = false
+        let uploadFile = uploadFiles.removeValue(forKey: id)
+        lock.unlock()
+        if let uploadFile {
+            try? FileManager.default.removeItem(at: uploadFile)
+        }
         let code = (task.response as? HTTPURLResponse)?.statusCode ?? 0
         if let error {
             NSLog("[Next2U] URLSession background: erro %@", error.localizedDescription)

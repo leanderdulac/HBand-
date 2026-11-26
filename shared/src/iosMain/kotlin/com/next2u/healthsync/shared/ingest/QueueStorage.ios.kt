@@ -3,6 +3,7 @@ package com.next2u.healthsync.shared.ingest
 import platform.Foundation.NSSearchPathForDirectoriesInDomains
 import platform.Foundation.NSDocumentDirectory
 import platform.Foundation.NSUserDomainMask
+import platform.Foundation.NSFileManager
 import platform.Foundation.NSString
 import platform.Foundation.NSUTF8StringEncoding
 import platform.Foundation.stringWithContentsOfFile
@@ -23,4 +24,10 @@ internal actual object PlatformQueueStore {
     actual fun saveJson(json: String) {
         (json as NSString).writeToFile(path, atomically = true, encoding = NSUTF8StringEncoding, error = null)
     }
+
+    actual fun deletePlaintext(): Boolean = runCatching {
+        val manager = NSFileManager.defaultManager
+        if (!manager.fileExistsAtPath(path)) return@runCatching true
+        manager.removeItemAtPath(path, error = null)
+    }.getOrDefault(false)
 }

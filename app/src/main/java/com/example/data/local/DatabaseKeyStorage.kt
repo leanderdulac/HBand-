@@ -26,9 +26,24 @@ internal class DatabaseKeyStorage(
 
     @Synchronized
     fun getOrCreate(prefs: SharedPreferences, database: File): ByteArray =
-        try { loadOrCreate(prefs, database) } catch (_: Exception) { throw DatabaseKeyUnavailableException() }
+        try { loadOrCreate(prefs, database, ignoreExistingFiles = false) } catch (_: Exception) { throw DatabaseKeyUnavailableException() }
 
-    private fun loadOrCreate(prefs: SharedPreferences, database: File): ByteArray {
+    /**
+     * A plaintext SQLite file is evidence we can encrypt, not an opaque database
+     * whose key must be recovered. The file bytes are not modified here.
+     * Opaque files and partial wrapped metadata still refuse to mint a key.
+     */
+    @Synchronized
+    fun getOrCreateForPlaintextMigration(prefs: SharedPreferences, database: File): ByteArray {
+        if (!SqliteFileInspector.looksLikeUnencryptedSqlite(database)) throw DatabaseKeyUnavailableException()
+        return try {
+            loadOrCreate(prefs, database, ignoreExistingFiles = true)
+        } catch (_: Exception) {
+            throw DatabaseKeyUnavailableException()
+        }
+    }
+
+    private fun loadOrCreate(prefs: SharedPreferences, database: File, ignoreExistingFiles: Boolean): ByteArray {
         if (persistenceFailed) throw DatabaseKeyUnavailableException()
         val wrapped = read(prefs, WRAPPED_KEY)
         val iv = read(prefs, WRAPPED_IV)
@@ -39,7 +54,10 @@ internal class DatabaseKeyStorage(
             return raw
         }
         // Sidecars, even without the main file, are evidence requiring recovery.
-        if (listOf("", "-wal", "-shm", "-journal").any { File(database.path + it).exists() }) {
+        // Plaintext migration opts in only after the caller has checked the SQLite header.
+        if (!ignoreExistingFiles &&
+            listOf("", "-wal", "-shm", "-journal").any { File(database.path + it).exists() }
+        ) {
             throw DatabaseKeyUnavailableException()
         }
         val raw = generate()

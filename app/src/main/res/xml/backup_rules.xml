@@ -1,5 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <full-backup-content>
     <exclude domain="database" path="healthtech_wearable_db" />
+    <exclude domain="database" path="healthtech_wearable_db.plaintext-preserved" />
+    <exclude domain="database" path="healthtech_wearable_db.plaintext-retired" />
+    <exclude domain="database" path="healthtech_wearable_db.cipher-tmp" />
     <exclude domain="sharedpref" path="hband_sqlcipher.xml" />
+    <exclude domain="sharedpref" path="hband_credentials.xml" />
 </full-backup-content>

@@ -34,6 +34,15 @@ object SqlCipherPassphrase {
             app.getDatabasePath(AppDatabase.DATABASE_NAME))
     } catch (_: Exception) { throw DatabaseKeyUnavailableException() }
 
+    /** Key for encrypting an existing plaintext SQLite file. Does not rewrite that file. */
+    fun getPassphraseForPlaintextMigration(context: Context): ByteArray = try {
+        val app = context.applicationContext
+        storage.getOrCreateForPlaintextMigration(
+            app.getSharedPreferences(PREFS, Context.MODE_PRIVATE),
+            app.getDatabasePath(AppDatabase.DATABASE_NAME),
+        )
+    } catch (_: Exception) { throw DatabaseKeyUnavailableException() }
+
     private fun wrap(raw: ByteArray): Pair<ByteArray, ByteArray> {
         val cipher = Cipher.getInstance(TRANSFORMATION)
         cipher.init(Cipher.ENCRYPT_MODE, getOrCreateSecretKey())

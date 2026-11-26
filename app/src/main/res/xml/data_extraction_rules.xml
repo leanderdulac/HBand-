@@ -2,10 +2,18 @@
 <data-extraction-rules>
     <cloud-backup>
         <exclude domain="database" path="healthtech_wearable_db" />
+        <exclude domain="database" path="healthtech_wearable_db.plaintext-preserved" />
+        <exclude domain="database" path="healthtech_wearable_db.plaintext-retired" />
+        <exclude domain="database" path="healthtech_wearable_db.cipher-tmp" />
         <exclude domain="sharedpref" path="hband_sqlcipher.xml" />
+        <exclude domain="sharedpref" path="hband_credentials.xml" />
     </cloud-backup>
     <device-transfer>
         <exclude domain="database" path="healthtech_wearable_db" />
+        <exclude domain="database" path="healthtech_wearable_db.plaintext-preserved" />
+        <exclude domain="database" path="healthtech_wearable_db.plaintext-retired" />
+        <exclude domain="database" path="healthtech_wearable_db.cipher-tmp" />
         <exclude domain="sharedpref" path="hband_sqlcipher.xml" />
+        <exclude domain="sharedpref" path="hband_credentials.xml" />
     </device-transfer>
 </data-extraction-rules>
