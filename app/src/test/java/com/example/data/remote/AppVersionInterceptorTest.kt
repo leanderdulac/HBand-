@@ -19,7 +19,7 @@ class AppVersionInterceptorTest {
             "android-${BuildConfig.VERSION_NAME}+${BuildConfig.VERSION_CODE}",
             AppVersionInterceptor.header(BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE),
         )
-        assertEquals("android-1.8.3+25", AppVersionInterceptor.header(BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE))
+        assertEquals("android-1.8.4+26", AppVersionInterceptor.header(BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE))
     }
 
     @Test fun interceptor_sets_the_header_and_leaves_the_api_key() {
