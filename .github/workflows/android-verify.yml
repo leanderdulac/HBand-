@@ -67,6 +67,33 @@ jobs:
         run: |
           set -euo pipefail
           read -r -a tasks <<< "$VERIFY_TASKS"
-          bash ./gradlew "${tasks[@]}" --no-daemon --no-parallel --max-workers=1 --no-configuration-cache --console=plain
+          # The Foojay plugin marker is only on the Gradle Plugin Portal. A portal
+          # blip is reported as "plugin was not found" during settings evaluation,
+          # before any task runs, and Gradle caches that miss. The same failure
+          # already happens on main. Retry only that case; compile and test
+          # failures stay final.
+          log="$(mktemp)"
+          trap 'rm -f "$log"' EXIT
+          attempt=1
+          max_attempts=3
+          while true; do
+            gradle_args=(--no-daemon --no-parallel --max-workers=1 --no-configuration-cache --console=plain)
+            if [ "$attempt" -gt 1 ]; then
+              gradle_args+=(--refresh-dependencies)
+            fi
+            set +e
+            bash ./gradlew "${tasks[@]}" "${gradle_args[@]}" 2>&1 | tee "$log"
+            status=${PIPESTATUS[0]}
+            set -e
+            if [ "$status" -eq 0 ]; then
+              break
+            fi
+            if [ "$attempt" -ge "$max_attempts" ] || ! grep -q 'foojay-resolver-convention' "$log" || ! grep -q 'was not found' "$log"; then
+              exit "$status"
+            fi
+            echo "Gradle Plugin Portal did not return foojay-resolver-convention (attempt ${attempt}/${max_attempts}); retrying."
+            attempt=$((attempt + 1))
+            sleep $((attempt * 10))
+          done
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           test -z "$(git status --porcelain --untracked-files=no)"
