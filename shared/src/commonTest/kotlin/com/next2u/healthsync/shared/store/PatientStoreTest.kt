@@ -130,6 +130,7 @@ class PatientStoreTest {
         codec = MemorySnapshotCodec(raw)
         PatientStore.useCodec(codec)
         assertEquals(StoreStatus.FAILED, PatientStore.open())
+        assertEquals(StoreStatus.FAILED, PatientStore.retryOpen())
         assertEquals(0, codec.writeCount)
         assertEquals(raw, codec.plaintext)
         assertTrue(PatientStore.detail.contains("esquema"))
@@ -141,8 +142,38 @@ class PatientStoreTest {
         codec = MemorySnapshotCodec("not-json")
         PatientStore.useCodec(codec)
         assertEquals(StoreStatus.FAILED, PatientStore.open())
+        assertEquals(StoreStatus.FAILED, PatientStore.retryOpen())
         assertEquals(0, codec.writeCount)
         assertEquals("not-json", codec.plaintext)
+    }
+
+    @Test
+    fun transient_open_failure_is_sticky_until_retry_and_does_not_write() {
+        var reads = 0
+        val flipping = object : SnapshotCodec {
+            override fun read(): PlaintextRead {
+                reads += 1
+                return if (reads == 1) {
+                    PlaintextRead(
+                        missing = false,
+                        failed = true,
+                        detail = PatientStore.TRANSIENT_UNAVAILABLE,
+                    )
+                } else {
+                    PlaintextRead(missing = true)
+                }
+            }
+
+            override fun write(plaintext: String): Boolean = true
+        }
+        PatientStore.useCodec(flipping)
+        assertEquals(StoreStatus.FAILED, PatientStore.open())
+        assertEquals(StoreStatus.FAILED, PatientStore.open())
+        assertEquals(1, reads)
+        assertTrue(PatientStore.detail.contains("temporariamente"))
+        assertEquals(StoreStatus.READY, PatientStore.retryOpen())
+        assertEquals(2, reads)
+        assertTrue(PatientStore.isReady)
     }
 
     @Test

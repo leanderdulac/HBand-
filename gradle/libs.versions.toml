@@ -37,6 +37,12 @@ moshiKotlin = "1.15.2"
 moshiKotlinCodegen = "1.15.2"
 datastorePreferences = "1.1.7"
 robolectric = "4.16.1"
+# Preinstrumented jars for Robolectric 4.16.1 (DefaultSdkProvider, i7).
+# API levels are the ones unit tests request: 36, 31, 28, and 24.
+robolectricAndroidAllApi36 = "16-robolectric-13921718-i7"
+robolectricAndroidAllApi31 = "12-robolectric-7732740-i7"
+robolectricAndroidAllApi28 = "9-robolectric-4913185-2-i7"
+robolectricAndroidAllApi24 = "7.0.0_r1-robolectric-r1-i7"
 roborazzi = "1.59.0"
 firebaseBom = "34.15.0"
 secretsGradlePlugin = "2.0.1"
@@ -93,6 +99,10 @@ moshi-kotlin = { group = "com.squareup.moshi", name = "moshi-kotlin", version.re
 moshi-kotlin-codegen = { group = "com.squareup.moshi", name = "moshi-kotlin-codegen", version.ref = "moshiKotlinCodegen" }
 androidx-datastore-preferences = { group = "androidx.datastore", name = "datastore-preferences", version.ref = "datastorePreferences" }
 robolectric = { group = "org.robolectric", name = "robolectric", version.ref = "robolectric" }
+robolectric-android-all-api36 = { group = "org.robolectric", name = "android-all-instrumented", version.ref = "robolectricAndroidAllApi36" }
+robolectric-android-all-api31 = { group = "org.robolectric", name = "android-all-instrumented", version.ref = "robolectricAndroidAllApi31" }
+robolectric-android-all-api28 = { group = "org.robolectric", name = "android-all-instrumented", version.ref = "robolectricAndroidAllApi28" }
+robolectric-android-all-api24 = { group = "org.robolectric", name = "android-all-instrumented", version.ref = "robolectricAndroidAllApi24" }
 roborazzi = { group = "io.github.takahirom.roborazzi", name = "roborazzi", version.ref = "roborazzi" }
 roborazzi-compose = { group = "io.github.takahirom.roborazzi", name = "roborazzi-compose", version.ref = "roborazzi" }
 roborazzi-junit-rule = { group = "io.github.takahirom.roborazzi", name = "roborazzi-junit-rule", version.ref = "roborazzi" }

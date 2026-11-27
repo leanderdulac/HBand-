@@ -205,6 +205,31 @@ gradle.taskGraph.whenReady {
 
 googleServices { missingGoogleServicesStrategy = MissingGoogleServicesStrategy.WARN }
 
+// Robolectric otherwise downloads these jars itself, with HttpURLConnection, while
+// the tests run. One dropped connection fails every Robolectric class in
+// MavenArtifactFetcher. Gradle fetches the jars the unit tests request and the
+// tests read that directory offline. Each API is its own configuration: Gradle
+// keeps a single version of one module on a shared configuration.
+fun robolectricJarConfiguration(name: String) = configurations.create(name) {
+  isCanBeConsumed = false
+  isCanBeResolved = true
+  isTransitive = false
+}
+val robolectricApi36 = robolectricJarConfiguration("robolectricApi36")
+val robolectricApi31 = robolectricJarConfiguration("robolectricApi31")
+val robolectricApi28 = robolectricJarConfiguration("robolectricApi28")
+val robolectricApi24 = robolectricJarConfiguration("robolectricApi24")
+val robolectricJarDir = layout.buildDirectory.dir("robolectric-jars")
+val stageRobolectricRuntime by tasks.registering(Sync::class) {
+  from(robolectricApi36, robolectricApi31, robolectricApi28, robolectricApi24)
+  into(robolectricJarDir)
+}
+tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
+  dependsOn(stageRobolectricRuntime)
+  systemProperty("robolectric.offline", "true")
+  systemProperty("robolectric.dependency.dir", robolectricJarDir.get().asFile.absolutePath)
+}
+
 // Some unused dependencies are commented out below instead of being removed.
 // This makes it easy to add them back in the future if needed.
 dependencies {
@@ -272,6 +297,10 @@ dependencies {
   testImplementation("org.json:json:20240303")
   testImplementation(libs.kotlinx.coroutines.test)
   testImplementation(libs.robolectric)
+  add("robolectricApi36", libs.robolectric.android.all.api36)
+  add("robolectricApi31", libs.robolectric.android.all.api31)
+  add("robolectricApi28", libs.robolectric.android.all.api28)
+  add("robolectricApi24", libs.robolectric.android.all.api24)
   testImplementation(libs.roborazzi)
   testImplementation(libs.roborazzi.compose)
   testImplementation(libs.roborazzi.junit.rule)
