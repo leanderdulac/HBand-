@@ -118,6 +118,14 @@ final class VeepooSession: NSObject, ObservableObject {
     /// Segundo plano: o app só lê o histórico gravado. Um teste ao vivo (FC/SpO₂/PA)
     /// é parado ao ir para o fundo — deixá-lo ligado era o que descarregava o relógio.
     private var backgroundStreaming = false
+    /// Service-UUID scan kept by iOS after suspend. Not the user-facing scan.
+    private var backgroundWakeScan = false
+    /// Closed-set label for `sync_wake`. Not clinical data.
+    private var syncWake = "foreground"
+    /// Set when a background history read must win over an in-flight policy write.
+    private var abandonPolicyWrites = false
+    private var lastStallCheckAt = Date()
+    static let batteryPolicyUUIDKey = "veepoo_battery_policy_uuid"
     private var lastRecordAt = Date.distantPast
     private var lastFlushAt = Date.distantPast
     private var deferredFlush: Task<Void, Never>?
@@ -226,6 +234,12 @@ final class VeepooSession: NSObject, ObservableObject {
         nc.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.handleWillEnterForeground() }
         }
+        nc.addObserver(forName: UIApplication.protectedDataDidBecomeAvailableNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard PatientStoreBootstrap.prepare() else { return }
+                self?.flushQueueOnly()
+            }
+        }
         // Fuso ou hora do iPhone mudou: reacerta o relógio se houver sessão.
         for name in [Notification.Name.NSSystemTimeZoneDidChange, UIApplication.significantTimeChangeNotification] {
             nc.addObserver(forName: name, object: nil, queue: .main) { [weak self] n in
@@ -238,11 +252,11 @@ final class VeepooSession: NSObject, ObservableObject {
         }
     }
 
-    /// Tempo máximo entre pedir a sessão Veepoo (senha 0000) e o handshake; passou disso,
-    /// o watchdog repõe a sessão. Antes eram 60 s + até 30 s de intervalo do timer.
-    static let handshakeAttemptTimeout: TimeInterval = 8
-    /// Tentativas de repor a sessão no mesmo GATT antes de derrubar o link e religar do zero.
-    static let handshakeRetriesBeforeLinkReset = 2
+    /// Tempo máximo de uma tentativa de senha 0000. 8 s derrubava o link em RSSI fraco
+    /// (relógio no pulso, iPhone no bolso) e o cancelamento virava um loop de
+    /// desconexão. O watchdog só religa o link no primeiro plano, e nunca por tempo
+    /// que passou com o processo suspenso.
+    static let handshakeAttemptTimeout: TimeInterval = BackgroundSyncPolicy.handshakeTimeout
     static let watchdogInterval: TimeInterval = 3
     private var handshakeRetries = 0
     private var passwordSentAt: Date?
@@ -261,7 +275,12 @@ final class VeepooSession: NSObject, ObservableObject {
 
     private func checkStall() {
         let now = Date()
+        let sinceLastCheck = now.timeIntervalSince(lastStallCheckAt)
+        lastStallCheckAt = now
         guard autoReconnectEnabled, !userRequestedDisconnect else { return }
+        if Self.isInBackground {
+            _ = PatientStoreBootstrap.prepare()
+        }
         if !hardwareReady {
             // GATT up but the Veepoo password handshake never finished (e.g. "bluetooth pairing
             // fail" from the SDK, or a connect issued before poweredOn that the SDK dropped).
@@ -269,22 +288,39 @@ final class VeepooSession: NSObject, ObservableObject {
                   let since = gattUpSince,
                   let uuid = lastPeripheralUUID.flatMap(UUID.init(uuidString:)),
                   let peripheral = manager.centralManager.retrievePeripherals(withIdentifiers: [uuid]).first,
-                  peripheral.state == .connected else { return }
+                  peripheral.state == .connected else {
+                if Self.isInBackground { startBackgroundWakeScan(reason: "watchdog") }
+                return
+            }
             let attemptAge = now.timeIntervalSince(sessionAttemptAt ?? since)
-            guard attemptAge > Self.handshakeAttemptTimeout else { return }
-            handshakeRetries += 1
-            if handshakeRetries > Self.handshakeRetriesBeforeLinkReset {
-                note("Watchdog: handshake sem resposta após \(handshakeRetries - 1) tentativas (\(Int(now.timeIntervalSince(since))) s). Religando o link com o relógio.")
+            let action = BackgroundSyncPolicy.handshakeAction(
+                attemptAge: attemptAge,
+                retriesSoFar: handshakeRetries,
+                sinceLastCheck: sinceLastCheck,
+                inBackground: Self.isInBackground
+            )
+            if action.resetClock {
+                sessionAttemptAt = now
+                note("Watchdog: o app ficou suspenso. A senha ganha uma nova janela, sem derrubar o link.")
+                return
+            }
+            if action.resetLink {
+                note("Watchdog: handshake sem resposta após \(handshakeRetries) tentativas (\(Int(now.timeIntervalSince(since))) s). Religando o link com o relógio.")
                 handshakeRetries = 0
                 gattUpSince = nil
                 sessionAttemptAt = nil
+                passwordSentAt = nil
                 // didDisconnect → keepPendingConnect → didConnect → resumeSession.
                 manager.centralManager.cancelPeripheralConnection(peripheral)
                 return
             }
-            note("Watchdog: handshake parado há \(Int(attemptAge)) s (tentativa \(handshakeRetries)). Repondo sessão.")
-            sessionAttemptAt = nil
-            resumeSession(peripheral)
+            if action.retryPassword {
+                handshakeRetries += 1
+                sessionAttemptAt = nil
+                passwordSentAt = nil
+                note("Watchdog: handshake parado há \(Int(attemptAge)) s (tentativa \(handshakeRetries)). Repondo a senha sem derrubar o link.")
+                resumeSession(peripheral)
+            }
             return
         }
         advanceMeasurementCycle(now: now)
@@ -387,8 +423,8 @@ final class VeepooSession: NSObject, ObservableObject {
             return
         }
         pm.veepooSDKReadAutoMonitSwitchInfo { [weak self] models in
-            Task { @MainActor in
-                guard let self, self.hardwareReady else { return }
+            BleMain.run {
+                guard let self, self.hardwareReady, !self.abandonPolicyWrites else { return }
                 guard let models else {
                     self.closeLegacyContinuousSwitches()
                     return
@@ -421,6 +457,9 @@ final class VeepooSession: NSObject, ObservableObject {
 
     private func writeLegacySwitches(_ kinds: [WatchBatteryPolicy.LegacySwitch]) {
         guard let kind = kinds.first else {
+            if let uuid = connected?.uuid, !uuid.isEmpty {
+                UserDefaults.standard.set(uuid, forKey: Self.batteryPolicyUUIDKey)
+            }
             readWatchAutoMeasure()
             startHistoryReadAfterPolicy()
             return
@@ -433,9 +472,10 @@ final class VeepooSession: NSObject, ObservableObject {
         }
         let rest = Array(kinds.dropFirst())
         pm.veepooSDKSettingBaseFunctionType(type, settingState: close) { [weak self] state in
-            Task { @MainActor in
+            BleMain.run {
+                guard let self, !self.abandonPolicyWrites else { return }
                 NSLog("[Next2U] Interruptor contínuo %d fechado: estado %d", kind.rawValue, state.rawValue)
-                self?.writeLegacySwitches(rest)
+                self.writeLegacySwitches(rest)
             }
         }
     }
@@ -452,11 +492,12 @@ final class VeepooSession: NSObject, ObservableObject {
         }
         let rest = Array(models.dropFirst())
         pm.veepooSDKSetAutoMonitSwitch(with: model) { [weak self] success, _ in
-            Task { @MainActor in
+            BleMain.run {
+                guard let self, !self.abandonPolicyWrites else { return }
                 NSLog("[Next2U] Medição automática tipo %d → %@ a cada %d min: %@",
                       Int(model.type.rawValue), model.on ? "ligada" : "desligada",
                       Int(model.timeInterval), success ? "ok" : "falhou")
-                self?.writeAutoMonitSequentially(rest)
+                self.writeAutoMonitSequentially(rest)
             }
         }
     }
@@ -548,6 +589,12 @@ final class VeepooSession: NSObject, ObservableObject {
             screenLocked: locked,
             watchBatteryPct: Int32(percent)
         )
+        IngestRuntime.shared.setSyncWake(raw: syncWake)
+    }
+
+    func publishSyncWake(_ wake: String) {
+        syncWake = wake
+        publishUploadContext()
     }
 
     /// Nome da pulseira escolhido pelo paciente em Meu perfil (vazio = segue o nome do perfil).
@@ -654,6 +701,8 @@ final class VeepooSession: NSObject, ObservableObject {
 
     func handleBecameActive() {
         note("App em primeiro plano.")
+        publishSyncWake("foreground")
+        _ = PatientStoreBootstrap.prepare()
         configureIngest()
         if hardwareReady {
             pullWatchHistory(reason: "primeiro plano")
@@ -672,15 +721,28 @@ final class VeepooSession: NSObject, ObservableObject {
     func handleEnteredBackground() {
         BleWakeLock.shared.ping()
         note("App em segundo plano.")
+        publishSyncWake("background_entry")
+        _ = PatientStoreBootstrap.prepare()
         Task { await self.performFlush() }
         scheduleBackgroundUpload()
         IngestBackground.schedule()
-        guard hardwareReady else { return }
+        guard hardwareReady else {
+            startBackgroundWakeScan(reason: "entrada em segundo plano")
+            return
+        }
         backgroundStreaming = true
         // Não manter um teste óptico ligado em segundo plano: os timers congelam e o PPG
-        // ficava ligado até acabar a bateria. O comando de parar sai mesmo sem flag local.
-        stopSensors(force: true)
-        finishCycle(reason: "segundo plano")
+        // ficava ligado até acabar a bateria. Parar o teste também corta o notify GATT,
+        // e o iOS suspende o processo em ~25 s: o timer de 30 min não dispara até o
+        // paciente abrir o app. A leitura do histórico tem de caber nesta janela.
+        let plan = BackgroundSyncPolicy.onEnteredBackground(lastHistoryPullAt: lastHistoryPullAt, now: Date())
+        if plan.stopLiveSensors {
+            stopSensors(force: true)
+            finishCycle(reason: "segundo plano")
+        }
+        if plan.pullHistory {
+            pullWatchHistory(reason: "entrada em segundo plano", force: true)
+        }
     }
 
     /// Restore / BGTask / GATT notify can relaunch into `.background` without
@@ -688,9 +750,17 @@ final class VeepooSession: NSObject, ObservableObject {
     func handleColdBackgroundLaunch() {
         BleWakeLock.shared.ping()
         note("Lançamento em segundo plano (restore, BLE ou BGTask).")
+        publishSyncWake("cold_background")
+        // SwiftUI `.task` often does not run on a BLE/BG relaunch. Without the
+        // store, history read here is dropped until the patient opens the app.
+        _ = PatientStoreBootstrap.prepare()
         reconnectLastKnown(reason: "lançamento em background")
+        if !hardwareReady {
+            startBackgroundWakeScan(reason: "lançamento em background")
+        }
         flushQueueOnly()
         scheduleBackgroundUpload()
+        IngestBackground.schedule()
     }
 
     func handleWillEnterForeground() {
@@ -726,6 +796,7 @@ final class VeepooSession: NSObject, ObservableObject {
     }
 
     func startScan(automatic: Bool = false) {
+        backgroundWakeScan = false
         if !automatic {
             userRequestedDisconnect = false
             backoffScanTask?.cancel()
@@ -757,6 +828,7 @@ final class VeepooSession: NSObject, ObservableObject {
     }
 
     func stopScan() {
+        backgroundWakeScan = false
         manager.veepooSDKStopScanDevice()
         manager.centralManager.stopScan()
         isScanning = false
@@ -828,7 +900,7 @@ final class VeepooSession: NSObject, ObservableObject {
         advertisementData: [String: Any],
         rssi: NSNumber
     ) {
-        guard isScanning else { return }
+        guard isScanning || backgroundWakeScan else { return }
         let localName = advertisementData[CBAdvertisementDataLocalNameKey] as? String
         let manufacturer = advertisementData[CBAdvertisementDataManufacturerDataKey] as? Data
         let uuid = peripheral.identifier.uuidString
@@ -840,6 +912,14 @@ final class VeepooSession: NSObject, ObservableObject {
         )
         guard let model = advertised ?? VPPeripheralModel(peripher: peripheral) else { return }
         let mac = (model.deviceAddress ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let matchesKnown = BackgroundSyncPolicy.matchesKnownWatch(
+            uuid: uuid,
+            address: mac,
+            knownUuids: savedPeripheralUuids(),
+            knownAddresses: savedWatchAddresses()
+        )
+        // A background service scan must not list every nearby Veepoo band.
+        guard isScanning || matchesKnown else { return }
         guard WatchScanFilter.shouldList(
             name: localName ?? peripheral.name ?? model.deviceName,
             serviceUuids: advertisedServiceUuids(advertisementData),
@@ -903,7 +983,20 @@ final class VeepooSession: NSObject, ObservableObject {
             || (!watch.uuid.isEmpty && watch.uuid == lastPeripheralUUID)
         if matchesLast, connected == nil, !userRequestedDisconnect, !autoConnectAttemptedThisScan {
             autoConnectAttemptedThisScan = true
-            connect(watch)
+            if backgroundWakeScan && !isScanning {
+                backgroundWakeScan = false
+                manager.centralManager.stopScan()
+                lastName = watch.name
+                rememberLastAddress(watch.address)
+                if let peripheral = watch.model.peripheral, peripheral.state == .connected {
+                    resumeSession(peripheral)
+                } else {
+                    keepPendingConnect(watch.model.peripheral)
+                }
+                note("Relógio conhecido visto em segundo plano. Ligação pendente.")
+            } else {
+                connect(watch)
+            }
         }
     }
 
@@ -974,6 +1067,10 @@ final class VeepooSession: NSObject, ObservableObject {
 
     func disconnect() {
         userRequestedDisconnect = true
+        if backgroundWakeScan {
+            backgroundWakeScan = false
+            manager.centralManager.stopScan()
+        }
         stopSensors()
         manager.automaticConnection = false
         manager.veepooSDKDisconnectDevice()
@@ -1072,17 +1169,30 @@ final class VeepooSession: NSObject, ObservableObject {
         note("Handshake. Para sensores ao vivo, ajusta a medição automática e lê o histórico.")
         // Link (re)established, e.g. after state restoration: push what queued meanwhile.
         flushQueueOnly()
+        IngestBackground.schedule()
         // Um teste que o SDK ou um app antigo deixou aberto não depende das flags locais.
         stopSensors(force: true)
         readBattery()
         // A política tem de ser escrita mesmo se a leitura do histórico não terminar.
-        // O histórico começa depois, no fim de `writeLegacySwitches` → não há segundo
-        // início aqui: `applyBatterySafeAutoMonitor` dispara a leitura ao concluir.
+        // No primeiro plano o histórico espera o fim de `writeLegacySwitches`, com
+        // fallback de 25 s. Em fundo esses 25 s são a janela inteira do iOS: se a
+        // política já foi gravada neste relógio, o histórico começa agora.
+        abandonPolicyWrites = false
         pendingHistoryReadAfterPolicy = true
-        applyBatterySafeAutoMonitor()
-        // Se a leitura dos interruptores não responder, o histórico não pode ficar preso.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 25) { [weak self] in
-            self?.startHistoryReadAfterPolicy()
+        let inBackground = Self.isInBackground
+        let applied = BackgroundSyncPolicy.batteryPolicyCovers(
+            storedUuid: UserDefaults.standard.string(forKey: Self.batteryPolicyUUIDKey),
+            currentUuid: watch.uuid
+        )
+        if BackgroundSyncPolicy.shouldSkipBatteryRewrite(inBackground: inBackground, policyCoversThisWatch: applied) {
+            note("Segundo plano: política de bateria já está neste relógio. Lendo o histórico agora.")
+            startHistoryReadAfterPolicy()
+        } else {
+            applyBatterySafeAutoMonitor()
+            let delay = BackgroundSyncPolicy.historyFallbackDelay(inBackground: inBackground)
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                self?.startHistoryReadAfterPolicy()
+            }
         }
     }
 
@@ -1094,6 +1204,8 @@ final class VeepooSession: NSObject, ObservableObject {
         guard pendingHistoryReadAfterPolicy else { return }
         pendingHistoryReadAfterPolicy = false
         guard hardwareReady else { return }
+        if Self.isInBackground { abandonPolicyWrites = true }
+        BleWakeLock.shared.ping()
         manager.peripheralManage.veepooSdkStartReadDeviceAllData { [weak self] state, _, _, _ in
             BleMain.run {
                 guard let self else { return }
@@ -1102,7 +1214,11 @@ final class VeepooSession: NSObject, ObservableObject {
                     self.note("Histórico do band lido.")
                     // Acerta a hora depois do histórico (como no Android): no handshake o VE30 ignora o comando.
                     self.syncWatchTime(manual: false)
-                    self.applyBatterySafeAutoMonitor()
+                    // Em fundo a janela já foi gasta na leitura. Regravar a política aqui
+                    // empurrava o envio para depois da suspensão.
+                    if !Self.isInBackground {
+                        self.applyBatterySafeAutoMonitor()
+                    }
                     if let current = self.connected {
                         self.adoptSdkMac(from: current)
                     }
@@ -1640,18 +1756,36 @@ final class VeepooSession: NSObject, ObservableObject {
     @discardableResult
     func performBackgroundOpportunity(reason: String) async -> Bool {
         BleWakeLock.shared.ping()
+        publishSyncWake("bgtask")
+        _ = PatientStoreBootstrap.prepare()
         note("Oportunidade em segundo plano (\(reason)).")
         reconnectLastKnown(reason: reason)
+        if !hardwareReady {
+            await waitForHardwareReady()
+        }
         if hardwareReady {
             backgroundStreaming = true
             await pullWatchHistoryAndWait(reason: reason)
             pullTodayStepsIfDue(now: Date(), force: true)
             // Build 19: nenhuma PA ao vivo em segundo plano; a PA vem da medição automática.
             advanceMeasurementCycle()
+        } else {
+            startBackgroundWakeScan(reason: reason)
         }
         let ok = await performFlush()
         scheduleBackgroundUpload()
+        IngestBackground.schedule()
         return ok
+    }
+
+    /// BGAppRefresh is short. Wait out one slow password instead of flushing an
+    /// empty queue and suspending before `didConnect` finishes the handshake.
+    private func waitForHardwareReady() async {
+        let deadline = Date().addingTimeInterval(BackgroundSyncPolicy.backgroundConnectWait)
+        while !hardwareReady && Date() < deadline {
+            if Task.isCancelled { return }
+            try? await Task.sleep(nanoseconds: 300_000_000)
+        }
     }
 
     private func pullWatchHistoryAndWait(reason: String) async {
@@ -1917,6 +2051,8 @@ final class VeepooSession: NSObject, ObservableObject {
     }
 
     func onWillRestoreState(_ dict: [String: Any]) {
+        publishSyncWake("ble_restore")
+        _ = PatientStoreBootstrap.prepare()
         let peripherals = (dict[CBCentralManagerRestoredStatePeripheralsKey] as? [CBPeripheral]) ?? []
         note("willRestoreState: \(peripherals.count) periférico(s).")
         scheduleBackgroundUpload()
@@ -1970,6 +2106,10 @@ final class VeepooSession: NSObject, ObservableObject {
         deferredFlush?.cancel()
         deferredFlush = nil
         hardwareReady = false
+        // `connected` left set made the UI say "Conectando" and blocked the
+        // known-watch auto-connect (`connected == nil`) after the link dropped.
+        connected = nil
+        autoConnectAttemptedThisScan = false
         heartRunning = false
         spo2Running = false
         bloodRunning = false
@@ -1978,9 +2118,14 @@ final class VeepooSession: NSObject, ObservableObject {
         sessionAttemptAt = nil
         handshakeRetries = 0
         passwordSentAt = nil
+        pendingHistoryReadAfterPolicy = false
+        abandonPolicyWrites = false
         note("didDisconnect \(reason)")
         stopSdkScanIfIdle()
         keepPendingConnect(peripheral)
+        if Self.isInBackground {
+            startBackgroundWakeScan(reason: "desconexão")
+        }
     }
 
     private func resumeSession(_ peripheral: CBPeripheral) {
@@ -2080,6 +2225,10 @@ final class VeepooSession: NSObject, ObservableObject {
     private var autoScanStopTask: Task<Void, Never>?
 
     private func scheduleBackoffScan(reason: String) {
+        if Self.isInBackground {
+            startBackgroundWakeScan(reason: reason)
+            return
+        }
         guard backoffScanTask == nil, !isScanning else { return }
         let delay = Self.backoffScanDelays[min(backoffScanStep, Self.backoffScanDelays.count - 1)]
         backoffScanStep += 1
@@ -2107,6 +2256,37 @@ final class VeepooSession: NSObject, ObservableObject {
                 self.scheduleBackoffScan(reason: "backoff")
             }
         }
+    }
+
+    /// iOS keeps a scan that names service UUIDs after suspend and wakes the app
+    /// when the VE30 advertises. A `withServices: nil` scan does not.
+    /// Skipped when `retrievePeripherals` still finds the last UUID: the pending
+    /// connect is the lower-power wake.
+    private func startBackgroundWakeScan(reason: String) {
+        guard Self.isInBackground else { return }
+        guard autoReconnectEnabled, !userRequestedDisconnect, !hardwareReady else { return }
+        guard manager.centralManager.state == .poweredOn else { return }
+        var canRetrieve = false
+        if let uuid = lastPeripheralUUID.flatMap(UUID.init(uuidString:)),
+           let peripheral = manager.centralManager.retrievePeripherals(withIdentifiers: [uuid]).first {
+            canRetrieve = true
+            keepPendingConnect(peripheral)
+        }
+        guard BackgroundSyncPolicy.shouldStartBackgroundServiceScan(
+            inBackground: true,
+            hardwareReady: hardwareReady,
+            canRetrievePeripheral: canRetrieve
+        ) else { return }
+        guard !backgroundWakeScan, !isScanning else { return }
+        backgroundWakeScan = true
+        autoConnectAttemptedThisScan = false
+        note("Scan BLE por serviço em segundo plano (\(reason)).")
+        manager.manufacturerIDFilter = false
+        manager.rrisLimit = -127
+        manager.centralManager.scanForPeripherals(
+            withServices: Self.trustedConnectedServiceUUIDs,
+            options: nil
+        )
     }
 
     /// Encerra qualquer scan interno do SDK quando nem o usuário nem o backoff pediram scan.

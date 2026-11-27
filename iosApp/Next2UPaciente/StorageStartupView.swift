@@ -62,10 +62,21 @@ final class StorageSession: ObservableObject {
 
     func openIfNeeded() async {
         guard status == .opening else { return }
+        await apply(retry: false)
+    }
+
+    /// A locked Keychain fails the first open and used to stay failed for the
+    /// life of the process. Retry when the screen unlocks or the app is foregrounded.
+    func retryTransient() async {
+        guard status == .failed else { return }
+        await apply(retry: true)
+    }
+
+    private func apply(retry: Bool) async {
         PatientCrypto.install()
-        let opened = await Task.detached(priority: .userInitiated) {
-            PatientStore.shared.open()
-        }.value
+        // Same actor as BLE restore / BGTask. A detached open raced with those
+        // and could observe a half-updated store.
+        let opened = retry ? PatientStore.shared.retryOpen() : PatientStore.shared.open()
         if opened == .ready {
             PatientStore.shared.attachQueue()
             VeepooSession.shared.onStoreReady()

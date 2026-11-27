@@ -60,7 +60,16 @@ enum PatientCrypto {
         guard FileManager.default.fileExists(atPath: url.path) else {
             return PlaintextRead(missing: true, failed: false, plaintext: "", detail: "")
         }
-        guard let key = loadKey() else {
+        switch loadKey() {
+        case .unavailable:
+            // Locked or unreadable key. Do not migrate and do not create another key.
+            return PlaintextRead(
+                missing: false,
+                failed: true,
+                plaintext: "",
+                detail: BackgroundSyncPolicy.transientStoreDetail
+            )
+        case .missing:
             // No Keychain item yet: a legacy JSON file can be encrypted now.
             // Anything else is left byte-for-byte (likely ciphertext without its key).
             if let data = try? Data(contentsOf: url),
@@ -75,7 +84,12 @@ enum PatientCrypto {
                 plaintext: "",
                 detail: "Chave do Keychain ausente. O arquivo cifrado não foi tocado."
             )
+        case .key(let key):
+            return decryptSnapshot(dataAt: url, key: key)
         }
+    }
+
+    private static func decryptSnapshot(dataAt url: URL, key: SymmetricKey) -> PlaintextRead {
         let data: Data
         do {
             data = try Data(contentsOf: url)
@@ -153,14 +167,26 @@ enum PatientCrypto {
         }
     }
 
-    private static func loadOrCreateKey() throws -> SymmetricKey {
-        if let existing = loadKey() { return existing }
-        let key = SymmetricKey(size: .bits256)
-        try saveKey(key)
-        return key
+    private enum LoadedKey {
+        case key(SymmetricKey)
+        case missing
+        case unavailable
     }
 
-    private static func loadKey() -> SymmetricKey? {
+    private static func loadOrCreateKey() throws -> SymmetricKey {
+        switch loadKey() {
+        case .key(let existing):
+            return existing
+        case .missing:
+            let key = SymmetricKey(size: .bits256)
+            try saveKey(key)
+            return key
+        case .unavailable:
+            throw NSError(domain: NSOSStatusErrorDomain, code: Int(errSecInteractionNotAllowed))
+        }
+    }
+
+    private static func loadKey() -> LoadedKey {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -170,8 +196,17 @@ enum PatientCrypto {
         ]
         var item: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &item)
-        guard status == errSecSuccess, let data = item as? Data else { return nil }
-        return SymmetricKey(data: data)
+        assert(Int32(errSecItemNotFound) == BackgroundSyncPolicy.errSecItemNotFound)
+        assert(Int32(errSecInteractionNotAllowed) == BackgroundSyncPolicy.errSecInteractionNotAllowed)
+        switch BackgroundSyncPolicy.classifyKeychain(status) {
+        case .success:
+            guard let data = item as? Data, !data.isEmpty else { return .unavailable }
+            return .key(SymmetricKey(data: data))
+        case .notFound:
+            return .missing
+        case .interactionNotAllowed, .other:
+            return .unavailable
+        }
     }
 
     private static func saveKey(_ key: SymmetricKey) throws {

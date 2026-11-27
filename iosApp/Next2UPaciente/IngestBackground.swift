@@ -1,6 +1,5 @@
 import BackgroundTasks
 import Foundation
-import shared
 
 /// Fallback Core sync when BLE notifies have been quiet.
 /// iOS does not promise a 15-minute cadence — the live path is GATT notifies
@@ -63,27 +62,10 @@ enum IngestBackground {
     @MainActor
     private static func runFlush() async -> Bool {
         if Task.isCancelled { return false }
-        guard prepareStoreAndIngest() else { return false }
+        guard PatientStoreBootstrap.prepare() else { return false }
+        VeepooSession.shared.configureIngest()
         if Task.isCancelled { return false }
         return await VeepooSession.shared.performBackgroundOpportunity(reason: "BGTask")
-    }
-
-    /// BG launch can skip the SwiftUI `.task` that normally opens the store.
-    @MainActor
-    private static func prepareStoreAndIngest() -> Bool {
-        PatientCrypto.install()
-        switch PatientStore.shared.status {
-        case .ready:
-            break
-        case .failed:
-            return false
-        default:
-            let opened = PatientStore.shared.open()
-            guard opened == .ready else { return false }
-            PatientStore.shared.attachQueue()
-        }
-        VeepooSession.shared.configureIngest()
-        return PatientStore.shared.status == .ready
     }
 }
 

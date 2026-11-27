@@ -291,6 +291,7 @@ class IngestRuntimeTest {
         assertEquals("background", reading["app_state"]!!.jsonPrimitive.content)
         assertEquals("true", reading["screen_locked"]!!.jsonPrimitive.content)
         assertTrue(reading["watch_battery_pct"] is JsonNull)
+        assertFalse(reading.containsKey("sync_wake"))
         assertFalse(IngestRuntime.items().single().payloadJson.contains("app_state"))
 
         IngestRuntime.setUploadContext("foreground", false, 55)
@@ -302,5 +303,37 @@ class IngestRuntimeTest {
         assertEquals("55", withBattery["watch_battery_pct"]!!.jsonPrimitive.content)
         IngestRuntime.setUploadContext("nope", false, 10)
         assertFalse(IngestRuntime.stampUploadContext(storedBefore).contains("app_state"))
+    }
+
+    @Test
+    fun sync_wake_is_optional_non_phi_and_does_not_change_the_idempotency_key() = runTest {
+        val recorded = IngestRuntime.recordLive(
+            deviceId = "C4:E3:42:AA:30:A4", deviceModel = "VE30", heartRate = 70, spo2 = 0,
+            systolic = 0, diastolic = 0, temperatureCelsius = 0f, steps = 0, calories = 0f,
+            distanceMeters = 0f, hrvScore = 0, patientId = "PAT-1",
+        )
+        val stored = IngestRuntime.items().single().payloadJson
+        val queued = QueuedReading(recorded.clientReadingId!!, stored)
+        val plainKey = IngestReconciler.flushIdempotencyKey(listOf(IngestReconciler.prepare(queued)))
+
+        IngestRuntime.setUploadContext("background", true, -1)
+        IngestRuntime.setSyncWake("PAT-1")
+        assertFalse(IngestRuntime.stampUploadContext(stored).contains("sync_wake"))
+
+        IngestRuntime.setSyncWake("bgtask")
+        val stamped = IngestRuntime.stampUploadContext(stored)
+        val wakeKey = IngestReconciler.flushIdempotencyKey(listOf(IngestReconciler.prepare(queued)))
+        assertEquals(plainKey, wakeKey)
+        val fields = Json.parseToJsonElement(stamped).jsonObject
+        assertEquals("bgtask", fields["sync_wake"]!!.jsonPrimitive.content)
+        assertFalse(stored.contains("sync_wake"))
+
+        IngestRuntime.setUploadContext("background", false, 40)
+        assertEquals(
+            "bgtask",
+            Json.parseToJsonElement(IngestRuntime.stampUploadContext(stored)).jsonObject["sync_wake"]!!.jsonPrimitive.content,
+        )
+        IngestRuntime.setSyncWake(null)
+        assertFalse(IngestRuntime.stampUploadContext(stored).contains("sync_wake"))
     }
 }

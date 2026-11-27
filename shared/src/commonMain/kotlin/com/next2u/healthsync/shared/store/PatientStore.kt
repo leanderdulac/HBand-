@@ -19,6 +19,16 @@ object PatientStore {
     const val CORRUPT = "Não foi possível ler o arquivo cifrado. Os registros não foram alterados."
     const val WRITE_FAILED = "Não foi possível gravar o arquivo cifrado."
 
+    /**
+     * Keychain or file protection was not readable yet (iOS
+     * `errSecInteractionNotAllowed`). [open] stays failed so a tight loop does
+     * not hammer the Keychain; [retryOpen] tries once more. Corrupt snapshots
+     * and unknown schemas are not transient and never take this path.
+     * Keep the text identical to `BackgroundSyncPolicy.transientStoreDetail`.
+     */
+    const val TRANSIENT_UNAVAILABLE =
+        "Armazenamento temporariamente indisponível. Tente de novo sem apagar os registros."
+
     private val json = Json {
         encodeDefaults = true
         ignoreUnknownKeys = true
@@ -28,6 +38,7 @@ object PatientStore {
     private var snapshot: PatientSnapshot = PatientSnapshot()
     private var _status: StoreStatus = StoreStatus.OPENING
     private var _detail: String = ""
+    private var failureIsTransient: Boolean = false
 
     /** Test hook. Production reads the legacy plaintext queue file. */
     internal var legacyQueueReader: () -> String = { FileQueueStore.loadJson() }
@@ -44,6 +55,7 @@ object PatientStore {
         snapshot = PatientSnapshot()
         _status = StoreStatus.OPENING
         _detail = ""
+        failureIsTransient = false
     }
 
     fun resetForTests(next: SnapshotCodec = MemorySnapshotCodec()) {
@@ -56,6 +68,26 @@ object PatientStore {
     fun open(): StoreStatus {
         if (_status == StoreStatus.READY) return StoreStatus.READY
         if (_status == StoreStatus.FAILED) return StoreStatus.FAILED
+        return readSnapshot()
+    }
+
+    /**
+     * One more [open] after a transient failure. Permanent failures (corrupt
+     * file, unknown schema, missing hooks) stay [StoreStatus.FAILED] and do
+     * not read or write again.
+     */
+    fun retryOpen(): StoreStatus {
+        if (_status == StoreStatus.READY) return StoreStatus.READY
+        if (_status == StoreStatus.FAILED && !failureIsTransient) return StoreStatus.FAILED
+        if (_status == StoreStatus.FAILED) {
+            _status = StoreStatus.OPENING
+            _detail = ""
+            failureIsTransient = false
+        }
+        return open()
+    }
+
+    private fun readSnapshot(): StoreStatus {
         val read = try {
             codec.read()
         } catch (error: Exception) {
@@ -245,8 +277,10 @@ object PatientStore {
     }
 
     private fun fail(message: String, extra: String? = null): StoreStatus {
+        val text = if (extra.isNullOrBlank()) message else "$message ($extra)"
+        failureIsTransient = text == TRANSIENT_UNAVAILABLE || text.startsWith("$TRANSIENT_UNAVAILABLE (")
         _status = StoreStatus.FAILED
-        _detail = if (extra.isNullOrBlank()) message else "$message ($extra)"
+        _detail = text
         return StoreStatus.FAILED
     }
 }

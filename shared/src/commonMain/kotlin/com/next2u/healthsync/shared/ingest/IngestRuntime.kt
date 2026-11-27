@@ -112,7 +112,18 @@ object IngestRuntime {
         private set
 
     fun setUploadContext(appState: String, screenLocked: Boolean, watchBatteryPct: Int) {
-        uploadContext = UploadContext.of(appState, screenLocked, watchBatteryPct)
+        val wake = uploadContext?.syncWake
+        val next = UploadContext.of(appState, screenLocked, watchBatteryPct)
+        uploadContext = if (next == null) null else next.copy(syncWake = wake)
+    }
+
+    /**
+     * Optional `sync_wake` on the next upload. Not clinical data. Ignored when
+     * no upload context is set, or when [raw] is outside the closed set.
+     */
+    fun setSyncWake(raw: String?) {
+        val current = uploadContext ?: return
+        uploadContext = current.copy(syncWake = UploadContext.sanitizeSyncWake(raw))
     }
 
     fun clearUploadContext() {

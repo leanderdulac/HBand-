@@ -5,6 +5,7 @@ import shared
 @main
 struct Next2UPacienteApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var storage = StorageSession()
 
     var body: some Scene {
@@ -18,6 +19,14 @@ struct Next2UPacienteApp: App {
             }
             .task {
                 await storage.openIfNeeded()
+            }
+            .onChange(of: scenePhase) { phase in
+                if phase == .active {
+                    Task { await storage.retryTransient() }
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIApplication.protectedDataDidBecomeAvailableNotification)) { _ in
+                Task { await storage.retryTransient() }
             }
         }
     }
